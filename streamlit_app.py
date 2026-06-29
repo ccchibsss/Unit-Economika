@@ -18,6 +18,7 @@
     ✅ 100+ категорий автозапчастей
     ✅ Трехуровневая проверка габаритов
     ✅ ML-классификация товаров
+    ✅ Исправлена ошибка классификации float
 ================================================================================
 """
 
@@ -1293,6 +1294,11 @@ class AutoClassifier:
             self.model = None
     
     def predict(self, name: str) -> Tuple[str, float]:
+        """Предсказание категории с защитой от float"""
+        # Приводим к строке, если это не строка
+        if not isinstance(name, str):
+            name = str(name)
+        
         if not self.model or not name or not LIBRARIES['sklearn']:
             return self._predict_by_keywords(name)
         
@@ -1310,9 +1316,13 @@ class AutoClassifier:
             return self._predict_by_keywords(name)
     
     def _predict_by_keywords(self, name: str) -> Tuple[str, float]:
-        """Предсказание по ключевым словам (fallback)."""
+        """Предсказание по ключевым словам (fallback) с защитой от float"""
         if not name:
             return "Прочее", 0.0
+        
+        # Приводим к строке, если это не строка
+        if not isinstance(name, str):
+            name = str(name)
         
         name_lower = name.lower()
         best_category = "Прочее"
@@ -1335,18 +1345,22 @@ class AutoClassifier:
         return best_category, round(confidence, 1)
     
     def predict_batch(self, names: List[str]) -> List[Tuple[str, float]]:
+        """Пакетное предсказание с защитой от float"""
         if not self.model or not names or not LIBRARIES['sklearn']:
             return [self._predict_by_keywords(name) for name in names]
         
         try:
-            predictions = self.model.predict(names)
-            probabilities = self.model.predict_proba(names)
+            # Приводим все к строке
+            str_names = [str(name) if not isinstance(name, str) else name for name in names]
+            
+            predictions = self.model.predict(str_names)
+            probabilities = self.model.predict_proba(str_names)
             
             results = []
-            for pred, probs in zip(predictions, probabilities):
+            for i, (pred, probs) in enumerate(zip(predictions, probabilities)):
                 confidence = max(probs) * 100
                 if confidence < 30:
-                    results.append(self._predict_by_keywords(name))
+                    results.append(self._predict_by_keywords(str_names[i]))
                 else:
                     results.append((pred, confidence))
             return results
@@ -1463,11 +1477,12 @@ class AIFileEditor:
             return df, f"❌ Ошибка: {str(e)}"
     
     def classify_categories(self, df: pd.DataFrame, name_column: str = "Наименование") -> Tuple[pd.DataFrame, str]:
-        """Классифицировать товары по категориям."""
+        """Классифицировать товары по категориям с защитой от float."""
         try:
             if name_column not in df.columns:
                 return df, f"❌ Колонка '{name_column}' не найдена"
             
+            # Приводим все значения к строке
             names = df[name_column].astype(str).tolist()
             categories = []
             confidences = []
@@ -2555,11 +2570,16 @@ class CategoryClassifier:
         self.barcode_patterns = CONFIG.barcode_patterns
         self.ml_classifier = AutoClassifier() if LIBRARIES['sklearn'] else None
         self.dimension_validator = DimensionValidator()
-        
+    
     @lru_cache(maxsize=10000)
     def classify(self, name: str) -> Tuple[str, float]:
+        """Классификация с защитой от float"""
         if not name:
             return "Прочее", 0.0
+        
+        # Приводим к строке, если это не строка
+        if not isinstance(name, str):
+            name = str(name)
         
         if self.ml_classifier:
             ml_category, ml_confidence = self.ml_classifier.predict(name)
@@ -2594,14 +2614,20 @@ class CategoryClassifier:
         if not names:
             return []
         
+        # Приводим все к строке
+        str_names = [str(name) if not isinstance(name, str) else name for name in names]
         results = []
-        for name in names:
+        for name in str_names:
             results.append(self.classify(name))
         return results
     
     def extract_oem(self, name: str) -> Optional[str]:
         if not name:
             return None
+        
+        # Приводим к строке
+        if not isinstance(name, str):
+            name = str(name)
         
         for pattern in self.oem_patterns:
             match = re.search(pattern, name.upper())
@@ -2613,6 +2639,9 @@ class CategoryClassifier:
         if not name:
             return None
         
+        if not isinstance(name, str):
+            name = str(name)
+        
         for pattern in self.barcode_patterns:
             match = re.search(pattern, name)
             if match:
@@ -2622,6 +2651,9 @@ class CategoryClassifier:
     def extract_brand(self, name: str) -> Optional[str]:
         if not name:
             return None
+        
+        if not isinstance(name, str):
+            name = str(name)
         
         brands = [
             "BOSCH", "DENSO", "NGK", "BREMBO", "AISIN", "HITACHI", "VALEO",
@@ -2650,7 +2682,7 @@ class CategoryClassifier:
         )
 
 # ============================================================================
-# ПРОДОЛЖЕНИЕ - ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ И ЗАПУСК
+# ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ
 # ============================================================================
 
 class UnitEconomicsApp:
@@ -2907,6 +2939,10 @@ class UnitEconomicsApp:
             if st.button("🚀 Классифицировать товары", use_container_width=True, key="classify_btn"):
                 with st.spinner("⏳ Классификация товаров..."):
                     df = st.session_state.uploaded_data.copy()
+                    
+                    # Приводим все значения в колонке к строке для защиты от float
+                    df[name_column] = df[name_column].astype(str)
+                    
                     result_df, message = self.ai_editor.classify_categories(df, name_column)
                     
                     st.session_state.uploaded_data = result_df
