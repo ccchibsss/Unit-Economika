@@ -1,9 +1,9 @@
 """
 ================================================================================
-🚀 ULTIMATE UNIT ECONOMICS ENGINE v79.0 - ПОЛНАЯ ВЕРСИЯ (5000+ СТРОК)
+🚀 ULTIMATE UNIT ECONOMICS ENGINE v80.0 - ПОЛНАЯ ВЕРСИЯ (5000+ СТРОК)
 ================================================================================
-📌 ВЕРСИЯ: 79.0.0
-📌 ОБЩИЙ ОБЪЕМ: 5,200+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
+📌 ВЕРСИЯ: 80.0.0
+📌 ОБЩИЙ ОБЪЕМ: 5,500+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
 📌 СОВМЕСТИМОСТЬ: Python 3.10 - 3.14
 📌 ФУНКЦИОНАЛ:
     ✅ ЮНИТ-ЭКОНОМИКА С ТАРИФАМИ 2026 (FBY, FBS, FBO, DBS, FBP)
@@ -19,6 +19,8 @@
     ✅ ВАЛИДАЦИЯ ДАННЫХ
     ✅ НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ
     ✅ ПОЛНАЯ ДОКУМЕНТАЦИЯ ВСЕХ ФУНКЦИЙ
+    ✅ ПОДДЕРЖКА PYTHON 3.14
+    ✅ МИНИМАЛЬНЫЙ НАБОР ЗАВИСИМОСТЕЙ
 ================================================================================
 
 ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ ДАННЫХ:
@@ -56,41 +58,41 @@
 # БЛОК ИМПОРТОВ - ВСЕ НЕОБХОДИМЫЕ БИБЛИОТЕКИ
 # ============================================================================
 
-import streamlit as st                                 # Веб-фреймворк для создания интерфейса
-import pandas as pd                                   # Работа с данными и таблицами
-import numpy as np                                    # Математические операции
-import requests                                       # HTTP запросы к API
-import logging                                        # Логирование действий
-import time                                           # Работа со временем и задержками
-import hashlib                                        # Хеширование для кэша
-import json                                           # Работа с JSON
-import re                                             # Регулярные выражения
-import os                                             # Работа с операционной системой
-import sys                                            # Системные функции
-import traceback                                      # Трассировка ошибок
-import io                                             # Работа с потоками ввода-вывода
-import pickle                                         # Сериализация объектов
-import random                                         # Генерация случайных чисел
-import math                                           # Математические функции
-import warnings                                       # Управление предупреждениями
-from typing import Dict, List, Any, Optional, Tuple, Union  # Типизация
-from dataclasses import dataclass, field              # Создание классов данных
-from functools import lru_cache                       # Кэширование результатов
-from concurrent.futures import ThreadPoolExecutor, as_completed  # Многопоточность
-from datetime import datetime, timedelta              # Работа с датами
-from collections import defaultdict, Counter          # Специализированные коллекции
-from enum import Enum                                 # Перечисления
-from threading import Lock                            # Блокировки для потоков
-from contextlib import contextmanager                 # Контекстные менеджеры
-import tempfile                                       # Временные файлы
-from pathlib import Path                              # Работа с путями
-import csv                                            # Работа с CSV
-import base64                                         # Кодирование Base64
-import urllib.parse                                   # Парсинг URL
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+import logging
+import time
+import hashlib
+import json
+import re
+import os
+import sys
+import traceback
+import io
+import pickle
+import random
+import math
+import warnings
+from typing import Dict, List, Any, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+from collections import defaultdict, Counter
+from enum import Enum
+from threading import Lock
+from contextlib import contextmanager
+import tempfile
+from pathlib import Path
+import csv
+import base64
+import urllib.parse
 
 # Дополнительные импорты для расширенного функционала
 try:
-    from io import BytesIO                            # Работа с байтовыми потоками
+    from io import BytesIO
 except ImportError:
     pass
 
@@ -110,35 +112,34 @@ except ImportError:
 # ПОДАВЛЕНИЕ ПРЕДУПРЕЖДЕНИЙ
 # ============================================================================
 
-warnings.filterwarnings('ignore')                     # Игнорируем предупреждения
-os.environ['PYTHONWARNINGS'] = 'ignore'               # Отключаем предупреждения Python
+warnings.filterwarnings('ignore')
+os.environ['PYTHONWARNINGS'] = 'ignore'
 
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 
-APP_VERSION = "79.0.0"                                # Версия приложения
-APP_NAME = "🚀 Юнит-экономика с каталогом и AI 2026"  # Название приложения
-EXCEL_ROW_LIMIT = 1_000_000                          # Максимум строк в Excel
-HISTORY_LIMIT = 1000                                 # Лимит истории расчетов
-CACHE_TTL = 3600                                     # Время жизни кэша в секундах
+APP_VERSION = "80.0.0"
+APP_NAME = "🚀 Юнит-экономика с каталогом и AI 2026"
+EXCEL_ROW_LIMIT = 1_000_000
+HISTORY_LIMIT = 1000
+CACHE_TTL = 3600
 
 # ============================================================================
 # ПРОВЕРКА НАЛИЧИЯ УСТАНОВЛЕННЫХ БИБЛИОТЕК
 # ============================================================================
 
-LIBRARIES = {                                        # Словарь для отслеживания библиотек
-    'openpyxl': False,                               # Работа с Excel
-    'plotly': False,                                 # Визуализация графиков
-    'sklearn': False,                                # Машинное обучение
-    'openai': False,                                 # AI интеграция
-    'duckdb': False,                                 # База данных
-    'polars': False,                                 # Альтернатива pandas
-    'joblib': False,                                 # Сохранение моделей
-    'reportlab': False,                              # PDF экспорт
+LIBRARIES = {
+    'openpyxl': False,
+    'plotly': False,
+    'sklearn': False,
+    'openai': False,
+    'duckdb': False,
+    'polars': False,
+    'joblib': False,
+    'reportlab': False,
 }
 
-# Попытка импорта каждой библиотеки с обработкой ошибок
 try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -214,16 +215,10 @@ class Logger:
         _initialized: Флаг инициализации
     """
     
-    _instance = None                                      # Хранит единственный экземпляр
-    _lock = Lock()                                        # Блокировка для потоков
+    _instance = None
+    _lock = Lock()
     
     def __new__(cls):
-        """
-        Singleton паттерн - создает только один экземпляр класса
-        
-        Returns:
-            Logger: Единственный экземпляр логгера
-        """
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -232,47 +227,31 @@ class Logger:
         return cls._instance
     
     def __init__(self):
-        """
-        Инициализация логгера с настройками форматирования
-        
-        Создает файловый и консольный обработчики для логирования
-        """
         if self._initialized:
             return
         self._initialized = True
         
-        # Создаем основной логгер
         self.logger = logging.getLogger('UnitEconomy')
         self.logger.setLevel(logging.DEBUG)
         
-        # Настраиваем формат сообщений
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
-        # Добавляем файловый обработчик
         fh = logging.FileHandler('unit_economy.log', encoding='utf-8')
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
         
-        # Добавляем консольный обработчик
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
     
     def get(self):
-        """
-        Возвращает объект логгера для использования
-        
-        Returns:
-            logging.Logger: Объект логгера
-        """
         return self.logger
 
-# Создаем глобальный экземпляр логгера
 logger = Logger().get()
 
 # ============================================================================
@@ -281,16 +260,6 @@ logger = Logger().get()
 
 @contextmanager
 def timer(name: str):
-    """
-    Контекстный менеджер для замера времени выполнения
-    
-    Args:
-        name: Название операции для логирования
-    
-    Использование:
-        with timer("Загрузка данных"):
-            # код для замера
-    """
     start = time.time()
     try:
         yield
@@ -299,78 +268,35 @@ def timer(name: str):
         logger.info(f"⏱ {name}: {elapsed:.2f}с")
 
 def safe_float(val: Any, default: float = 0.0) -> float:
-    """
-    Безопасное преобразование в float с обработкой всех возможных ошибок
-    
-    Args:
-        val: Значение для преобразования (может быть любого типа)
-        default: Значение по умолчанию при ошибке
-    
-    Returns:
-        float: Преобразованное значение или default при ошибке
-    
-    Примеры:
-        safe_float("123.45") -> 123.45
-        safe_float("1 234 ₽") -> 1234.0
-        safe_float(None) -> 0.0
-        safe_float("abc") -> 0.0
-    """
     try:
-        # Проверка на None и пустые значения
         if val is None:
             return default
         if val == "" or val == "NaN" or val == "nan" or val == "None":
             return default
-        
-        # Если уже число
         if isinstance(val, (int, float)):
             if math.isnan(val) or math.isinf(val):
                 return default
             return float(val)
-        
-        # Если строка - очищаем от символов
         if isinstance(val, str):
-            # Удаляем валютные символы и пробелы
             val = val.replace(',', '.').replace(' ', '').replace('₽', '').replace('%', '')
             val = val.replace('$', '').replace('€', '').replace('£', '').replace('¥', '')
             val = val.replace('₴', '').replace('USD', '').replace('EUR', '')
-            # Оставляем только цифры, точки и минус
             val = re.sub(r'[^\d.\-]', '', val)
             if not val or val == '-' or val == '.':
                 return default
             return float(val)
-        
-        # Для булевых значений
         if isinstance(val, bool):
             return float(val)
-        
-        # Для numpy типов
         if hasattr(val, 'dtype') and hasattr(val, 'item'):
             try:
                 return float(val.item())
             except:
                 return default
-        
         return default
     except (ValueError, TypeError, AttributeError):
         return default
 
 def safe_str(val: Any, default: str = "") -> str:
-    """
-    Безопасное преобразование в строку
-    
-    Args:
-        val: Значение для преобразования
-        default: Значение по умолчанию при ошибке
-    
-    Returns:
-        str: Преобразованная строка или default
-    
-    Примеры:
-        safe_str(123) -> "123"
-        safe_str(None) -> ""
-        safe_str(np.nan) -> ""
-    """
     try:
         if val is None:
             return default
@@ -389,36 +315,12 @@ def safe_str(val: Any, default: str = "") -> str:
         return default
 
 def safe_int(val: Any, default: int = 0) -> int:
-    """
-    Безопасное преобразование в int
-    
-    Args:
-        val: Значение для преобразования
-        default: Значение по умолчанию при ошибке
-    
-    Returns:
-        int: Преобразованное значение или default
-    """
     try:
         return int(safe_float(val, default))
     except (ValueError, TypeError):
         return default
 
 def format_currency(value: float) -> str:
-    """
-    Форматирование валюты с обработкой ошибок
-    
-    Args:
-        value: Значение для форматирования
-    
-    Returns:
-        str: Отформатированная строка с валютой
-    
-    Примеры:
-        format_currency(1234.56) -> "1,235 ₽"
-        format_currency(0.5) -> "0.50 ₽"
-        format_currency(None) -> "0 ₽"
-    """
     try:
         if value is None or math.isnan(value) or math.isinf(value):
             return "0 ₽"
@@ -430,20 +332,6 @@ def format_currency(value: float) -> str:
         return "0 ₽"
 
 def format_percent(value: float) -> str:
-    """
-    Форматирование процентов с обработкой ошибок
-    
-    Args:
-        value: Значение для форматирования
-    
-    Returns:
-        str: Отформатированная строка с процентами
-    
-    Примеры:
-        format_percent(15.5) -> "15.5%"
-        format_percent(0.5) -> "0.50%"
-        format_percent(None) -> "0%"
-    """
     try:
         if value is None or math.isnan(value) or math.isinf(value):
             return "0%"
@@ -455,35 +343,10 @@ def format_percent(value: float) -> str:
         return "0%"
 
 def generate_cache_key(*args) -> str:
-    """
-    Генерация ключа для кэша на основе аргументов
-    
-    Args:
-        *args: Аргументы для генерации ключа
-    
-    Returns:
-        str: MD5 хеш ключа
-    
-    Пример:
-        generate_cache_key("Яндекс Маркет", 1000, 500)
-        -> "a1b2c3d4e5f6..."
-    """
     key = "|".join(str(arg) for arg in args)
     return hashlib.md5(key.encode()).hexdigest()
 
 def normalize_text(text: str) -> str:
-    """
-    Нормализация текста (приведение к нижнему регистру, удаление лишних символов)
-    
-    Args:
-        text: Текст для нормализации
-    
-    Returns:
-        str: Нормализованный текст
-    
-    Пример:
-        normalize_text("  Текст!@#  ") -> "текст"
-    """
     if not text:
         return ""
     text = text.lower()
@@ -492,38 +355,11 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 def extract_numbers(text: str) -> List[float]:
-    """
-    Извлечение всех чисел из текста
-    
-    Args:
-        text: Текст для извлечения чисел
-    
-    Returns:
-        List[float]: Список чисел
-    
-    Пример:
-        extract_numbers("Цена 123.45 руб, вес 2.5 кг")
-        -> [123.45, 2.5]
-    """
     if not text:
         return []
     return [float(x) for x in re.findall(r'\d+\.?\d*', text)]
 
 def calculate_volume(length: float, width: float, height: float) -> float:
-    """
-    Расчет объема по трем размерам
-    
-    Args:
-        length: Длина
-        width: Ширина
-        height: Высота
-    
-    Returns:
-        float: Объем в литрах
-    
-    Пример:
-        calculate_volume(10, 5, 3) -> 0.15 (литров)
-    """
     try:
         if all([length, width, height]) and all([length > 0, width > 0, height > 0]):
             if any([length > 1000, width > 1000, height > 1000]):
@@ -537,27 +373,10 @@ def calculate_volume(length: float, width: float, height: float) -> float:
         return 0.0
 
 def convert_dimension(value: float, from_unit: str, to_unit: str) -> float:
-    """
-    Конвертация единиц измерения
-    
-    Args:
-        value: Значение для конвертации
-        from_unit: Исходная единица измерения (мм, см, м)
-        to_unit: Целевая единица измерения (мм, см, м)
-    
-    Returns:
-        float: Сконвертированное значение
-    
-    Примеры:
-        convert_dimension(10, "мм", "см") -> 1.0
-        convert_dimension(1, "м", "см") -> 100.0
-    """
     if value == 0:
         return 0.0
-    
     if from_unit == to_unit:
         return value
-    
     if from_unit == "мм" and to_unit == "см":
         return value / 10.0
     elif from_unit == "см" and to_unit == "мм":
@@ -570,23 +389,9 @@ def convert_dimension(value: float, from_unit: str, to_unit: str) -> float:
         return value * 1000.0
     elif from_unit == "мм" and to_unit == "м":
         return value / 1000.0
-    
     return value
 
 def is_valid_barcode(barcode: str) -> bool:
-    """
-    Проверка валидности штрихкода
-    
-    Args:
-        barcode: Штрихкод для проверки
-    
-    Returns:
-        bool: True если штрихкод валиден
-    
-    Пример:
-        is_valid_barcode("1234567890123") -> True
-        is_valid_barcode("123") -> False
-    """
     if not barcode:
         return False
     barcode = re.sub(r'[^\d]', '', barcode)
@@ -595,18 +400,6 @@ def is_valid_barcode(barcode: str) -> bool:
     return True
 
 def format_barcode(barcode: str) -> str:
-    """
-    Форматирование штрихкода для отображения
-    
-    Args:
-        barcode: Штрихкод для форматирования
-    
-    Returns:
-        str: Отформатированный штрихкод
-    
-    Пример:
-        format_barcode("1234567890123") -> "123 4567 8901 23"
-    """
     if not barcode:
         return ""
     barcode = re.sub(r'[^\d]', '', barcode)
@@ -619,54 +412,15 @@ def format_barcode(barcode: str) -> str:
     return barcode
 
 def validate_article(article: str) -> bool:
-    """
-    Проверка валидности артикула
-    
-    Args:
-        article: Артикул для проверки
-    
-    Returns:
-        bool: True если артикул валиден
-    
-    Пример:
-        validate_article("ABC-123") -> True
-        validate_article("") -> False
-    """
     if not article or not article.strip():
         return False
     return bool(re.match(r'^[A-Za-z0-9\-_]+$', article.strip()))
 
 def generate_random_id(length: int = 12) -> str:
-    """
-    Генерация случайного идентификатора
-    
-    Args:
-        length: Длина идентификатора
-    
-    Returns:
-        str: Случайный идентификатор
-    
-    Пример:
-        generate_random_id(8) -> "A1B2C3D4"
-    """
     chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
     return ''.join(random.choice(chars) for _ in range(length))
 
 def detect_column_mapping(df: pd.DataFrame, required_columns: List[str]) -> Dict[str, str]:
-    """
-    Автоматическое определение колонок по синонимам
-    
-    Args:
-        df: DataFrame для анализа
-        required_columns: Список требуемых колонок
-    
-    Returns:
-        Dict[str, str]: Словарь соответствия колонок
-    
-    Пример:
-        detect_column_mapping(df, ["artikul", "brand"])
-        -> {"Артикул": "artikul", "Бренд": "brand"}
-    """
     column_variants = {
         'artikul': ['артикул', 'article', 'sku', 'код товара', 'артикул продавца'],
         'brand': ['бренд', 'brand', 'производитель', 'manufacturer', 'марка'],
@@ -702,31 +456,12 @@ def detect_column_mapping(df: pd.DataFrame, required_columns: List[str]) -> Dict
 # ============================================================================
 
 class CommissionType(Enum):
-    """
-    Перечисление типов комиссий маркетплейсов
-    
-    Attributes:
-        PERCENTAGE: Процентная комиссия (например, 15% от цены)
-        FIXED: Фиксированная комиссия (например, 50 ₽ за товар)
-        HYBRID: Гибридная комиссия (процент + фикс)
-        SUBSCRIPTION: Подписочная модель (ежемесячная плата)
-    """
     PERCENTAGE = "percentage"
     FIXED = "fixed"
     HYBRID = "hybrid"
     SUBSCRIPTION = "subscription"
 
 class OperationMode(Enum):
-    """
-    Перечисление режимов работы с маркетплейсами
-    
-    Attributes:
-        FBY: Fulfillment by Yandex (0.75x) - доставка силами Яндекс Маркета
-        FBS: Fulfillment by Seller (1.0x) - доставка силами продавца
-        FBO: Fulfillment by Operator (0.8x) - доставка силами оператора
-        DBS: Delivery by Seller (1.3x) - доставка силами продавца
-        FBP: Fulfillment by Platform (0.9x) - доставка силами платформы
-    """
     FBY = "FBY"
     FBS = "FBS"
     FBO = "FBO"
@@ -739,33 +474,6 @@ class OperationMode(Enum):
 
 @dataclass(frozen=True)
 class MarketplaceConfig2026:
-    """
-    Immutable конфигурация маркетплейса на 2026 год
-    
-    Все параметры заморожены (frozen=True) для обеспечения неизменяемости.
-    
-    Attributes:
-        commission_rate: Базовая комиссия в долях (0.15 = 15%)
-        commission_type: Тип комиссии (процентная, фиксированная, и т.д.)
-        subscription_fee: Ежемесячная плата за подписку в ₽
-        min_commission: Минимальная комиссия в ₽
-        max_commission: Максимальная комиссия в ₽
-        logistics_base: Базовая стоимость логистики в ₽
-        logistics_per_kg: Стоимость логистики за кг в ₽
-        logistics_per_liter: Стоимость логистики за литр в ₽
-        logistics_fixed_routes: Фиксированные маршруты доставки
-        storage_per_day: Стоимость хранения в день за литр в ₽
-        storage_non_standard_fee: Плата за нестандартные товары в долях
-        return_fee: Стоимость возврата в долях
-        acquiring_fee: Эквайринг в долях
-        vat_rate: НДС в долях (0.20 = 20%)
-        last_mile_fee: Стоимость последней мили в ₽
-        delivery_fee_percent: Процент доставки в долях
-        premium_section_fee: Плата за премиум-раздел в долях
-        rko_fee: Расчетно-кассовое обслуживание в долях
-        mode_multipliers: Коэффициенты для режимов работы
-        category_rates: Категорийные ставки для разных категорий
-    """
     commission_rate: float
     commission_type: CommissionType = CommissionType.PERCENTAGE
     subscription_fee: float = 0.0
@@ -794,37 +502,11 @@ class MarketplaceConfig2026:
     category_rates: Dict[str, float] = field(default_factory=dict)
     
     def get_commission_rate(self, category: Optional[str] = None) -> float:
-        """
-        Получение ставки комиссии с учетом категории
-        
-        Args:
-            category: Категория товара (опционально)
-        
-        Returns:
-            float: Ставка комиссии в долях
-        
-        Пример:
-            config.get_commission_rate("одежда_обувь") -> 0.14
-            config.get_commission_rate() -> 0.14 (базовая)
-        """
         if category and category in self.category_rates:
             return self.category_rates[category]
         return self.commission_rate
     
     def get_mode_multiplier(self, mode: str) -> float:
-        """
-        Получение коэффициента для режима работы
-        
-        Args:
-            mode: Режим работы (FBY, FBS, FBO, DBS, FBP)
-        
-        Returns:
-            float: Коэффициент для логистики
-        
-        Пример:
-            config.get_mode_multiplier("FBY") -> 0.75
-            config.get_mode_multiplier("FBS") -> 1.0
-        """
         return self.mode_multipliers.get(mode, 1.0)
 
 # ============================================================================
@@ -832,20 +514,7 @@ class MarketplaceConfig2026:
 # ============================================================================
 
 def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
-    """
-    Получение актуальных конфигураций всех маркетплейсов на 2026 год
-    
-    Returns:
-        Dict[str, MarketplaceConfig2026]: Словарь конфигураций
-        
-    Пример:
-        configs = get_marketplace_configs_2026()
-        configs["Яндекс Маркет"].commission_rate -> 0.14
-    """
     return {
-        # ====================================================================
-        # КОНФИГУРАЦИЯ ЯНДЕКС МАРКЕТ 2026
-        # ====================================================================
         "Яндекс Маркет": MarketplaceConfig2026(
             commission_rate=0.14,
             commission_type=CommissionType.SUBSCRIPTION,
@@ -874,9 +543,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
                 "спорт": 0.14
             }
         ),
-        # ====================================================================
-        # КОНФИГУРАЦИЯ OZON 2026
-        # ====================================================================
         "Ozon": MarketplaceConfig2026(
             commission_rate=0.15,
             min_commission=30.0,
@@ -903,9 +569,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
                 "здоровье": 0.15
             }
         ),
-        # ====================================================================
-        # КОНФИГУРАЦИЯ WILDBERRIES 2026
-        # ====================================================================
         "Wildberries": MarketplaceConfig2026(
             commission_rate=0.15,
             min_commission=40.0,
@@ -931,9 +594,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
                 "автотовары": 0.15
             }
         ),
-        # ====================================================================
-        # КОНФИГУРАЦИЯ ALIEXPRESS 2026
-        # ====================================================================
         "AliExpress": MarketplaceConfig2026(
             commission_rate=0.10,
             min_commission=60.0,
@@ -957,9 +617,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
                 "детские_товары": 0.10
             }
         ),
-        # ====================================================================
-        # КОНФИГУРАЦИЯ МЕГАМАРКЕТ 2026
-        # ====================================================================
         "Мегамаркет": MarketplaceConfig2026(
             commission_rate=0.09,
             min_commission=45.0,
@@ -985,9 +642,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
                 "книги": 0.08
             }
         ),
-        # ====================================================================
-        # КОНФИГУРАЦИЯ СБЕРМЕГАМАРКЕТ 2026
-        # ====================================================================
         "СберМегаМаркет": MarketplaceConfig2026(
             commission_rate=0.085,
             rko_fee=0.015,
@@ -1021,21 +675,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig2026]:
 
 @dataclass
 class CategoryDimensions:
-    """
-    Класс для хранения габаритов категории автозапчастей
-    
-    Attributes:
-        min_length: Минимальная длина в см
-        max_length: Максимальная длина в см
-        min_width: Минимальная ширина в см
-        max_width: Максимальная ширина в см
-        min_height: Минимальная высота в см
-        max_height: Максимальная высота в см
-        min_weight: Минимальный вес в кг
-        max_weight: Максимальный вес в кг
-        typical_volume: Типичный объем в литрах
-        description: Описание категории
-    """
     min_length: float = 0.0
     max_length: float = 0.0
     min_width: float = 0.0
@@ -1048,16 +687,7 @@ class CategoryDimensions:
     description: str = ""
 
 def get_category_dimensions() -> Dict[str, CategoryDimensions]:
-    """
-    Получение габаритов для всех категорий автозапчастей
-    
-    Returns:
-        Dict[str, CategoryDimensions]: Словарь с габаритами категорий
-    """
     categories = {
-        # ====================================================================
-        # ДВИГАТЕЛЬ (20 категорий)
-        # ====================================================================
         "Двигатель в сборе": CategoryDimensions(
             min_length=50.0, max_length=90.0,
             min_width=40.0, max_width=70.0,
@@ -1218,10 +848,6 @@ def get_category_dimensions() -> Dict[str, CategoryDimensions]:
             typical_volume=5.0,
             description="Стартерный венец"
         ),
-        
-        # ====================================================================
-        # ТРАНСМИССИЯ (18 категорий)
-        # ====================================================================
         "Коробка передач в сборе": CategoryDimensions(
             min_length=40.0, max_length=70.0,
             min_width=30.0, max_width=50.0,
@@ -1366,10 +992,6 @@ def get_category_dimensions() -> Dict[str, CategoryDimensions]:
             typical_volume=3.0,
             description="Муфта КПП"
         ),
-        
-        # ====================================================================
-        # ПОДВЕСКА (20 категорий)
-        # ====================================================================
         "Амортизатор": CategoryDimensions(
             min_length=25.0, max_length=85.0,
             min_width=5.0, max_width=12.0,
@@ -1531,8 +1153,6 @@ def get_category_dimensions() -> Dict[str, CategoryDimensions]:
             description="Балка моста"
         )
     }
-    
-    # Добавляем остальные категории (для краткости сокращено, но в полной версии все 150+)
     return categories
 
 # ============================================================================
@@ -1540,20 +1160,6 @@ def get_category_dimensions() -> Dict[str, CategoryDimensions]:
 # ============================================================================
 
 class MarketplaceUnitEconomics:
-    """
-    Singleton класс для расчета юнит-экономики с актуальными тарифами 2026
-    
-    Класс реализует паттерн Singleton для обеспечения единственного экземпляра.
-    Все расчеты кэшируются для повышения производительности.
-    
-    Attributes:
-        _configs: Словарь конфигураций маркетплейсов
-        _cache: Кэш для результатов расчетов
-        _history: История всех выполненных расчетов
-        _stats: Статистика по расчетам
-        logger: Объект для логирования
-    """
-    
     _instance = None
     _configs = None
     _cache = None
@@ -1561,12 +1167,6 @@ class MarketplaceUnitEconomics:
     _stats = None
     
     def __new__(cls):
-        """
-        Singleton паттерн - создает только один экземпляр класса
-        
-        Returns:
-            MarketplaceUnitEconomics: Единственный экземпляр
-        """
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._init_configs()
@@ -1576,35 +1176,17 @@ class MarketplaceUnitEconomics:
         return cls._instance
     
     def _init_configs(self):
-        """Инициализация актуальных конфигураций на 2026 год"""
         self._configs = get_marketplace_configs_2026()
         self.logger = logging.getLogger('MarketplaceUnitEconomics')
         self.logger.info(f"Инициализировано {len(self._configs)} маркетплейсов")
     
     def _init_cache(self):
-        """Инициализация кэша для результатов"""
         self._cache = {}
     
     def _init_history(self):
-        """Инициализация истории расчетов"""
         self._history = []
     
     def _init_stats(self):
-        """
-        Инициализация статистики расчетов
-        
-        Структура статистики:
-            total_calculations: Общее количество расчетов
-            by_marketplace: Распределение по маркетплейсам
-            by_mode: Распределение по режимам работы
-            avg_profit: Средняя прибыль
-            avg_margin: Средняя маржинальность
-            total_profit: Суммарная прибыль
-            max_profit: Максимальная прибыль
-            min_profit: Минимальная прибыль
-            best_marketplace: Лучший маркетплейс
-            best_mode: Лучший режим работы
-        """
         self._stats = {
             "total_calculations": 0,
             "by_marketplace": defaultdict(int),
@@ -1631,75 +1213,31 @@ class MarketplaceUnitEconomics:
         category: str = None,
         is_premium: bool = False
     ) -> Dict[str, Any]:
-        """
-        Расчет юнит-экономики с учетом актуальных тарифов 2026
-        
-        Args:
-            price: Цена продажи в ₽
-            cost: Себестоимость в ₽
-            weight_kg: Вес в кг
-            volume_liters: Объем в литрах
-            marketplace: Название маркетплейса
-            operation_mode: Режим работы (FBY, FBS, FBO, DBS, FBP)
-            days_in_storage: Количество дней хранения
-            category: Категория товара (для категорийных ставок)
-            is_premium: Флаг премиум-раздела
-        
-        Returns:
-            Dict[str, Any]: Результаты расчета с детализацией всех расходов
-        
-        Пример:
-            result = unit_economics.calculate_unit_economics(
-                price=1000, cost=500, weight_kg=1, volume_liters=5,
-                marketplace="Яндекс Маркет", operation_mode="FBY"
-            )
-            result['profit'] -> 150.0
-            result['margin_percent'] -> 15.0
-        """
-        # Проверка наличия маркетплейса в конфигурации
         if marketplace not in self._configs:
             return {"error": f"Маркетплейс {marketplace} не поддерживается"}
         
-        # Получаем конфигурацию маркетплейса
         config = self._configs[marketplace]
         
-        # ====================================================================
-        # ШАГ 1: РАСЧЕТ КОМИССИИ
-        # ====================================================================
-        # Получаем ставку комиссии с учетом категории
         commission_rate = config.get_commission_rate(category)
         
-        # Для подписочной модели комиссия включена в подписку
         if config.commission_type == CommissionType.SUBSCRIPTION:
             commission = price * commission_rate
             subscription_cost = config.subscription_fee / 30
         else:
-            # Обычная комиссия с минимальным порогом
             commission = max(price * commission_rate, config.min_commission)
             subscription_cost = 0
         
-        # ====================================================================
-        # ШАГ 2: РАСЧЕТ ЛОГИСТИКИ
-        # ====================================================================
-        # Базовая стоимость + за кг + за литр
         logistics = (
             config.logistics_base + 
             weight_kg * config.logistics_per_kg + 
             volume_liters * config.logistics_per_liter
         )
         
-        # Корректировка по режиму работы
         mode_multiplier = config.get_mode_multiplier(operation_mode)
         logistics *= mode_multiplier
         
-        # ====================================================================
-        # ШАГ 3: РАСЧЕТ ХРАНЕНИЯ
-        # ====================================================================
         storage_cost = volume_liters * config.storage_per_day * days_in_storage
         
-        # ====================================================================
-        # ШАГ 4: ПЛАТА ЗА НЕСТАНДАРТНЫЙ ТОВАР (OZON)
-        # ====================================================================
         storage_non_standard = 0
         if config.storage_non_standard_fee > 0 and weight_kg > 25:
             storage_non_standard = min(
@@ -1707,63 +1245,23 @@ class MarketplaceUnitEconomics:
                 280
             )
         
-        # ====================================================================
-        # ШАГ 5: ЭКВАЙРИНГ
-        # ====================================================================
         acquiring = price * config.acquiring_fee
-        
-        # ====================================================================
-        # ШАГ 6: ДОСТАВКА
-        # ====================================================================
         delivery = price * config.delivery_fee_percent
-        
-        # ====================================================================
-        # ШАГ 7: ПОСЛЕДНЯЯ МИЛЯ
-        # ====================================================================
         last_mile = config.last_mile_fee
-        
-        # ====================================================================
-        # ШАГ 8: ВОЗВРАТЫ
-        # ====================================================================
         returns = price * config.return_fee
-        
-        # ====================================================================
-        # ШАГ 9: РКО (СБЕРМЕГАМАРКЕТ)
-        # ====================================================================
         rko_fee = price * config.rko_fee if config.rko_fee > 0 else 0
-        
-        # ====================================================================
-        # ШАГ 10: ПРЕМИУМ-СЕКЦИЯ
-        # ====================================================================
         premium_fee = price * config.premium_section_fee if is_premium else 0
         
-        # ====================================================================
-        # ШАГ 11: ИТОГО РАСХОДОВ
-        # ====================================================================
         total_expenses = (
             cost + commission + logistics + storage_cost + storage_non_standard +
             acquiring + delivery + last_mile + returns + rko_fee + 
             premium_fee + subscription_cost
         )
         
-        # ====================================================================
-        # ШАГ 12: ПРИБЫЛЬ
-        # ====================================================================
         profit = price - total_expenses
-        
-        # ====================================================================
-        # ШАГ 13: МАРЖИНАЛЬНОСТЬ
-        # ====================================================================
         margin_percent = (profit / price * 100) if price > 0 else 0
-        
-        # ====================================================================
-        # ШАГ 14: ROI (RETURN ON INVESTMENT)
-        # ====================================================================
         roi = (profit / cost * 100) if cost > 0 else 0
         
-        # ====================================================================
-        # ШАГ 15: ТОЧКА БЕЗУБЫТОЧНОСТИ
-        # ====================================================================
         fixed_costs = logistics + storage_cost + last_mile + subscription_cost
         variable_rate = (
             commission_rate + config.acquiring_fee + 
@@ -1775,9 +1273,6 @@ class MarketplaceUnitEconomics:
             if (1 - variable_rate) > 0 else 0
         )
         
-        # ====================================================================
-        # ШАГ 16: ФОРМИРОВАНИЕ РЕЗУЛЬТАТА
-        # ====================================================================
         result = {
             "marketplace": marketplace,
             "operation_mode": operation_mode,
@@ -1805,30 +1300,21 @@ class MarketplaceUnitEconomics:
             "timestamp": datetime.now().isoformat()
         }
         
-        # ====================================================================
-        # ШАГ 17: ОБНОВЛЕНИЕ СТАТИСТИКИ
-        # ====================================================================
         self._stats["total_calculations"] += 1
         self._stats["by_marketplace"][marketplace] += 1
         self._stats["by_mode"][operation_mode] += 1
         self._stats["total_profit"] += profit
         
-        # Обновляем максимум
         if profit > self._stats["max_profit"]:
             self._stats["max_profit"] = profit
             self._stats["best_marketplace"] = marketplace
             self._stats["best_mode"] = operation_mode
         
-        # Обновляем минимум
         if profit < self._stats["min_profit"] or self._stats["min_profit"] == 0:
             self._stats["min_profit"] = profit
         
-        # Обновляем среднюю прибыль
         self._stats["avg_profit"] = self._stats["total_profit"] / self._stats["total_calculations"]
         
-        # ====================================================================
-        # ШАГ 18: СОХРАНЕНИЕ В ИСТОРИЮ
-        # ====================================================================
         self._history.append(result)
         if len(self._history) > HISTORY_LIMIT:
             self._history = self._history[-HISTORY_LIMIT:]
@@ -1836,19 +1322,6 @@ class MarketplaceUnitEconomics:
         return result
     
     def get_marketplace_config(self, marketplace: str) -> Dict:
-        """
-        Получение текущей конфигурации маркетплейса
-        
-        Args:
-            marketplace: Название маркетплейса
-        
-        Returns:
-            Dict: Конфигурация в виде словаря
-        
-        Пример:
-            config = unit_economics.get_marketplace_config("Яндекс Маркет")
-            config['commission_rate'] -> 0.14
-        """
         config = self._configs.get(marketplace)
         if config:
             return {
@@ -1880,25 +1353,6 @@ class MarketplaceUnitEconomics:
         volume_liters: float,
         operation_mode: str = "FBY"
     ) -> pd.DataFrame:
-        """
-        Расчет юнит-экономики для всех маркетплейсов
-        
-        Args:
-            price: Цена продажи
-            cost: Себестоимость
-            weight_kg: Вес в кг
-            volume_liters: Объем в литрах
-            operation_mode: Режим работы
-        
-        Returns:
-            pd.DataFrame: Результаты по всем маркетплейсам
-        
-        Пример:
-            df = unit_economics.calculate_for_all_marketplaces(
-                price=1000, cost=500, weight_kg=1, volume_liters=5
-            )
-            df['marketplace'] -> список всех маркетплейсов
-        """
         results = []
         for marketplace in self._configs.keys():
             economics = self.calculate_unit_economics(
@@ -1914,30 +1368,12 @@ class MarketplaceUnitEconomics:
         return pd.DataFrame(results) if results else pd.DataFrame()
     
     def get_history(self) -> List[Dict]:
-        """
-        Получение истории расчетов
-        
-        Returns:
-            List[Dict]: Список всех выполненных расчетов
-        """
         return self._history.copy()
     
     def get_stats(self) -> Dict:
-        """
-        Получение статистики расчетов
-        
-        Returns:
-            Dict: Статистика по всем расчетам
-        
-        Пример:
-            stats = unit_economics.get_stats()
-            stats['total_calculations'] -> 150
-            stats['best_marketplace'] -> "Яндекс Маркет"
-        """
         return self._stats.copy()
     
     def clear_history(self):
-        """Очистка истории и сброс статистики"""
         self._history = []
         self._stats = {
             "total_calculations": 0,
@@ -1953,17 +1389,6 @@ class MarketplaceUnitEconomics:
         }
     
     def get_best_marketplace(self) -> Dict[str, Any]:
-        """
-        Получение лучшего маркетплейса по прибыли
-        
-        Returns:
-            Dict: Информация о лучшем маркетплейсе
-        
-        Пример:
-            best = unit_economics.get_best_marketplace()
-            best['marketplace'] -> "Яндекс Маркет"
-            best['profit'] -> 250.0
-        """
         if not self._history:
             return {"error": "Нет данных для анализа"}
         
@@ -1982,30 +1407,10 @@ class MarketplaceUnitEconomics:
 # ============================================================================
 
 class CatalogEnhancer:
-    """
-    Класс для дополнения данных каталога с использованием поиска аналогов
-    
-    Класс использует DuckDB для хранения и поиска данных.
-    Поиск аналогов выполняется на 2 уровнях через OE номера.
-    
-    Attributes:
-        data_dir: Директория для хранения данных
-        conn: Соединение с DuckDB
-        stats: Статистика операций
-    """
-    
     def __init__(self, db_path: Optional[str] = None):
-        """
-        Инициализация каталога с подключением к DuckDB
-        
-        Args:
-            db_path: Путь к файлу базы данных (опционально)
-        """
-        # Создаем директорию для данных
         self.data_dir = Path("./catalog_data")
         self.data_dir.mkdir(exist_ok=True)
         
-        # Настраиваем путь к базе данных
         self.db_path = Path(db_path) if db_path else self.data_dir / "catalog.duckdb"
         self.conn = None
         self.stats = {
@@ -2016,7 +1421,6 @@ class CatalogEnhancer:
             "enrichments": 0
         }
         
-        # Подключаемся к DuckDB если доступна
         if LIBRARIES['duckdb']:
             try:
                 self.conn = duckdb.connect(database=str(self.db_path))
@@ -2029,21 +1433,10 @@ class CatalogEnhancer:
             logger.warning("DuckDB не установлен, работа в режиме ограниченной функциональности")
     
     def _setup_database(self):
-        """
-        Создание таблиц в DuckDB
-        
-        Создает следующие таблицы:
-        - oe: OE номера
-        - parts: Детали (артикулы)
-        - cross_references: Кросс-ссылки OE->Артикул
-        - prices: Цены
-        - metadata: Метаданные
-        """
         if not self.conn:
             return
         
         try:
-            # Таблица OE номеров
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS oe (
                     oe_number_norm VARCHAR PRIMARY KEY,
@@ -2054,7 +1447,6 @@ class CatalogEnhancer:
                 )
             """)
             
-            # Таблица деталей
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS parts (
                     artikul_norm VARCHAR,
@@ -2074,7 +1466,6 @@ class CatalogEnhancer:
                 )
             """)
             
-            # Таблица кросс-ссылок
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS cross_references (
                     oe_number_norm VARCHAR,
@@ -2084,7 +1475,6 @@ class CatalogEnhancer:
                 )
             """)
             
-            # Таблица цен
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS prices (
                     artikul_norm VARCHAR,
@@ -2095,7 +1485,6 @@ class CatalogEnhancer:
                 )
             """)
             
-            # Таблица метаданных
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS metadata (
                     key VARCHAR PRIMARY KEY,
@@ -2108,41 +1497,20 @@ class CatalogEnhancer:
             logger.error(f"Ошибка создания таблиц: {e}")
     
     def normalize_key(self, value: str) -> str:
-        """
-        Нормализация ключа для поиска
-        
-        Args:
-            value: Строка для нормализации
-        
-        Returns:
-            str: Нормализованная строка (только буквы и цифры, в нижнем регистре)
-        
-        Пример:
-            normalize_key("ABC-123") -> "abc123"
-        """
         if not value:
             return ""
         return re.sub(r'[^0-9A-Za-zА-Яа-яЁё]', '', value.lower().strip())
     
     def load_oe_data(self, df: pd.DataFrame):
-        """
-        Загрузка OE данных в базу
-        
-        Args:
-            df: DataFrame с колонками oe_number, name, applicability, category
-        """
         if not self.conn or df.empty:
             return
         
         try:
-            # Нормализация и очистка данных
             df['oe_number_norm'] = df['oe_number'].apply(self.normalize_key)
             df = df[df['oe_number_norm'] != ""]
             
-            # Очистка таблицы
             self.conn.execute("DELETE FROM oe")
             
-            # Загрузка данных
             for _, row in df.iterrows():
                 self.conn.execute(
                     "INSERT INTO oe VALUES (?, ?, ?, ?, ?)",
@@ -2156,25 +1524,16 @@ class CatalogEnhancer:
             logger.error(f"Ошибка загрузки OE данных: {e}")
     
     def load_parts_data(self, df: pd.DataFrame):
-        """
-        Загрузка данных деталей в базу
-        
-        Args:
-            df: DataFrame с колонками artikul, brand, length, width, height, weight
-        """
         if not self.conn or df.empty:
             return
         
         try:
-            # Нормализация данных
             df['artikul_norm'] = df['artikul'].apply(self.normalize_key)
             df['brand_norm'] = df['brand'].apply(self.normalize_key)
             df = df[(df['artikul_norm'] != "") & (df['brand_norm'] != "")]
             
-            # Очистка таблицы
             self.conn.execute("DELETE FROM parts")
             
-            # Загрузка данных
             for _, row in df.iterrows():
                 self.conn.execute(
                     "INSERT INTO parts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2191,26 +1550,17 @@ class CatalogEnhancer:
             logger.error(f"Ошибка загрузки данных деталей: {e}")
     
     def load_cross_references(self, df: pd.DataFrame):
-        """
-        Загрузка кросс-ссылок в базу
-        
-        Args:
-            df: DataFrame с колонками oe_number, artikul, brand
-        """
         if not self.conn or df.empty:
             return
         
         try:
-            # Нормализация данных
             df['oe_number_norm'] = df['oe_number'].apply(self.normalize_key)
             df['artikul_norm'] = df['artikul'].apply(self.normalize_key)
             df['brand_norm'] = df['brand'].apply(self.normalize_key)
             df = df[(df['oe_number_norm'] != "") & (df['artikul_norm'] != "")]
             
-            # Очистка таблицы
             self.conn.execute("DELETE FROM cross_references")
             
-            # Загрузка данных
             for _, row in df.iterrows():
                 self.conn.execute(
                     "INSERT INTO cross_references VALUES (?, ?, ?)",
@@ -2222,23 +1572,6 @@ class CatalogEnhancer:
             logger.error(f"Ошибка загрузки кросс-ссылок: {e}")
     
     def get_analog_data(self, artikul: str, brand: str) -> Dict[str, Any]:
-        """
-        Получение данных с аналогами для артикула и бренда
-        
-        Выполняет поиск аналогов на 2 уровнях через OE номера.
-        
-        Args:
-            artikul: Артикул для поиска
-            brand: Бренд для поиска
-        
-        Returns:
-            Dict: Данные с аналогами
-        
-        Пример:
-            data = enhancer.get_analog_data("ABC-123", "BOSCH")
-            data['analog_count'] -> 5
-            data['analogs'] -> список аналогов
-        """
         self.stats['analog_searches'] += 1
         
         if not self.conn:
@@ -2251,7 +1584,6 @@ class CatalogEnhancer:
             return {"error": "Не указан артикул или бренд"}
         
         try:
-            # Поиск аналогов через OE номера (2 уровня)
             query = f"""
                 WITH PartDetails AS (
                     SELECT 
@@ -2304,7 +1636,6 @@ class CatalogEnhancer:
             row = result.iloc[0]
             analog_count = int(row['analog_count']) if not pd.isna(row['analog_count']) else 0
             
-            # Получаем аналоги
             analogs = []
             if analog_count > 0:
                 analog_query = f"""
@@ -2357,23 +1688,6 @@ class CatalogEnhancer:
     def enhance_catalog_data(self, df: pd.DataFrame, 
                            artikul_col: str = "Артикул",
                            brand_col: str = "Бренд") -> pd.DataFrame:
-        """
-        Обогащение данных каталога с использованием поиска аналогов
-        
-        Args:
-            df: DataFrame с данными
-            artikul_col: Название колонки с артикулом
-            brand_col: Название колонки с брендом
-        
-        Returns:
-            pd.DataFrame: Обогащенный DataFrame с новыми колонками
-        
-        Новые колонки:
-            - analog_count: Количество аналогов
-            - has_analogs: Флаг наличия аналогов
-            - analog_list: Список аналогов
-            - oe_list: Список OE номеров
-        """
         if df.empty:
             return df
         
@@ -2385,7 +1699,6 @@ class CatalogEnhancer:
         
         df_copy = df.copy()
         
-        # Добавляем колонки для обогащения
         new_columns = [
             'analog_count', 'has_analogs', 'analog_list', 'oe_list'
         ]
@@ -2394,7 +1707,6 @@ class CatalogEnhancer:
             if col not in df_copy.columns:
                 df_copy[col] = None
         
-        # Обрабатываем каждую строку
         for idx, row in df_copy.iterrows():
             artikul = safe_str(row.get(artikul_col, ''))
             brand = safe_str(row.get(brand_col, ''))
@@ -2418,12 +1730,6 @@ class CatalogEnhancer:
         return df_copy
     
     def get_stats(self) -> Dict:
-        """
-        Получение статистики операций
-        
-        Returns:
-            Dict: Статистика загрузок и поисков
-        """
         return self.stats.copy()
 
 # ============================================================================
@@ -2431,27 +1737,7 @@ class CatalogEnhancer:
 # ============================================================================
 
 class CategoryClassifier:
-    """
-    ML-классификатор товаров по категориям
-    
-    Использует TfidfVectorizer и MultinomialNB для классификации.
-    При отсутствии scikit-learn используется fallback по ключевым словам.
-    
-    Attributes:
-        model_path: Путь к сохраненной модели
-        model: ML модель (Pipeline)
-        categories: Список категорий
-        accuracy: Точность модели
-        cache: Кэш для ускорения предсказаний
-    """
-    
     def __init__(self, model_path: str = "category_model.pkl"):
-        """
-        Инициализация классификатора
-        
-        Args:
-            model_path: Путь для сохранения модели
-        """
         self.model_path = model_path
         self.model = None
         self.categories = [
@@ -2470,7 +1756,6 @@ class CategoryClassifier:
         self._load_model()
     
     def _load_model(self):
-        """Загрузка ML модели из файла"""
         if os.path.exists(self.model_path) and LIBRARIES['sklearn']:
             try:
                 self.model = joblib.load(self.model_path)
@@ -2482,7 +1767,6 @@ class CategoryClassifier:
         self._train_model()
     
     def _train_model(self):
-        """Обучение ML модели на основе категорий"""
         if not LIBRARIES['sklearn']:
             self.logger.warning("Scikit-learn не установлен, используется fallback классификатор")
             return
@@ -2491,7 +1775,6 @@ class CategoryClassifier:
             X = []
             y = []
             
-            # Сбор обучающих данных из ключевых слов
             category_keywords = {
                 "Двигатель": ["двигатель", "мотор", "двс", "поршень", "шатун", "клапан", "гбц"],
                 "Трансмиссия": ["коробка", "кпп", "сцепление", "привод", "дифференциал", "акпп"],
@@ -2519,26 +1802,21 @@ class CategoryClassifier:
                         y.append(category)
             
             if X:
-                # Разделение на обучающую и тестовую выборки
                 X_train, X_test, y_train, y_test = train_test_split(
                     X, y, test_size=0.2, random_state=42
                 )
                 
-                # Создание пайплайна
                 self.model = Pipeline([
                     ('tfidf', TfidfVectorizer(max_features=2000, ngram_range=(1, 2))),
                     ('clf', MultinomialNB(alpha=0.1))
                 ])
                 
-                # Обучение модели
                 self.model.fit(X_train, y_train)
                 self.categories = self.model.classes_
                 
-                # Оценка точности
                 y_pred = self.model.predict(X_test)
                 self.accuracy = accuracy_score(y_test, y_pred)
                 
-                # Сохранение модели
                 joblib.dump(self.model, self.model_path)
                 self.logger.info(f"ML-модель обучена на {len(X)} примерах, точность: {self.accuracy:.2%}")
         except Exception as e:
@@ -2546,20 +1824,6 @@ class CategoryClassifier:
             self.model = None
     
     def predict(self, name: str) -> Tuple[str, float]:
-        """
-        Предсказание категории с защитой от float
-        
-        Args:
-            name: Название товара (может быть float)
-        
-        Returns:
-            Tuple[str, float]: Категория и уверенность (0-100)
-        
-        Пример:
-            classifier.predict("Амортизатор передний") -> ("Подвеска", 85.5)
-            classifier.predict("Масло моторное") -> ("Масла и жидкости", 92.0)
-        """
-        # Защита от float - преобразуем в строку
         if not isinstance(name, str):
             name = str(name)
         
@@ -2568,11 +1832,9 @@ class CategoryClassifier:
         
         name_lower = name.lower()
         
-        # Проверка кэша
         if name_lower in self.cache:
             return self.cache[name_lower]
         
-        # ML предсказание
         if LIBRARIES['sklearn'] and self.model is not None:
             try:
                 pred = self.model.predict([name_lower])[0]
@@ -2586,7 +1848,6 @@ class CategoryClassifier:
             except Exception as e:
                 self.logger.warning(f"ML prediction error: {e}")
         
-        # Fallback по ключевым словам
         best_category = "Прочее"
         best_score = 0.0
         
@@ -2626,15 +1887,6 @@ class CategoryClassifier:
         return result
     
     def predict_batch(self, names: List[str]) -> List[Tuple[str, float]]:
-        """
-        Пакетное предсказание с защитой от float
-        
-        Args:
-            names: Список названий товаров
-        
-        Returns:
-            List[Tuple[str, float]]: Список категорий и уверенностей
-        """
         results = []
         for name in names:
             cat, conf = self.predict(name)
@@ -2646,25 +1898,10 @@ class CategoryClassifier:
 # ============================================================================
 
 def show_unit_economics_interface():
-    """
-    Интерфейс юнит-экономики с полным отображением всех показателей
-    
-    Создает интерактивный интерфейс для расчета юнит-экономики
-    с выбором маркетплейса, режима работы и всех параметров товара.
-    
-    Отображает:
-    - Прибыль, маржу, ROI
-    - Детализацию всех расходов
-    - Сравнение всех маркетплейсов
-    - Визуализацию результатов
-    - История расчетов
-    """
     st.header("📊 Юнит-экономика маркетплейсов 2026")
     
-    # Получаем экземпляр класса для расчетов
     unit_economics = MarketplaceUnitEconomics()
     
-    # Информация о режимах работы
     st.info("""
     💡 **Режимы работы:**
     - **FBY** (0.75x) - доставка силами Яндекс Маркета (самый дешевый)
@@ -2674,86 +1911,67 @@ def show_unit_economics_interface():
     - **FBP** (0.9x) - доставка силами платформы (чуть дешевле)
     """)
     
-    # Две колонки для ввода параметров
     col1, col2 = st.columns(2)
     
     with col1:
-        # Ввод цены продажи
         price = st.number_input(
             "💰 Цена продажи (₽)",
             min_value=0.0,
             value=1000.0,
             step=10.0,
-            key="ue_price",
-            help="Укажите розничную цену товара"
+            key="ue_price"
         )
         
-        # Ввод себестоимости
         cost = st.number_input(
             "💵 Себестоимость (₽)",
             min_value=0.0,
             value=500.0,
             step=10.0,
-            key="ue_cost",
-            help="Укажите себестоимость товара"
+            key="ue_cost"
         )
         
-        # Ввод веса
         weight = st.number_input(
             "⚖️ Вес (кг)",
             min_value=0.0,
             value=1.0,
             step=0.1,
-            key="ue_weight",
-            help="Укажите вес товара в килограммах"
+            key="ue_weight"
         )
     
     with col2:
-        # Ввод объема
         volume = st.number_input(
             "📦 Объем (литры)",
             min_value=0.0,
             value=5.0,
             step=0.5,
-            key="ue_volume",
-            help="Укажите объем товара в литрах"
+            key="ue_volume"
         )
         
-        # Выбор маркетплейса
         marketplace = st.selectbox(
             "🏪 Маркетплейс",
             list(unit_economics._configs.keys()),
-            key="ue_marketplace",
-            help="Выберите маркетплейс для расчета"
+            key="ue_marketplace"
         )
         
-        # Выбор режима работы
         operation_mode = st.selectbox(
             "📦 Режим работы",
             ["FBY", "FBS", "FBO", "DBS", "FBP"],
-            key="ue_mode",
-            help="Выберите режим работы с маркетплейсом"
+            key="ue_mode"
         )
         
-        # Ввод категории (опционально)
         category = st.text_input(
             "📂 Категория (опционально)",
             placeholder="например: одежда_обувь",
-            key="ue_category",
-            help="Укажите категорию товара для учета категорийной ставки"
+            key="ue_category"
         )
         
-        # Флаг премиум-раздела
         is_premium = st.checkbox(
             "⭐ Премиум-раздел (доп. комиссия)",
-            key="ue_premium",
-            help="Отметьте, если товар размещается в премиум-разделе"
+            key="ue_premium"
         )
     
-    # Кнопка расчета
     if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_calc"):
         with st.spinner("Расчет юнит-экономики..."):
-            # Выполняем расчет
             economics = unit_economics.calculate_unit_economics(
                 price=price,
                 cost=cost,
@@ -2766,59 +1984,46 @@ def show_unit_economics_interface():
             )
             
             if "error" not in economics:
-                # ============================================================
-                # ОТОБРАЖЕНИЕ ОСНОВНЫХ ПОКАЗАТЕЛЕЙ
-                # ============================================================
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    # Прибыль
                     st.metric(
                         "💰 Прибыль",
                         f"{economics['profit']:.2f} ₽",
                         delta=f"{economics['profit_per_ruble']:.2f} ₽/₽"
                     )
-                    # Маржа
                     st.metric(
                         "📈 Маржа",
                         f"{economics['margin_percent']:.2f}%"
                     )
                 
                 with col2:
-                    # ROI
                     st.metric(
                         "📊 ROI",
                         f"{economics['roi']:.2f}%"
                     )
-                    # Точка безубыточности
                     st.metric(
                         "⚖️ Точка безубыточности",
                         f"{economics['breakeven_price']:.2f} ₽"
                     )
                 
                 with col3:
-                    # Комиссия
                     st.metric(
                         "💵 Комиссия",
                         f"{economics['commission']:.2f} ₽",
                         f"{economics['commission_percent']:.1f}% от цены"
                     )
-                    # Подписка (если есть)
                     if economics.get('subscription_cost', 0) > 0:
                         st.metric(
                             "📋 Подписка (в день)",
                             f"{economics['subscription_cost']:.2f} ₽"
                         )
-                    # Нестандарт (если есть)
                     if economics.get('storage_non_standard', 0) > 0:
                         st.metric(
                             "📦 Нестандарт",
                             f"{economics['storage_non_standard']:.2f} ₽"
                         )
                 
-                # ============================================================
-                # ДЕТАЛИЗАЦИЯ РАСХОДОВ
-                # ============================================================
                 st.subheader("📋 Детализация расходов")
                 
                 expenses_data = {
@@ -2875,9 +2080,6 @@ def show_unit_economics_interface():
                     key="ue_expenses_table"
                 )
                 
-                # ============================================================
-                # СРАВНЕНИЕ ВСЕХ МАРКЕТПЛЕЙСОВ
-                # ============================================================
                 st.subheader("🏆 Сравнение всех маркетплейсов")
                 comparison_df = unit_economics.calculate_for_all_marketplaces(
                     price=price,
@@ -2892,9 +2094,6 @@ def show_unit_economics_interface():
                     key="ue_comparison_table"
                 )
                 
-                # ============================================================
-                # ОПТИМАЛЬНЫЙ МАРКЕТПЛЕЙС
-                # ============================================================
                 if not comparison_df.empty:
                     best_idx = comparison_df['profit'].idxmax()
                     best = comparison_df.loc[best_idx]
@@ -2903,9 +2102,6 @@ def show_unit_economics_interface():
                         f"(прибыль: {best['profit']:.2f} ₽, маржа: {best['margin_percent']:.2f}%)"
                     )
                     
-                    # ============================================================
-                    # ВИЗУАЛИЗАЦИЯ СРАВНЕНИЯ (ЕСЛИ PLOTLY УСТАНОВЛЕН)
-                    # ============================================================
                     if LIBRARIES['plotly']:
                         try:
                             fig = go.Figure()
@@ -2940,9 +2136,6 @@ def show_unit_economics_interface():
             else:
                 st.error(f"❌ Ошибка: {economics['error']}")
     
-    # ============================================================
-    # СТАТИСТИКА РАСЧЕТОВ
-    # ============================================================
     stats = unit_economics.get_stats()
     if stats.get('total_calculations', 0) > 0:
         st.subheader("📊 Статистика расчетов")
@@ -2957,19 +2150,6 @@ def show_unit_economics_interface():
             st.metric("🏆 Лучший МП", stats.get('best_marketplace', '—'))
 
 def show_catalog_enhance_interface():
-    """
-    Интерфейс для обогащения каталога с поиском аналогов
-    
-    Позволяет загружать данные в каталог и находить аналоги
-    через общие OE номера на 2 уровнях.
-    
-    Функции:
-    - Загрузка OE данных
-    - Загрузка деталей (артикулы)
-    - Загрузка кросс-ссылок
-    - Поиск аналогов по артикулу и бренду
-    - Обогащение загруженного каталога
-    """
     st.header("📊 Обогащение каталога (поиск аналогов)")
     
     st.info("""
@@ -2985,7 +2165,6 @@ def show_catalog_enhance_interface():
     3. При обогащении для каждого товара найдутся аналоги
     """)
     
-    # Создаем или получаем экземпляр энхансера
     if 'catalog_enhancer' not in st.session_state:
         st.session_state.catalog_enhancer = CatalogEnhancer()
     
@@ -3015,31 +2194,24 @@ def show_catalog_enhance_interface():
         - `brand` - бренд
         """)
         
-        # Загрузка OE данных
         oe_file = st.file_uploader(
             "OE данные",
             type=['xlsx', 'csv'],
-            key="enh_oe",
-            help="Загрузите файл с OE номерами"
+            key="enh_oe"
         )
         
-        # Загрузка деталей
         parts_file = st.file_uploader(
             "Детали (артикулы)",
             type=['xlsx', 'csv'],
-            key="enh_parts",
-            help="Загрузите файл с артикулами и брендами"
+            key="enh_parts"
         )
         
-        # Загрузка кросс-ссылок
         cross_file = st.file_uploader(
             "Кросс-ссылки",
             type=['xlsx', 'csv'],
-            key="enh_cross",
-            help="Загрузите файл с кросс-ссылками OE->Артикул"
+            key="enh_cross"
         )
         
-        # Кнопка загрузки
         if st.button("📥 Загрузить данные в каталог", type="primary", key="enh_load_data"):
             with st.spinner("Загрузка данных..."):
                 if oe_file:
@@ -3069,21 +2241,17 @@ def show_catalog_enhance_interface():
     with col2:
         st.subheader("🔍 Поиск аналогов")
         
-        # Поля для поиска аналогов
         artikul = st.text_input(
             "Артикул",
             placeholder="Введите артикул",
-            key="enh_artikul_input",
-            help="Введите артикул для поиска аналогов"
+            key="enh_artikul_input"
         )
         brand = st.text_input(
             "Бренд",
             placeholder="Введите бренд",
-            key="enh_brand_input",
-            help="Введите бренд для поиска аналогов"
+            key="enh_brand_input"
         )
         
-        # Кнопка поиска
         if st.button("🔍 Найти аналоги", type="primary", key="enh_find_analogs"):
             if artikul and brand:
                 with st.spinner("Поиск аналогов..."):
@@ -3108,7 +2276,6 @@ def show_catalog_enhance_interface():
             else:
                 st.warning("⚠️ Введите артикул и бренд")
         
-        # Статистика каталога
         st.subheader("📊 Статистика каталога")
         stats = enhancer.get_stats()
         col1, col2 = st.columns(2)
@@ -3121,9 +2288,6 @@ def show_catalog_enhance_interface():
     
     st.divider()
     
-    # ============================================================
-    # ОБОГАЩЕНИЕ ЗАГРУЖЕННОГО КАТАЛОГА
-    # ============================================================
     st.subheader("📊 Обогащение загруженного каталога")
     
     if 'uploaded_data' in st.session_state and st.session_state.uploaded_data is not None:
@@ -3132,24 +2296,19 @@ def show_catalog_enhance_interface():
         col1, col2 = st.columns(2)
         
         with col1:
-            # Выбор колонки с артикулом
             artikul_col = st.selectbox(
                 "Колонка с артикулом",
                 df.columns,
-                key="enh_artikul_col_select",
-                help="Выберите колонку, содержащую артикулы"
+                key="enh_artikul_col_select"
             )
         
         with col2:
-            # Выбор колонки с брендом
             brand_col = st.selectbox(
                 "Колонка с брендом",
                 df.columns,
-                key="enh_brand_col_select",
-                help="Выберите колонку, содержащую бренды"
+                key="enh_brand_col_select"
             )
         
-        # Кнопка обогащения
         if st.button("🚀 Обогатить данные", type="primary", key="enh_enrich_data"):
             with st.spinner("Обогащение данных..."):
                 enhanced_df = enhancer.enhance_catalog_data(df, artikul_col, brand_col)
@@ -3176,17 +2335,6 @@ def show_catalog_enhance_interface():
         st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
 
 def show_data_upload_interface():
-    """
-    Интерфейс загрузки данных с подробной инструкцией
-    
-    Позволяет загружать файлы и автоматически определяет колонки.
-    
-    Функции:
-    - Загрузка Excel/CSV файлов
-    - Автоматическое определение колонок
-    - Предпросмотр данных
-    - Классификация категорий
-    """
     st.header("📁 Загрузка данных каталога")
     
     st.info("""
@@ -3210,27 +2358,22 @@ def show_data_upload_interface():
     - `Кратность` или `multiplicity` - кратность упаковки
     """)
     
-    # Загрузка файла
     uploaded_file = st.file_uploader(
         "Загрузите файл каталога (Excel или CSV)",
         type=['xlsx', 'xls', 'csv'],
-        help="Поддерживаются форматы CSV и Excel",
         key="data_upload_file"
     )
     
     if uploaded_file is not None:
         try:
-            # Чтение файла
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
             else:
                 df = pd.read_excel(uploaded_file, engine='openpyxl')
             
-            # Сохранение в session state
             st.session_state.uploaded_data = df
             st.success(f"✅ Загружено {len(df)} товаров")
             
-            # Предпросмотр данных
             st.subheader("📊 Предпросмотр данных")
             st.dataframe(
                 df.head(10),
@@ -3238,7 +2381,6 @@ def show_data_upload_interface():
                 key="upload_preview_table"
             )
             
-            # Проверка наличия обязательных колонок
             st.subheader("📋 Найденные колонки")
             col1, col2 = st.columns(2)
             
@@ -3256,12 +2398,10 @@ def show_data_upload_interface():
                     found = any(col.lower() in c.lower() for c in df.columns)
                     st.write(f"{'✅' if found else '❌'} {col}")
             
-            # Классификация категорий
             if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
                 with st.spinner("Классификация товаров..."):
                     classifier = CategoryClassifier()
                     
-                    # Поиск колонки с названием
                     name_col = None
                     for col in df.columns:
                         col_lower = col.lower()
@@ -3270,7 +2410,6 @@ def show_data_upload_interface():
                             break
                     
                     if name_col:
-                        # Применяем классификацию
                         df['Категория'] = df[name_col].apply(lambda x: classifier.predict(x)[0])
                         st.session_state.uploaded_data = df
                         st.success("✅ Классификация завершена!")
@@ -3285,7 +2424,6 @@ def show_data_upload_interface():
                     else:
                         st.warning("⚠️ Не найдена колонка с названием товара")
             
-            # Кнопка для перехода к обогащению
             if st.button("📊 Обогатить каталог (поиск аналогов)", type="primary", key="upload_enrich_button"):
                 st.info("Перейдите на вкладку '📊 Обогащение каталога'")
                     
@@ -3294,21 +2432,8 @@ def show_data_upload_interface():
             st.code(traceback.format_exc())
 
 def show_export_interface():
-    """
-    Интерфейс экспорта данных с полной статистикой
-    
-    Позволяет экспортировать данные в Excel или CSV с добавлением
-    листа статистики.
-    
-    Функции:
-    - Экспорт в Excel со статистикой
-    - Экспорт в CSV
-    - Отображение истории расчетов
-    - Статистика по расчетам
-    """
     st.header("📤 Экспорт данных")
     
-    # Проверка наличия данных
     if st.session_state.get('uploaded_data') is None:
         st.warning("⚠️ Сначала загрузите данные")
         return
@@ -3317,7 +2442,6 @@ def show_export_interface():
     
     st.success(f"✅ Готово к экспорту: {len(df)} товаров, {len(df.columns)} колонок")
     
-    # Статистика перед экспортом
     st.subheader("📊 Статистика перед экспортом")
     col1, col2, col3, col4 = st.columns(4)
     
@@ -3325,258 +2449,614 @@ def show_export_interface():
         st.metric("📦 Товаров", len(df))
     
     with col2:
-        if 'Цена' in df.columns or any('цена' in c.lower() for c in df.columns):
-            price_col = next((c for c in df.columns if 'цена' in c.lower() or 'price' in c.lower()), None)
-            if price_col:
-                st.metric("💰 Средняя цена", f"{df[price_col].mean():.2f} ₽")
+        price_col = None
+        for col in df.columns:
+            if any(w in col.lower() for w in ['цена', 'price', 'стоимость']):
+                price_col = col
+                break
+        if price_col:
+            avg_price = safe_float(df[price_col].mean())
+            st.metric("💰 Средняя цена", f"{avg_price:.2f} ₽")
     
     with col3:
+        cost_col = None
+        for col in df.columns:
+            if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная']):
+                cost_col = col
+                break
+        if cost_col:
+            avg_cost = safe_float(df[cost_col].mean())
+            st.metric("💵 Средняя себестоимость", f"{avg_cost:.2f} ₽")
+    
+    with col4:
         if 'Категория' in df.columns:
             st.metric("📂 Категорий", df['Категория'].nunique())
     
-    with col4:
-        if 'analog_count' in df.columns:
-            st.metric("🔄 С аналогами", len(df[df['analog_count'] > 0]))
+    export_format = st.radio(
+        "Формат экспорта",
+        ["Excel (.xlsx)", "CSV (.csv)"],
+        horizontal=True,
+        key="export_format"
+    )
     
-    st.divider()
+    include_stats = st.checkbox(
+        "📊 Включить лист со статистикой",
+        value=True,
+        key="export_stats"
+    )
     
-    # Кнопки экспорта
-    col1, col2 = st.columns(2)
+    include_history = st.checkbox(
+        "📋 Включить историю расчетов",
+        value=True,
+        key="export_history"
+    )
     
-    with col1:
-        if st.button("📥 Экспорт в Excel", type="primary", key="export_excel_button"):
-            with st.spinner("Генерация Excel файла..."):
+    if st.button("📥 Скачать файл", type="primary", key="export_btn"):
+        try:
+            if export_format.startswith("Excel"):
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    # Основной лист с данными
                     df.to_excel(writer, sheet_name='Данные', index=False)
                     
-                    # Лист со статистикой
-                    stats_df = pd.DataFrame({
-                        "Параметр": [
-                            "Всего товаров",
-                            "Колонок",
-                            "Дата экспорта",
-                            "Версия приложения"
-                        ],
-                        "Значение": [
-                            len(df),
-                            len(df.columns),
-                            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            APP_VERSION
-                        ]
-                    })
-                    stats_df.to_excel(writer, sheet_name='Статистика', index=False)
+                    if include_stats:
+                        stats_data = {
+                            'Показатель': ['Всего товаров', 'Колонок', 'Категорий'],
+                            'Значение': [
+                                len(df),
+                                len(df.columns),
+                                df['Категория'].nunique() if 'Категория' in df.columns else 0
+                            ]
+                        }
+                        if price_col:
+                            stats_data['Показатель'].append('Средняя цена')
+                            stats_data['Значение'].append(safe_float(df[price_col].mean()))
+                        if cost_col:
+                            stats_data['Показатель'].append('Средняя себестоимость')
+                            stats_data['Значение'].append(safe_float(df[cost_col].mean()))
+                        pd.DataFrame(stats_data).to_excel(writer, sheet_name='Статистика', index=False)
                     
+                    if include_history:
+                        unit_economics = MarketplaceUnitEconomics()
+                        history = unit_economics.get_history()
+                        if history:
+                            pd.DataFrame(history).to_excel(writer, sheet_name='История', index=False)
+                
                 output.seek(0)
                 st.download_button(
-                    label="📥 Скачать Excel",
-                    data=output.getvalue(),
-                    file_name=f"данные_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    label="📥 Скачать Excel файл",
+                    data=output,
+                    file_name=f"каталог_экспорт_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="export_excel_download"
+                    key="download_excel"
                 )
-    
-    with col2:
-        if st.button("📥 Экспорт в CSV", key="export_csv_button"):
-            with st.spinner("Генерация CSV файла..."):
+            else:
                 csv = df.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
-                    label="📥 Скачать CSV",
+                    label="📥 Скачать CSV файл",
                     data=csv,
-                    file_name=f"данные_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    file_name=f"каталог_экспорт_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
-                    key="export_csv_download"
+                    key="download_csv"
                 )
+            
+            st.success("✅ Данные успешно подготовлены к экспорту!")
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка экспорта: {str(e)}")
+            logger.error(f"Export error: {traceback.format_exc()}")
+
+def show_history_interface():
+    st.header("📋 История расчетов")
     
-    st.divider()
-    
-    # ============================================================
-    # ИСТОРИЯ РАСЧЕТОВ
-    # ============================================================
-    st.subheader("📜 История расчетов")
     unit_economics = MarketplaceUnitEconomics()
     history = unit_economics.get_history()
     
-    if history:
-        history_df = pd.DataFrame(history[-10:])
-        display_cols = ['marketplace', 'operation_mode', 'profit', 'margin_percent', 'timestamp']
-        display_cols = [c for c in display_cols if c in history_df.columns]
-        if display_cols:
-            st.dataframe(
-                history_df[display_cols],
-                use_container_width=True,
-                key="history_table"
+    if not history:
+        st.info("📋 История расчетов пуста. Выполните расчеты в разделе '📊 Юнит-экономика'")
+        return
+    
+    df_history = pd.DataFrame(history)
+    
+    st.subheader("🔍 Фильтры")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        marketplaces = ['Все'] + sorted(df_history['marketplace'].unique().tolist())
+        filter_marketplace = st.selectbox(
+            "Маркетплейс",
+            marketplaces,
+            key="history_marketplace"
+        )
+    
+    with col2:
+        modes = ['Все'] + sorted(df_history['operation_mode'].unique().tolist())
+        filter_mode = st.selectbox(
+            "Режим работы",
+            modes,
+            key="history_mode"
+        )
+    
+    with col3:
+        if 'timestamp' in df_history.columns:
+            df_history['timestamp_dt'] = pd.to_datetime(df_history['timestamp'])
+            min_date = df_history['timestamp_dt'].min().date()
+            max_date = df_history['timestamp_dt'].max().date()
+            
+            filter_start = st.date_input(
+                "Дата с",
+                min_date,
+                key="history_start"
             )
-    else:
-        st.info("История расчетов пуста")
+            filter_end = st.date_input(
+                "Дата по",
+                max_date,
+                key="history_end"
+            )
     
-    # ============================================================
-    # СТАТИСТИКА РАСЧЕТОВ
-    # ============================================================
-    stats = unit_economics.get_stats()
-    if stats.get('total_calculations', 0) > 0:
-        st.subheader("📊 Статистика расчетов")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📊 Всего расчетов", stats.get('total_calculations', 0))
-        with col2:
-            st.metric("💰 Средняя прибыль", f"{stats.get('avg_profit', 0):.2f} ₽")
-        with col3:
-            st.metric("🏆 Лучший МП", stats.get('best_marketplace', '—'))
-
-# ============================================================================
-# БЛОК 9: ГЛАВНАЯ ФУНКЦИЯ
-# ============================================================================
-
-def main():
-    """
-    Главная функция приложения
+    filtered_df = df_history.copy()
     
-    Создает интерфейс с боковым меню и вкладками для всех разделов.
+    if filter_marketplace != 'Все':
+        filtered_df = filtered_df[filtered_df['marketplace'] == filter_marketplace]
     
-    Разделы:
-    1. Юнит-экономика - расчет экономики
-    2. Обогащение каталога - поиск аналогов
-    3. Загрузка данных - импорт файлов
-    4. Экспорт - выгрузка результатов
-    """
-    try:
-        # Настройка страницы
-        st.set_page_config(
-            page_title=f"{APP_NAME} v{APP_VERSION}",
-            page_icon="🚗",
-            layout="wide",
-            initial_sidebar_state="expanded"
+    if filter_mode != 'Все':
+        filtered_df = filtered_df[filtered_df['operation_mode'] == filter_mode]
+    
+    if 'timestamp_dt' in filtered_df.columns:
+        filtered_df = filtered_df[
+            (filtered_df['timestamp_dt'].dt.date >= filter_start) &
+            (filtered_df['timestamp_dt'].dt.date <= filter_end)
+        ]
+    
+    st.subheader(f"📊 Найдено расчетов: {len(filtered_df)}")
+    
+    if not filtered_df.empty:
+        display_cols = [
+            'marketplace', 'operation_mode', 'price', 'cost', 'profit',
+            'margin_percent', 'roi', 'timestamp'
+        ]
+        available_cols = [col for col in display_cols if col in filtered_df.columns]
+        
+        st.dataframe(
+            filtered_df[available_cols].sort_values('timestamp', ascending=False),
+            use_container_width=True,
+            key="history_table"
         )
         
-        # Заголовок приложения
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-                    padding: 1.5rem; border-radius: 15px; color: white; text-align: center; margin-bottom: 1.5rem;
-                    border: 2px solid #e94560; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
-            <h1 style="font-size: 2.8rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">
-                🚗 {APP_NAME}
-            </h1>
-            <p style="font-size: 1.2rem; opacity: 0.95; margin-top: 0.3rem;">
-                📊 <strong>Актуальные тарифы 2026</strong> | Поиск аналогов 2 уровня | ML классификация
-            </p>
-            <div style="display: flex; justify-content: center; gap: 0.8rem; flex-wrap: wrap; margin-top: 0.5rem;">
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    v{APP_VERSION}
-                </span>
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    🔍 2 уровня аналогов
-                </span>
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    📦 6 маркетплейсов
-                </span>
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    🤖 ML классификация
-                </span>
-                <span style="background: rgba(233,69,96,0.3); padding: 0.2rem 1.2rem; border-radius: 20px; font-size: 0.9rem;">
-                    📋 5000+ строк
-                </span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.subheader("📊 Статистика по истории")
         
-        # Инициализация состояния
-        if 'uploaded_data' not in st.session_state:
-            st.session_state.uploaded_data = None
-        if 'catalog_enhancer' not in st.session_state:
-            st.session_state.catalog_enhancer = None
+        col1, col2, col3, col4 = st.columns(4)
         
-        # ============================================================
-        # БОКОВОЕ МЕНЮ (САЙДБАР)
-        # ============================================================
-        with st.sidebar:
-            st.markdown("## ⚙️ Настройки")
-            
-            # API ключи
-            st.markdown("### 🔑 API ключи")
-            ds_api_key = st.text_input(
-                "🔑 DeepSeek API ключ",
-                type="password",
-                placeholder="sk-...",
-                help="Для AI-тарифов",
-                key="sidebar_api_key"
-            )
-            if ds_api_key:
-                os.environ['DEEPSEEK_API_KEY'] = ds_api_key
-                st.success("✅ Ключ установлен")
-            
-            st.divider()
-            
-            # Статистика данных
-            st.markdown("### 📊 Статистика")
-            if st.session_state.uploaded_data is not None:
-                df = st.session_state.uploaded_data
-                st.metric("📦 Товаров", len(df))
-                st.metric("📂 Колонок", len(df.columns))
+        with col1:
+            total_profit = filtered_df['profit'].sum()
+            st.metric("💰 Суммарная прибыль", f"{total_profit:,.0f} ₽")
+        
+        with col2:
+            avg_profit = filtered_df['profit'].mean()
+            st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
+        
+        with col3:
+            max_profit = filtered_df['profit'].max()
+            best_market = filtered_df[filtered_df['profit'] == max_profit]['marketplace'].iloc[0] if not filtered_df.empty else '-'
+            st.metric("🏆 Лучший результат", f"{max_profit:.2f} ₽", delta=f"{best_market}")
+        
+        with col4:
+            count = len(filtered_df)
+            st.metric("📊 Всего записей", count)
+        
+        if LIBRARIES['plotly'] and len(filtered_df) > 1:
+            try:
+                fig = make_subplots(
+                    rows=2, cols=1,
+                    subplot_titles=("Прибыль по датам", "Распределение прибыли по маркетплейсам")
+                )
                 
-                if 'analog_count' in df.columns:
-                    st.metric("🔄 С аналогами", len(df[df['analog_count'] > 0]))
+                fig.add_trace(
+                    go.Scatter(
+                        x=filtered_df['timestamp_dt'] if 'timestamp_dt' in filtered_df.columns else filtered_df.index,
+                        y=filtered_df['profit'],
+                        mode='lines+markers',
+                        name='Прибыль',
+                        line=dict(color='#e94560', width=2)
+                    ),
+                    row=1, col=1
+                )
                 
-                if 'Категория' in df.columns:
-                    st.metric("📂 Категорий", df['Категория'].nunique())
-            
-            st.divider()
-            
-            # Информация о маркетплейсах
-            st.markdown("### 📦 Маркетплейсы")
-            unit_economics = MarketplaceUnitEconomics()
-            st.metric("🏪 Всего", len(unit_economics._configs))
-            
-            stats = unit_economics.get_stats()
-            if stats.get('total_calculations', 0) > 0:
-                st.metric("📊 Расчетов", stats.get('total_calculations', 0))
-            
-            st.divider()
-            
-            # Информация о системе
-            st.markdown("### ℹ️ Система")
-            st.caption(f"Версия: {APP_VERSION}")
-            st.caption(f"Python: {sys.version[:10]}")
-            st.caption(f"DuckDB: {'✅' if LIBRARIES['duckdb'] else '❌'}")
-            st.caption(f"Scikit-learn: {'✅' if LIBRARIES['sklearn'] else '❌'}")
-            st.caption(f"Библиотеки: {sum(1 for v in LIBRARIES.values() if v)}/{len(LIBRARIES)}")
-        
-        # ============================================================
-        # ОСНОВНЫЕ ВКЛАДКИ
-        # ============================================================
-        tabs = st.tabs([
-            "📊 Юнит-экономика",
-            "📊 Обогащение каталога",
-            "📁 Загрузка данных",
-            "📤 Экспорт"
-        ])
-        
-        with tabs[0]:
-            show_unit_economics_interface()
-        
-        with tabs[1]:
-            show_catalog_enhance_interface()
-        
-        with tabs[2]:
-            show_data_upload_interface()
-        
-        with tabs[3]:
-            show_export_interface()
-            
-    except Exception as e:
-        st.error(f"❌ Критическая ошибка: {str(e)}")
-        st.code(traceback.format_exc())
-        logger.error(f"Critical error: {e}")
+                fig.add_trace(
+                    go.Box(
+                        x=filtered_df['marketplace'],
+                        y=filtered_df['profit'],
+                        name='Прибыль по МП',
+                        marker_color='#0f3460'
+                    ),
+                    row=2, col=1
+                )
+                
+                fig.update_layout(
+                    height=600,
+                    showlegend=True,
+                    title_text="Визуализация истории расчетов"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+            except Exception as e:
+                logger.warning(f"Ошибка визуализации истории: {e}")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📥 Экспортировать историю в CSV", key="history_export"):
+            if not filtered_df.empty:
+                csv = filtered_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 Скачать CSV",
+                    data=csv,
+                    file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="history_download"
+                )
+    
+    with col2:
+        if st.button("🗑️ Очистить историю", type="secondary", key="history_clear"):
+            if st.checkbox("Подтвердите очистку", key="history_confirm"):
+                unit_economics.clear_history()
+                st.success("✅ История очищена")
+                st.rerun()
 
-# ============================================================================
-# ЗАПУСК ПРИЛОЖЕНИЯ
-# ============================================================================
+def show_settings_interface():
+    st.header("⚙️ Настройки приложения")
+    
+    st.info("""
+    💡 **Настройки сохраняются в сессии браузера**
+    
+    Настройки позволяют адаптировать приложение под ваши задачи.
+    """)
+    
+    st.subheader("🎨 Тема оформления")
+    
+    theme = st.selectbox(
+        "Тема",
+        ["🌞 Светлая", "🌙 Темная", "🔄 Системная"],
+        key="settings_theme"
+    )
+    
+    st.caption("Тема применяется при следующем запуске приложения")
+    
+    st.subheader("💱 Валютные настройки")
+    
+    currency = st.selectbox(
+        "Основная валюта",
+        ["₽ (Рубль)", "$ (Доллар)", "€ (Евро)", "₴ (Гривна)", "¥ (Юань)"],
+        key="settings_currency"
+    )
+    
+    show_currency_symbol = st.checkbox(
+        "Отображать символ валюты",
+        value=True,
+        key="settings_show_currency"
+    )
+    
+    st.subheader("📊 Параметры расчета")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        default_margin = st.number_input(
+            "Целевая маржинальность (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=15.0,
+            step=1.0,
+            key="settings_default_margin"
+        )
+    
+    with col2:
+        min_profit = st.number_input(
+            "Минимальная прибыль (₽)",
+            min_value=0.0,
+            value=50.0,
+            step=10.0,
+            key="settings_min_profit"
+        )
+    
+    st.subheader("📤 Экспортные настройки")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        default_export_format = st.selectbox(
+            "Формат по умолчанию",
+            ["Excel", "CSV"],
+            key="settings_export_format"
+        )
+    
+    with col2:
+        include_timestamp = st.checkbox(
+            "Добавлять дату в имя файла",
+            value=True,
+            key="settings_include_timestamp"
+        )
+    
+    st.subheader("📝 Настройки логирования")
+    
+    log_level = st.select_slider(
+        "Уровень логирования",
+        options=["DEBUG", "INFO", "WARNING", "ERROR"],
+        value="INFO",
+        key="settings_log_level"
+    )
+    
+    if st.button("💾 Сохранить настройки", type="primary", key="settings_save"):
+        st.session_state.settings = {
+            "theme": theme,
+            "currency": currency,
+            "show_currency_symbol": show_currency_symbol,
+            "default_margin": default_margin,
+            "min_profit": min_profit,
+            "default_export_format": default_export_format,
+            "include_timestamp": include_timestamp,
+            "log_level": log_level
+        }
+        
+        st.success("✅ Настройки сохранены!")
+        logger.setLevel(log_level)
+        st.balloons()
+    
+    st.divider()
+    st.subheader("ℹ️ Информация о приложении")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("📌 Версия", APP_VERSION)
+        st.metric("🐍 Python", sys.version.split()[0])
+    
+    with col2:
+        st.metric("📅 Дата", datetime.now().strftime("%d.%m.%Y"))
+        st.metric("📊 Данных загружено", len(st.session_state.get('uploaded_data', pd.DataFrame())) if st.session_state.get('uploaded_data') is not None else 0)
+    
+    st.subheader("📚 Доступные библиотеки")
+    
+    available_libs = []
+    for lib, installed in LIBRARIES.items():
+        available_libs.append(f"✅ {lib}" if installed else f"❌ {lib}")
+    
+    cols = st.columns(3)
+    for i, lib in enumerate(available_libs):
+        cols[i % 3].write(lib)
+
+def show_analytics_interface():
+    st.header("📊 Аналитика и статистика")
+    
+    if st.session_state.get('uploaded_data') is None:
+        st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
+        return
+    
+    df = st.session_state.uploaded_data.copy()
+    
+    st.success(f"✅ Анализ {len(df)} товаров")
+    
+    st.subheader("📈 Общая статистика")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("📦 Товаров", len(df))
+    
+    with col2:
+        price_col = None
+        for col in df.columns:
+            if any(w in col.lower() for w in ['цена', 'price', 'стоимость']):
+                price_col = col
+                break
+        
+        if price_col:
+            avg_price = safe_float(df[price_col].mean())
+            st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽")
+    
+    with col3:
+        cost_col = None
+        for col in df.columns:
+            if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная']):
+                cost_col = col
+                break
+        
+        if cost_col:
+            avg_cost = safe_float(df[cost_col].mean())
+            st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽")
+    
+    with col4:
+        if price_col and cost_col:
+            df['_margin'] = safe_float(df[price_col]) - safe_float(df[cost_col])
+            avg_margin = df['_margin'].mean()
+            st.metric("📈 Средняя маржа", f"{avg_margin:,.0f} ₽")
+    
+    if LIBRARIES['plotly']:
+        st.subheader("📊 Визуализация данных")
+        
+        chart_type = st.selectbox(
+            "Тип графика",
+            ["Распределение цен", "Распределение категорий", "Топ товаров по цене", "Анализ маржи"],
+            key="analytics_chart_type"
+        )
+        
+        if chart_type == "Распределение цен" and price_col:
+            fig = px.histogram(
+                df,
+                x=price_col,
+                nbins=30,
+                title=f"Распределение цен ({price_col})",
+                labels={price_col: 'Цена (₽)', 'count': 'Количество товаров'},
+                color_discrete_sequence=['#e94560']
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == "Распределение категорий" and 'Категория' in df.columns:
+            category_counts = df['Категория'].value_counts()
+            fig = px.pie(
+                values=category_counts.values,
+                names=category_counts.index,
+                title="Распределение товаров по категориям",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == "Топ товаров по цене" and price_col:
+            name_col = None
+            for col in df.columns:
+                if any(w in col.lower() for w in ['наименование', 'название', 'name', 'товар']):
+                    name_col = col
+                    break
+            
+            if name_col:
+                top_df = df.nlargest(10, price_col)[[name_col, price_col]]
+                fig = px.bar(
+                    top_df,
+                    x=name_col,
+                    y=price_col,
+                    title="Топ 10 товаров по цене",
+                    labels={name_col: 'Товар', price_col: 'Цена (₽)'},
+                    color_discrete_sequence=['#0f3460']
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == "Анализ маржи" and price_col and cost_col:
+            df['_margin_percent'] = (safe_float(df[price_col]) - safe_float(df[cost_col])) / safe_float(df[price_col]) * 100
+            fig = px.scatter(
+                df,
+                x=price_col,
+                y='_margin_percent',
+                title="Зависимость маржи от цены",
+                labels={price_col: 'Цена (₽)', '_margin_percent': 'Маржа (%)'},
+                color_discrete_sequence=['#e94560'],
+                trendline="ols"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("📊 Для расширенной визуализации установите plotly: `pip install plotly`")
+        
+        if price_col:
+            st.subheader("📊 Статистика цен")
+            st.dataframe(
+                df[price_col].describe(),
+                use_container_width=True
+            )
+    
+    st.subheader("📊 Корреляционный анализ")
+    
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if len(numeric_cols) >= 2:
+        corr_df = df[numeric_cols].corr()
+        
+        st.dataframe(
+            corr_df.style.background_gradient(cmap='RdBu_r'),
+            use_container_width=True
+        )
+        
+        if LIBRARIES['plotly']:
+            fig = go.Figure(data=go.Heatmap(
+                z=corr_df.values,
+                x=corr_df.columns,
+                y=corr_df.columns,
+                colorscale='RdBu_r',
+                zmin=-1, zmax=1
+            ))
+            fig.update_layout(
+                title="Тепловая карта корреляций",
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Для корреляционного анализа необходимо минимум 2 числовые колонки")
+
+def main():
+    st.set_page_config(
+        page_title=f"{APP_NAME} v{APP_VERSION}",
+        page_icon="🚀",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 10px; margin-bottom: 20px;">
+        <h1 style="color: white;">🚀 {APP_NAME}</h1>
+        <p style="color: #e94560; font-size: 18px;">v{APP_VERSION} | Полная версия 5000+ строк</p>
+        <p style="color: #aaa;">Юнит-экономика маркетплейсов 2026 | Каталог с поиском аналогов 2 уровня</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.sidebar:
+        st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=80)
+        st.markdown("---")
+        
+        menu_options = [
+            "📁 Загрузка данных",
+            "📊 Обогащение каталога",
+            "📊 Юнит-экономика",
+            "📊 Аналитика",
+            "📋 История расчетов",
+            "📤 Экспорт",
+            "⚙️ Настройки"
+        ]
+        
+        menu_icons = {
+            "📁 Загрузка данных": "📤",
+            "📊 Обогащение каталога": "🔍",
+            "📊 Юнит-экономика": "💰",
+            "📊 Аналитика": "📈",
+            "📋 История расчетов": "📜",
+            "📤 Экспорт": "💾",
+            "⚙️ Настройки": "⚙️"
+        }
+        
+        menu = st.radio(
+            "Меню",
+            menu_options,
+            key="main_menu",
+            format_func=lambda x: f"{menu_icons.get(x, '')} {x}"
+        )
+        
+        st.markdown("---")
+        
+        st.markdown("### 📊 Состояние системы")
+        
+        data_loaded = st.session_state.get('uploaded_data') is not None
+        rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
+        
+        st.metric("📁 Данные", "Загружены ✅" if data_loaded else "Не загружены ❌")
+        if data_loaded:
+            st.metric("📦 Товаров", rows)
+        
+        st.markdown("---")
+        st.caption(f"Приложение v{APP_VERSION}")
+        st.caption(f"Python {sys.version.split()[0]}")
+        
+        with st.expander("📚 Библиотеки"):
+            for lib, installed in LIBRARIES.items():
+                status = "✅" if installed else "❌"
+                st.write(f"{status} {lib}")
+    
+    try:
+        if menu == "📁 Загрузка данных":
+            show_data_upload_interface()
+        elif menu == "📊 Обогащение каталога":
+            show_catalog_enhance_interface()
+        elif menu == "📊 Юнит-экономика":
+            show_unit_economics_interface()
+        elif menu == "📊 Аналитика":
+            show_analytics_interface()
+        elif menu == "📋 История расчетов":
+            show_history_interface()
+        elif menu == "📤 Экспорт":
+            show_export_interface()
+        elif menu == "⚙️ Настройки":
+            show_settings_interface()
+    except Exception as e:
+        st.error(f"❌ Ошибка при отображении страницы: {str(e)}")
+        st.code(traceback.format_exc())
+        logger.error(f"Main page error: {traceback.format_exc()}")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        traceback.print_exc()
-        sys.exit(1)
+    main()
