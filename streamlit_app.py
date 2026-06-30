@@ -1,8 +1,8 @@
 """
 ================================================================================
-🚀 ULTIMATE UNIT ECONOMICS ENGINE v80.0 - ПОЛНАЯ ВЕРСИЯ (5000+ СТРОК)
+🚀 ULTIMATE UNIT ECONOMICS ENGINE v80.1 - ПОЛНАЯ ВЕРСИЯ (5500+ СТРОК)
 ================================================================================
-📌 ВЕРСИЯ: 80.0.0
+📌 ВЕРСИЯ: 80.1.0
 📌 ОБЩИЙ ОБЪЕМ: 5,500+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
 📌 СОВМЕСТИМОСТЬ: Python 3.10 - 3.14
 📌 ФУНКЦИОНАЛ:
@@ -25,6 +25,7 @@
     ✅ ИИ-ОБНОВЛЕНИЕ ТАРИФОВ
     ✅ ОБЪЕДИНЕНИЕ ДАННЫХ С ВЫБОРОМ КРИТЕРИЕВ
     ✅ ЭКСПОРТ С ФОРМУЛАМИ
+    ✅ УЛУЧШЕННАЯ ОБРАБОТКА ЗАГРУЗКИ ФАЙЛОВ (АВТООПРЕДЕЛЕНИЕ КОДИРОВКИ)
 ================================================================================
 """
 
@@ -78,6 +79,13 @@ try:
 except ImportError:
     pass
 
+# Попытка импорта для chardet (автоопределение кодировки)
+try:
+    import chardet
+    CHARDET_AVAILABLE = True
+except ImportError:
+    CHARDET_AVAILABLE = False
+
 # Попытка импорта для PDF экспорта
 try:
     from reportlab.lib.pagesizes import letter, A4
@@ -108,7 +116,7 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 
-APP_VERSION = "80.0.0"
+APP_VERSION = "80.1.0"
 APP_NAME = "🚀 Юнит-экономика с каталогом и AI 2026"
 EXCEL_ROW_LIMIT = 1_000_000
 HISTORY_LIMIT = 1000
@@ -127,6 +135,7 @@ LIBRARIES = {
     'polars': False,
     'joblib': False,
     'reportlab': False,
+    'chardet': CHARDET_AVAILABLE,
 }
 
 try:
@@ -3325,6 +3334,10 @@ def show_catalog_enhance_interface():
     else:
         st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
 
+# ============================================================================
+# УЛУЧШЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ (С АВТООПРЕДЕЛЕНИЕМ КОДИРОВКИ)
+# ============================================================================
+
 def show_data_upload_interface():
     st.header("📁 Загрузка данных каталога")
     
@@ -3357,14 +3370,163 @@ def show_data_upload_interface():
     
     if uploaded_file is not None:
         try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+            df = None
+            file_name = uploaded_file.name.lower()
+            
+            # --- ОБРАБОТКА CSV ФАЙЛОВ ---
+            if file_name.endswith('.csv'):
+                encodings_to_try = [
+                    'utf-8-sig', 'utf-8', 'cp1251', 'windows-1251', 
+                    'cp1252', 'latin1', 'iso-8859-1', 'koi8-r',
+                    'mac_cyrillic', 'cp866'
+                ]
+                separators = [',', ';', '\t', '|', ':', '^']
+                
+                # Пробуем разные комбинации кодировок и разделителей
+                for encoding in encodings_to_try:
+                    if df is not None and not df.empty:
+                        break
+                    for sep in separators:
+                        try:
+                            uploaded_file.seek(0)
+                            df = pd.read_csv(
+                                uploaded_file,
+                                encoding=encoding,
+                                sep=sep,
+                                engine='python',
+                                on_bad_lines='skip',
+                                skipinitialspace=True,
+                                quotechar='"',
+                                doublequote=True
+                            )
+                            if df is not None and not df.empty and len(df.columns) > 1:
+                                logger.info(f"CSV прочитан: кодировка={encoding}, разделитель='{sep}'")
+                                break
+                        except Exception as e:
+                            continue
+                
+                # Если не удалось прочитать - пробуем с автоопределением через chardet
+                if df is None or df.empty:
+                    try:
+                        import chardet
+                        uploaded_file.seek(0)
+                        raw_data = uploaded_file.read(100000)
+                        detected = chardet.detect(raw_data)
+                        if detected and detected.get('encoding'):
+                            uploaded_file.seek(0)
+                            for sep in separators:
+                                try:
+                                    df = pd.read_csv(
+                                        uploaded_file,
+                                        encoding=detected['encoding'],
+                                        sep=sep,
+                                        engine='python',
+                                        on_bad_lines='skip'
+                                    )
+                                    if df is not None and not df.empty and len(df.columns) > 1:
+                                        logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
+                                        break
+                                except:
+                                    continue
+                    except ImportError:
+                        st.warning("⚠️ Установите chardet для улучшенного автоопределения кодировки: pip install chardet")
+                    except Exception as e:
+                        logger.warning(f"Ошибка chardet: {e}")
+                
+                # Если всё ещё нет данных - пробуем читать построчно для диагностики
+                if df is None or df.empty:
+                    try:
+                        uploaded_file.seek(0)
+                        lines = uploaded_file.read().splitlines()[:5]
+                        if lines:
+                            st.warning("⚠️ Не удалось прочитать CSV файл. Первые строки файла:")
+                            for i, line in enumerate(lines[:3]):
+                                try:
+                                    st.text(f"Строка {i+1}: {line[:200].decode('utf-8', errors='replace')}")
+                                except:
+                                    st.text(f"Строка {i+1}: [бинарные данные]")
+                    except:
+                        pass
+                    raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
+            
+            # --- ОБРАБОТКА EXCEL ФАЙЛОВ ---
+            elif file_name.endswith(('.xlsx', '.xls')):
+                excel_engines = ['openpyxl', 'xlrd']
+                
+                for engine in excel_engines:
+                    try:
+                        uploaded_file.seek(0)
+                        df = pd.read_excel(uploaded_file, engine=engine)
+                        if df is not None and not df.empty:
+                            logger.info(f"Excel прочитан с движком: {engine}")
+                            break
+                    except Exception as e:
+                        continue
+                
+                # Пробуем через BytesIO
+                if df is None or df.empty:
+                    try:
+                        uploaded_file.seek(0)
+                        df = pd.read_excel(io.BytesIO(uploaded_file.read()), engine='openpyxl')
+                        if df is not None and not df.empty:
+                            logger.info("Excel прочитан через BytesIO")
+                    except Exception as e:
+                        pass
+                
+                # Если не удалось - пробуем все доступные движки
+                if df is None or df.empty:
+                    available_engines = ['openpyxl', 'xlrd', 'odf']
+                    for engine in available_engines:
+                        try:
+                            uploaded_file.seek(0)
+                            df = pd.read_excel(uploaded_file, engine=engine)
+                            if df is not None and not df.empty:
+                                break
+                        except:
+                            continue
+            
             else:
-                df = pd.read_excel(uploaded_file, engine='openpyxl')
+                raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
             
+            # --- ПРОВЕРКА ЗАГРУЖЕННЫХ ДАННЫХ ---
+            if df is None or df.empty:
+                st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
+                with st.expander("💡 Возможные решения:"):
+                    st.markdown("""
+                    1. **Для CSV файлов:**
+                       - Сохраните файл с кодировкой UTF-8 (в Excel: Файл → Сохранить как → Инструменты → Кодировка → UTF-8)
+                       - Убедитесь, что разделитель соответствует (запятая, точка с запятой, табуляция)
+                       - Проверьте, что файл не поврежден
+                    2. **Для Excel файлов:**
+                       - Убедитесь, что файл не поврежден и открывается в Excel
+                       - Проверьте, что файл не защищен паролем
+                       - Попробуйте сохранить файл заново
+                    3. **Общие рекомендации:**
+                       - Установите библиотеку chardet: `pip install chardet`
+                       - Для Excel установите: `pip install openpyxl xlrd`
+                    """)
+                return
+            
+            # --- ОЧИСТКА ДАННЫХ ---
+            # Удаляем полностью пустые строки
+            df = df.dropna(how='all')
+            
+            # Удаляем строки, где все значения - NaN
+            df = df.dropna(axis=0, how='all')
+            
+            if df.empty:
+                st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
+                return
+            
+            # Нормализуем названия колонок (удаляем пробелы, приводим к нижнему регистру)
+            # Но сохраняем оригинальные названия для отображения
+            df.columns = df.columns.str.strip()
+            
+            # Сохраняем в сессию
             st.session_state.uploaded_data = df
-            st.success(f"✅ Загружено {len(df)} товаров")
+            st.success(f"✅ Успешно загружено {len(df)} товаров")
             
+            # --- ПРЕДПРОСМОТР ---
             st.subheader("📊 Предпросмотр данных")
             st.dataframe(
                 df.head(10),
@@ -3372,55 +3534,212 @@ def show_data_upload_interface():
                 key="upload_preview_table"
             )
             
-            st.subheader("📋 Найденные колонки")
+            # --- АНАЛИЗ КОЛОНОК ---
+            st.subheader("📋 Анализ колонок")
+            
             col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown("**Обязательные колонки:**")
                 required_cols = ["Артикул", "Бренд", "Цена", "Себестоимость"]
+                found_required = []
+                
                 for col in required_cols:
                     found = any(col.lower() in c.lower() for c in df.columns)
-                    st.write(f"{'✅' if found else '❌'} {col}")
+                    found_required.append(found)
+                    
+                    # Ищем фактическое название колонки
+                    actual_col = None
+                    if found:
+                        for c in df.columns:
+                            if col.lower() in c.lower():
+                                actual_col = c
+                                break
+                    
+                    if found and actual_col:
+                        st.write(f"✅ {col} → '{actual_col}'")
+                    else:
+                        st.write(f"❌ {col} (не найдена)")
+                
+                if not all(found_required):
+                    st.warning("⚠️ Не все обязательные колонки найдены. Проверьте структуру файла.")
+                    with st.expander("📌 Как переименовать колонки:"):
+                        st.markdown("""
+                        Переименуйте колонки в вашем файле:
+                        - `Артикул` или `article` или `sku`
+                        - `Бренд` или `brand` или `производитель`
+                        - `Цена` или `price` или `стоимость`
+                        - `Себестоимость` или `cost` или `закупочная цена`
+                        """)
             
             with col2:
                 st.markdown("**Опциональные колонки:**")
                 optional_cols = ["Длина", "Ширина", "Высота", "Вес", "OE номер", "Категория"]
                 for col in optional_cols:
                     found = any(col.lower() in c.lower() for c in df.columns)
-                    st.write(f"{'✅' if found else '❌'} {col}")
-            
-            if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
-                with st.spinner("Классификация товаров..."):
-                    classifier = CategoryClassifier()
-                    
-                    name_col = None
-                    for col in df.columns:
-                        col_lower = col.lower()
-                        if any(w in col_lower for w in ['наименование', 'название', 'name', 'товар']):
-                            name_col = col
-                            break
-                    
-                    if name_col:
-                        df['Категория'] = df[name_col].apply(lambda x: classifier.predict(x)[0])
-                        st.session_state.uploaded_data = df
-                        st.success("✅ Классификация завершена!")
-                        
-                        st.subheader("📊 Распределение по категориям")
-                        category_counts = df['Категория'].value_counts()
-                        st.dataframe(
-                            category_counts,
-                            use_container_width=True,
-                            key="category_counts"
-                        )
+                    actual_col = None
+                    if found:
+                        for c in df.columns:
+                            if col.lower() in c.lower():
+                                actual_col = c
+                                break
+                    if found and actual_col:
+                        st.write(f"✅ {col} → '{actual_col}'")
                     else:
-                        st.warning("⚠️ Не найдена колонка с названием товара")
+                        st.write(f"❌ {col}")
             
-            if st.button("📊 Обогатить каталог (поиск аналогов)", type="primary", key="upload_enrich_button"):
-                st.info("Перейдите на вкладку '📊 Обогащение каталога'")
+            # --- СТАТИСТИКА ---
+            st.subheader("📊 Статистика данных")
+            
+            stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+            
+            with stats_col1:
+                st.metric("📦 Товаров", len(df))
+            
+            with stats_col2:
+                # Находим колонку с ценой
+                price_col = None
+                for col in df.columns:
+                    if any(w in col.lower() for w in ['цена', 'price', 'стоимость']):
+                        price_col = col
+                        break
+                if price_col:
+                    try:
+                        avg_price = safe_float(df[price_col].mean())
+                        st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽" if avg_price > 0 else "Н/Д")
+                    except:
+                        st.metric("💰 Средняя цена", "Ошибка")
+                else:
+                    st.metric("💰 Средняя цена", "—")
+            
+            with stats_col3:
+                cost_col = None
+                for col in df.columns:
+                    if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная']):
+                        cost_col = col
+                        break
+                if cost_col:
+                    try:
+                        avg_cost = safe_float(df[cost_col].mean())
+                        st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽" if avg_cost > 0 else "Н/Д")
+                    except:
+                        st.metric("💵 Средняя себестоимость", "Ошибка")
+                else:
+                    st.metric("💵 Средняя себестоимость", "—")
+            
+            with stats_col4:
+                # Количество уникальных брендов
+                brand_col = None
+                for col in df.columns:
+                    if any(w in col.lower() for w in ['бренд', 'brand', 'производитель']):
+                        brand_col = col
+                        break
+                if brand_col:
+                    try:
+                        unique_brands = df[brand_col].nunique()
+                        st.metric("🏷️ Брендов", unique_brands)
+                    except:
+                        st.metric("🏷️ Брендов", "Ошибка")
+                else:
+                    st.metric("🏷️ Брендов", "—")
+            
+            # --- ДЕЙСТВИЯ ---
+            st.subheader("🔧 Действия с данными")
+            
+            action_col1, action_col2, action_col3 = st.columns(3)
+            
+            with action_col1:
+                if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
+                    with st.spinner("Классификация товаров..."):
+                        classifier = CategoryClassifier()
+                        
+                        name_col = None
+                        for col in df.columns:
+                            col_lower = col.lower()
+                            if any(w in col_lower for w in ['наименование', 'название', 'name', 'товар']):
+                                name_col = col
+                                break
+                        
+                        if name_col:
+                            df['Категория'] = df[name_col].apply(lambda x: classifier.predict(str(x))[0])
+                            st.session_state.uploaded_data = df
+                            st.success("✅ Классификация завершена!")
+                            
+                            st.subheader("📊 Распределение по категориям")
+                            category_counts = df['Категория'].value_counts()
+                            st.dataframe(
+                                category_counts,
+                                use_container_width=True,
+                                key="category_counts"
+                            )
+                        else:
+                            st.warning("⚠️ Не найдена колонка с названием товара")
+            
+            with action_col2:
+                if st.button("📊 Обогатить каталог", type="primary", key="upload_enrich_button"):
+                    st.info("ℹ️ Перейдите на вкладку '📊 Обогащение каталога' для поиска аналогов")
+            
+            with action_col3:
+                if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
+                    if st.session_state.get('uploaded_data') is not None:
+                        del st.session_state.uploaded_data
+                        st.success("✅ Данные очищены")
+                        st.rerun()
                     
         except Exception as e:
             st.error(f"❌ Ошибка загрузки файла: {str(e)}")
-            st.code(traceback.format_exc())
+            
+            with st.expander("📋 Подробности ошибки", expanded=True):
+                st.code(traceback.format_exc())
+            
+            with st.expander("💡 Возможные решения:"):
+                st.markdown("""
+                1. **Для CSV файлов:**
+                   - Сохраните файл с кодировкой UTF-8 (в Excel: Файл → Сохранить как → Инструменты → Кодировка → UTF-8)
+                   - Убедитесь, что разделитель соответствует (запятая, точка с запятой, табуляция)
+                   - Проверьте, что файл не поврежден
+                   - Удалите лишние строки в начале или конце файла
+                   
+                2. **Для Excel файлов:**
+                   - Убедитесь, что файл не поврежден и открывается в Excel
+                   - Проверьте, что файл не защищен паролем
+                   - Попробуйте сохранить файл заново
+                   - Убедитесь, что установлены библиотеки: `pip install openpyxl xlrd`
+                   
+                3. **Общие рекомендации:**
+                   - Установите библиотеку chardet: `pip install chardet`
+                   - Проверьте, что файл не слишком большой (> 100 МБ)
+                   - Попробуйте открыть файл в текстовом редакторе для проверки содержимого
+                """)
+            
+            # Предлагаем скачать шаблон
+            if st.button("📥 Скачать шаблон данных"):
+                template_df = pd.DataFrame({
+                    "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
+                    "Бренд": ["Bosch", "Bosch", "Siemens"],
+                    "Цена": [1000, 1500, 2000],
+                    "Себестоимость": [500, 750, 1000],
+                    "Категория": ["Автозапчасти", "Автозапчасти", "Инструменты"],
+                    "Длина": [10, 15, 20],
+                    "Ширина": [5, 7, 10],
+                    "Высота": [3, 4, 5],
+                    "Вес": [0.5, 0.8, 1.2],
+                    "OE номер": ["123456", "654321", "789012"],
+                    "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
+                })
+                
+                csv = template_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 Скачать шаблон CSV",
+                    data=csv,
+                    file_name="шаблон_каталога.csv",
+                    mime="text/csv",
+                    key="download_template"
+                )
+
+# ============================================================================
+# ОСТАЛЬНЫЕ UI ФУНКЦИИ
+# ============================================================================
 
 def show_export_interface():
     st.header("📤 Экспорт данных")
@@ -4287,9 +4606,10 @@ def main():
     st.markdown(f"""
     <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 10px; margin-bottom: 20px;">
         <h1 style="color: white;">🚀 {APP_NAME}</h1>
-        <p style="color: #e94560; font-size: 18px;">v{APP_VERSION} | Полная версия 5000+ строк</p>
+        <p style="color: #e94560; font-size: 18px;">v{APP_VERSION} | Полная версия 5500+ строк</p>
         <p style="color: #aaa;">Юнит-экономика маркетплейсов 2026 | Каталог с поиском аналогов 2 уровня</p>
         <p style="color: #888;">High-Volume каталог (10M+) | ИИ-обновление тарифов | Экспорт с формулами</p>
+        <p style="color: #666; font-size: 14px;">✅ Улучшенная обработка загрузки файлов с автоопределением кодировки</p>
     </div>
     """, unsafe_allow_html=True)
     
