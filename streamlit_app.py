@@ -3,17 +3,16 @@
 🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v95.0 - МАКСИМАЛЬНАЯ ВЕРСИЯ
 ================================================================================
 📌 ВЕРСИЯ: 95.0.0
-📌 ОБЩИЙ ОБЪЕМ: 7,500+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
+📌 ОБЩИЙ ОБЪЕМ: 4,500+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
 📌 СОВМЕСТИМОСТЬ: Python 3.10 - 3.14
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
 
 📌 РАСШИРЕННЫЙ ФУНКЦИОНАЛ:
-    ✅ 250+ КАТЕГОРИЙ АВТОЗАПЧАСТЕЙ С ПОЛНЫМИ ГАБАРИТАМИ
+    ✅ 150+ КАТЕГОРИЙ АВТОЗАПЧАСТЕЙ С ПОЛНЫМИ ГАБАРИТАМИ
     ✅ РАСЧЕТ ЮНИТ-ЭКОНОМИКИ ПО КАЖДОМУ АРТИКУЛУ
-    ✅ ПОИСК АНАЛОГОВ ПО OE НОМЕРАМ (3 УРОВНЯ)
+    ✅ ПОИСК АНАЛОГОВ ПО OE НОМЕРАМ
     ✅ ML-КЛАССИФИКАЦИЯ ТОВАРОВ
     ✅ ИНТЕГРАЦИЯ С DEEPSEEK AI ДЛЯ ОБНОВЛЕНИЯ ТАРИФОВ
-    ✅ HIGH-VOLUME КАТАЛОГ (10M+ ЗАПИСЕЙ)
     ✅ ЭКСПОРТ В CSV/EXCEL/PDF С ФОРМУЛАМИ
     ✅ ВИЗУАЛИЗАЦИЯ ПРИБЫЛИ ПО КАТЕГОРИЯМ
     ✅ ПРОГНОЗИРОВАНИЕ ПРИБЫЛИ (12 МЕСЯЦЕВ)
@@ -34,28 +33,11 @@
     ✅ ПРОГНОЗИРОВАНИЕ СПРОСА
     ✅ АНАЛИЗ КОНКУРЕНТОВ
     ✅ АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ ОТЧЕТОВ
-    ✅ СРАВНЕНИЕ ЭФФЕКТИВНОСТИ РЕЖИМОВ РАБОТЫ
-    ✅ РАСЧЕТ ТОЧКИ БЕЗУБЫТОЧНОСТИ
-    ✅ ОПТИМИЗАЦИЯ ЛОГИСТИКИ
-    ✅ УЧЕТ СЕЗОННОСТИ
-    ✅ АНАЛИЗ ПРИБЫЛЬНОСТИ КАТЕГОРИЙ
-    ✅ РАСШИРЕННАЯ ВИЗУАЛИЗАЦИЯ
-    ✅ ЭКСПОРТ В HTML ДАШБОРД
-    ✅ АВТОМАТИЧЕСКОЕ ОБНАРУЖЕНИЕ ВЫБРОСОВ
-    ✅ КОРРЕЛЯЦИОННЫЙ АНАЛИЗ
-    ✅ КЛАСТЕРИЗАЦИЯ ТОВАРОВ
-    ✅ А/Б ТЕСТИРОВАНИЕ ЦЕН
-    ✅ ПРОГНОЗИРОВАНИЕ ОСТАТКОВ
-    ✅ ОПТИМИЗАЦИЯ ЗАКУПОК
-    ✅ АНАЛИЗ ЭФФЕКТИВНОСТИ КАНАЛОВ ПРОДАЖ
-    ✅ МЕТРИКИ LTV, CAC, ROMI
-    ✅ ДАШБОРД В РЕАЛЬНОМ ВРЕМЕНИ
-    ✅ ЭКСПОРТ В POWER BI И TABLEAU
 ================================================================================
 """
 
 # ============================================================================
-# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ (400+ СТРОК)
+# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ (300+ СТРОК)
 # ============================================================================
 
 import streamlit as st
@@ -89,25 +71,20 @@ import uuid
 import glob
 import shutil
 import zipfile
-import gzip
-import bz2
-import lzma
-import socket
-import struct
 import threading
 import queue
 import concurrent.futures
 from typing import Dict, List, Any, Optional, Tuple, Union, Set, Callable, Iterable, Iterator, Generator
 from dataclasses import dataclass, field, asdict, astuple, replace
-from functools import lru_cache, wraps, reduce, partial, singledispatch
-from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor, wait
+from functools import lru_cache, wraps, reduce, partial
+from concurrent.futures import ThreadPoolExecutor, as_completed, ProcessPoolExecutor
 from datetime import datetime, timedelta, date, timezone
-from collections import defaultdict, Counter, deque, OrderedDict, ChainMap, namedtuple, UserDict, UserList
-from enum import Enum, auto, IntEnum, Flag
-from threading import Lock, RLock, Semaphore, Thread, Event, Barrier, Condition, Timer
+from collections import defaultdict, Counter, deque, OrderedDict, ChainMap, namedtuple
+from enum import Enum, auto, IntEnum
+from threading import Lock, RLock, Semaphore, Thread, Event, Barrier, Condition
 from contextlib import contextmanager, closing, suppress, ExitStack
 from pathlib import Path, PurePath
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 import inspect
 import importlib
 import importlib.util
@@ -127,8 +104,6 @@ import webbrowser
 import calendar
 import email
 import smtplib
-import imaplib
-import poplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -140,8 +115,6 @@ import configparser
 import argparse
 import getpass
 import hmac
-import jwt
-import oauthlib
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
 import pytz
 import dateutil
@@ -163,6 +136,8 @@ try:
     import polars as pl
     import polars.selectors as cs
     POLARS_AVAILABLE = True
+    logger_polars = logging.getLogger('polars')
+    logger_polars.setLevel(logging.WARNING)
 except ImportError:
     POLARS_AVAILABLE = False
     pl = None
@@ -198,12 +173,6 @@ except ImportError:
     MODIN_AVAILABLE = False
 
 try:
-    import vaex
-    VAEX_AVAILABLE = True
-except ImportError:
-    VAEX_AVAILABLE = False
-
-try:
     import pyarrow as pa
     import pyarrow.parquet as pq
     import pyarrow.csv as pc
@@ -228,8 +197,8 @@ try:
     from sklearn.naive_bayes import MultinomialNB, GaussianNB, BernoulliNB, ComplementNB
     from sklearn.pipeline import Pipeline, make_pipeline, FeatureUnion
     from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, RandomizedSearchCV
-    from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, precision_score
-    from sklearn.metrics import recall_score, roc_auc_score, roc_curve, auc, precision_recall_curve
+    from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
+    from sklearn.metrics import precision_score, recall_score, roc_auc_score, roc_curve, auc
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, explained_variance_score
     from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
     from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
@@ -248,15 +217,9 @@ try:
     from sklearn.multioutput import MultiOutputClassifier, MultiOutputRegressor
     from sklearn.multiclass import OneVsRestClassifier, OneVsOneClassifier
     import joblib
-    import xgboost as xgb
-    import lightgbm as lgb
-    import catboost as cb
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
-    xgb = None
-    lgb = None
-    cb = None
 
 try:
     import plotly.graph_objects as go
@@ -334,10 +297,10 @@ try:
     from reportlab.pdfgen import canvas
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.platypus import PageBreak, Image, KeepTogether, NextPageTemplate, BaseDocTemplate
-    from reportlab.platypus import Frame, PageTemplate, Flowable, DocTemplate, TableOfContents
+    from reportlab.platypus import PageBreak, Image, KeepTogether, NextPageTemplate
+    from reportlab.platypus import Frame, PageTemplate, Flowable, DocTemplate
     from reportlab.platypus.para import Paragraph as Para
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle, StyleSheet1
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch, cm, mm
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
     from reportlab.lib.utils import ImageReader
@@ -494,7 +457,10 @@ PLUGINS_DIR = BASE_DIR / "plugins"
 EXPORTS_DIR = BASE_DIR / "exports"
 
 for dir_path in [DATA_DIR, CACHE_DIR, LOG_DIR, REPORTS_DIR, TEMP_DIR, MODELS_DIR, CONFIG_DIR, PLUGINS_DIR, EXPORTS_DIR]:
-    dir_path.mkdir(exist_ok=True, parents=True)
+    try:
+        dir_path.mkdir(exist_ok=True, parents=True)
+    except Exception as e:
+        print(f"Ошибка создания директории {dir_path}: {e}")
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -773,7 +739,8 @@ def retry_decorator(max_retries: int = 3, delay: float = 1.0, backoff: float = 2
             if last_exception:
                 raise last_exception
             return None
-        return wrapper    return decorator
+        return wrapper
+    return decorator
 
 def validate_inputs(*types: Union[type, tuple], **kwargs_types: Union[type, tuple]) -> Callable:
     """Декоратор для валидации входных данных"""
@@ -921,26 +888,6 @@ def deprecated_decorator(version: str = "next", message: str = "") -> Callable:
         return wrapper
     return decorator
 
-def async_retry_decorator(max_retries: int = 3, delay: float = 1.0) -> Callable:
-    """Декоратор для повторных попыток асинхронных функций"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    if attempt == max_retries - 1:
-                        raise
-                    await asyncio.sleep(delay * (2 ** attempt))
-            if last_exception:
-                raise last_exception
-            return None
-        return wrapper
-    return decorator
-
 def require_authentication(func: Callable) -> Callable:
     """Декоратор для проверки аутентификации"""
     @wraps(func)
@@ -1027,10 +974,13 @@ class Logger:
             datefmt=LOG_DATE_FORMAT
         )
         
-        fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
+        try:
+            fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+            fh.setLevel(logging.DEBUG)
+            fh.setFormatter(formatter)
+            self.logger.addHandler(fh)
+        except Exception as e:
+            print(f"Ошибка создания файлового логгера: {e}")
         
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
@@ -1563,10 +1513,6 @@ def load_dataframe(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:
             return pd.read_html(path, **kwargs)[0]
         elif ext == '.xml':
             return pd.read_xml(path, **kwargs)
-        elif ext == '.sqlite' or ext == '.db':
-            import sqlite3
-            conn = sqlite3.connect(path)
-            return pd.read_sql_query("SELECT * FROM data", conn)
         else:
             raise ValueError(f"Неподдерживаемый формат файла: {ext}")
     except Exception as e:
@@ -3727,9 +3673,9 @@ def main():
     st.markdown(f"""
     <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 10px; margin-bottom: 20px;">
         <h1 style="color: white;">🚗 {APP_NAME}</h1>
-        <p style="color: #e94560; font-size: 18px;">v{APP_VERSION} | 7500+ строк кода</p>
+        <p style="color: #e94560; font-size: 18px;">v{APP_VERSION} | 4500+ строк кода</p>
         <p style="color: #aaa;">Юнит-экономика маркетплейсов 2026 | Автозапчасти</p>
-        <p style="color: #888;">300+ категорий | AI-обновление тарифов | Полный расчет</p>
+        <p style="color: #888;">150+ категорий | AI-обновление тарифов | Полный расчет</p>
         <p style="color: #666; font-size: 14px;">✅ Учет габаритов и веса</p>
         <p style="color: #666; font-size: 14px;">✅ Сравнение 6+ маркетплейсов</p>
         <p style="color: #666; font-size: 14px;">✅ Оптимизация цены под целевую маржу</p>
