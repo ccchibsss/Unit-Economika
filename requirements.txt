@@ -10,6 +10,11 @@
 # 1. Python версии 3.10, 3.11 или 3.12
 # 2. Файл .python-version с содержимым "3.12"
 # 3. НЕ ИСПОЛЬЗУЙТЕ Python 3.14 - pyarrow НЕ РАБОТАЕТ!
+#
+# УСТАНОВКА:
+# pip install -r requirements.txt
+# или
+# uv pip install -r requirements.txt
 # ============================================================================
 
 # ----------------------------------------------------------------------------
@@ -122,16 +127,16 @@ pylint>=2.17.0,<3.0.0
 # ============================================================================
 
 # Для быстрой установки (только обязательные):
+# pip install streamlit pandas numpy openpyxl requests rich
+
+# Для установки всех зависимостей:
 # pip install -r requirements.txt
 
 # Для установки с ML поддержкой:
-# pip install -r requirements.txt scikit-learn joblib
+# pip install scikit-learn joblib
 
 # Для установки с AI поддержкой:
-# pip install -r requirements.txt openai gspread oauth2client
-
-# Для установки на Python 3.14 (БЕЗ pyarrow, polars, duckdb):
-# pip install streamlit pandas numpy openpyxl requests rich
+# pip install openai gspread oauth2client
 
 # Для установки через uv (рекомендуется):
 # uv pip install -r requirements.txt
