@@ -26,6 +26,112 @@
 # ============================================================================
 # БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ (300+ СТРОК)
 # ============================================================================
+import sys
+import subprocess
+import os
+import importlib
+
+# ============================================================
+# 🔧 ФОРСИРОВАННАЯ УСТАНОВКА ОТСУТСТВУЮЩИХ БИБЛИОТЕК
+# ============================================================
+
+def install_missing_libraries():
+    """Принудительная установка отсутствующих библиотек"""
+    
+    # Список библиотек для проверки и установки
+    libraries = {
+        'openpyxl': 'openpyxl',
+        'reportlab': 'reportlab',
+        'PIL': 'pillow'
+    }
+    
+    missing = []
+    
+    # Проверяем наличие библиотек
+    for import_name, package_name in libraries.items():
+        try:
+            if import_name == 'PIL':
+                import PIL
+            else:
+                importlib.import_module(import_name)
+            print(f"✅ {package_name} уже установлен")
+        except ImportError:
+            missing.append(package_name)
+            print(f"❌ {package_name} отсутствует")
+    
+    # Если есть отсутствующие - устанавливаем
+    if missing:
+        print(f"📦 Устанавливаем: {', '.join(missing)}")
+        
+        for package in missing:
+            # Попытка 1: обычная установка
+            try:
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", 
+                    package, "--no-cache-dir", "--upgrade"
+                ])
+                print(f"✅ {package} установлен (способ 1)")
+            except Exception as e1:
+                print(f"⚠️ Ошибка способа 1 для {package}: {e1}")
+                
+                # Попытка 2: с принудительной переустановкой
+                try:
+                    subprocess.check_call([
+                        sys.executable, "-m", "pip", "install",
+                        package, "--no-cache-dir", "--force-reinstall"
+                    ])
+                    print(f"✅ {package} установлен (способ 2)")
+                except Exception as e2:
+                    print(f"⚠️ Ошибка способа 2 для {package}: {e2}")
+                    
+                    # Попытка 3: установка без кэша с конкретной версией
+                    try:
+                        if package == 'openpyxl':
+                            version = '3.1.2'
+                        elif package == 'reportlab':
+                            version = '4.0.9'
+                        elif package == 'pillow':
+                            version = '10.1.0'
+                        else:
+                            version = ''
+                        
+                        cmd = [sys.executable, "-m", "pip", "install", 
+                               f"{package}=={version}", "--no-cache-dir"]
+                        subprocess.check_call(cmd)
+                        print(f"✅ {package}=={version} установлен (способ 3)")
+                    except Exception as e3:
+                        print(f"❌ ВСЕ СПОСОБЫ НЕ УДАЛИСЬ для {package}: {e3}")
+        
+        # Проверяем результат установки
+        print("🔍 Проверка установки...")
+        for import_name, package_name in libraries.items():
+            try:
+                if import_name == 'PIL':
+                    import PIL
+                else:
+                    importlib.import_module(import_name)
+                print(f"✅ {package_name} успешно установлен!")
+            except ImportError:
+                print(f"❌ {package_name} всё ещё не установлен!")
+                
+        # Перезапускаем приложение после установки
+        print("🔄 Перезапуск приложения...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+# Выполняем установку
+if not os.environ.get('LIBS_INSTALLED', False):
+    install_missing_libraries()
+    os.environ['LIBS_INSTALLED'] = 'true'
+
+# ============================================================
+# ТЕПЕРЬ МОЖНО ИМПОРТИРОВАТЬ ВСЕ БИБЛИОТЕКИ
+# ============================================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+# ... остальные импорты
 import streamlit as st
 import pandas as pd
 import numpy as np
