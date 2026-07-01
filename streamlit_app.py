@@ -30,99 +30,110 @@ import sys
 import subprocess
 import os
 import importlib
+import streamlit as st
 
 # ============================================================
-# 🔧 ФОРСИРОВАННАЯ УСТАНОВКА ОТСУТСТВУЮЩИХ БИБЛИОТЕК
+# 🔍 ДИАГНОСТИКА: ПОЧЕМУ БИБЛИОТЕКИ НЕ УСТАНАВЛИВАЮТСЯ?
 # ============================================================
 
-def install_missing_libraries():
-    """Принудительная установка отсутствующих библиотек"""
-    
-    # Список библиотек для проверки и установки
-    libraries = {
-        'openpyxl': 'openpyxl',
-        'reportlab': 'reportlab',
-        'PIL': 'pillow'
-    }
-    
-    missing = []
-    
-    # Проверяем наличие библиотек
-    for import_name, package_name in libraries.items():
-        try:
-            if import_name == 'PIL':
-                import PIL
-            else:
-                importlib.import_module(import_name)
-            print(f"✅ {package_name} уже установлен")
-        except ImportError:
-            missing.append(package_name)
-            print(f"❌ {package_name} отсутствует")
-    
-    # Если есть отсутствующие - устанавливаем
-    if missing:
-        print(f"📦 Устанавливаем: {', '.join(missing)}")
-        
-        for package in missing:
-            # Попытка 1: обычная установка
-            try:
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", 
-                    package, "--no-cache-dir", "--upgrade"
-                ])
-                print(f"✅ {package} установлен (способ 1)")
-            except Exception as e1:
-                print(f"⚠️ Ошибка способа 1 для {package}: {e1}")
-                
-                # Попытка 2: с принудительной переустановкой
-                try:
-                    subprocess.check_call([
-                        sys.executable, "-m", "pip", "install",
-                        package, "--no-cache-dir", "--force-reinstall"
-                    ])
-                    print(f"✅ {package} установлен (способ 2)")
-                except Exception as e2:
-                    print(f"⚠️ Ошибка способа 2 для {package}: {e2}")
-                    
-                    # Попытка 3: установка без кэша с конкретной версией
-                    try:
-                        if package == 'openpyxl':
-                            version = '3.1.2'
-                        elif package == 'reportlab':
-                            version = '4.0.9'
-                        elif package == 'pillow':
-                            version = '10.1.0'
-                        else:
-                            version = ''
-                        
-                        cmd = [sys.executable, "-m", "pip", "install", 
-                               f"{package}=={version}", "--no-cache-dir"]
-                        subprocess.check_call(cmd)
-                        print(f"✅ {package}=={version} установлен (способ 3)")
-                    except Exception as e3:
-                        print(f"❌ ВСЕ СПОСОБЫ НЕ УДАЛИСЬ для {package}: {e3}")
-        
-        # Проверяем результат установки
-        print("🔍 Проверка установки...")
-        for import_name, package_name in libraries.items():
-            try:
-                if import_name == 'PIL':
-                    import PIL
-                else:
-                    importlib.import_module(import_name)
-                print(f"✅ {package_name} успешно установлен!")
-            except ImportError:
-                print(f"❌ {package_name} всё ещё не установлен!")
-                
-        # Перезапускаем приложение после установки
-        print("🔄 Перезапуск приложения...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+st.set_page_config(layout="wide")
+st.title("🔍 Диагностика установки библиотек")
 
-# Выполняем установку
-if not os.environ.get('LIBS_INSTALLED', False):
-    install_missing_libraries()
-    os.environ['LIBS_INSTALLED'] = 'true'
+# 1. Проверяем окружение
+st.subheader("🐍 Информация об окружении")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.write(f"**Python версия:** {sys.version}")
+with col2:
+    st.write(f"**Путь к Python:** {sys.executable}")
+with col3:
+    st.write(f"**Текущая директория:** {os.getcwd()}")
 
+# 2. Проверяем установленные библиотеки
+st.subheader("📦 Проверка установленных библиотек")
+
+libraries = {
+    'openpyxl': 'openpyxl',
+    'reportlab': 'reportlab',
+    'PIL': 'pillow'
+}
+
+results = {}
+for import_name, package_name in libraries.items():
+    try:
+        if import_name == 'PIL':
+            import PIL
+            version = PIL.__version__ if hasattr(PIL, '__version__') else 'unknown'
+        else:
+            module = importlib.import_module(import_name)
+            version = module.__version__ if hasattr(module, '__version__') else 'unknown'
+        results[package_name] = {'status': '✅ Установлен', 'version': version}
+    except ImportError as e:
+        results[package_name] = {'status': '❌ НЕ установлен', 'error': str(e)}
+
+for package, info in results.items():
+    if '✅' in info['status']:
+        st.success(f"**{package}**: {info['status']} (версия: {info.get('version', 'unknown')})")
+    else:
+        st.error(f"**{package}**: {info['status']}")
+        st.code(f"Ошибка: {info.get('error', 'Unknown error')}")
+
+# 3. Пытаемся установить библиотеки через разные способы
+st.subheader("🔧 Попытка установки")
+
+# Способ 1: Через pip
+st.write("**Способ 1:** Установка через pip")
+for package in ['openpyxl', 'reportlab', 'pillow']:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", package, "--no-cache-dir", "--upgrade"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if result.returncode == 0:
+            st.success(f"✅ {package} установлен через pip")
+        else:
+            st.error(f"❌ Ошибка установки {package}: {result.stderr[:200]}")
+    except Exception as e:
+        st.error(f"❌ Исключение при установке {package}: {e}")
+
+# 4. Проверяем права доступа
+st.subheader("🔒 Проверка прав доступа")
+try:
+    test_file = '/tmp/test_write.txt'
+    with open(test_file, 'w') as f:
+        f.write('test')
+    os.remove(test_file)
+    st.success("✅ Права на запись есть")
+except Exception as e:
+    st.error(f"❌ Нет прав на запись: {e}")
+
+# 5. Проверяем pip
+st.subheader("📦 Проверка pip")
+try:
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "--version"],
+        capture_output=True,
+        text=True
+    )
+    st.code(result.stdout)
+except Exception as e:
+    st.error(f"❌ Ошибка pip: {e}")
+
+# 6. Проверяем установку через system
+st.subheader("🖥️ Проверка system pip")
+try:
+    result = subprocess.run(
+        ["pip", "--version"],
+        capture_output=True,
+        text=True
+    )
+    st.code(result.stdout)
+except Exception as e:
+    st.error(f"❌ Ошибка system pip: {e}")
+
+st.warning("⚠️ После диагностики, если библиотеки не установились, попробуйте решение ниже")
 # ============================================================
 # ТЕПЕРЬ МОЖНО ИМПОРТИРОВАТЬ ВСЕ БИБЛИОТЕКИ
 # ============================================================
