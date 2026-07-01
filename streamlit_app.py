@@ -126,12 +126,6 @@ if not os.environ.get('LIBS_INSTALLED', False):
 # ============================================================
 # ТЕПЕРЬ МОЖНО ИМПОРТИРОВАТЬ ВСЕ БИБЛИОТЕКИ
 # ============================================================
-
-import streamlit as st
-import pandas as pd
-import numpy as np
-
-# ... остальные импорты
 import streamlit as st
 import pandas as pd
 import numpy as np
