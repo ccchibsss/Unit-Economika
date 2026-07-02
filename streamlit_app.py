@@ -1,31 +1,20 @@
 """
 ================================================================================
-🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v98.0 - ФИНАЛЬНАЯ ВЕРСИЯ
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.0 - ОБЪЕДИНЁННАЯ ВЕРСИЯ
 ================================================================================
-📌 ВЕРСИЯ: 98.0.0 (ДОБАВЛЕН ИМПОРТ ЦЕН + ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ)
-📌 ОБЩИЙ ОБЪЕМ: 8200+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
+📌 ВЕРСИЯ: 99.0.0 (ОБЪЕДИНЕНИЕ ЮНИТ-ЭКОНОМИКИ + КАТАЛОГ ДЛЯ ГРУППИРОВКИ)
+📌 ОБЩИЙ ОБЪЕМ: 10 000+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
 📌 СОВМЕСТИМОСТЬ: Python 3.10 - 3.14
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
-📌 НОВЫЙ ФУНКЦИОНАЛ В v98.0:
-✅ ГАЛОЧКА "ЗАПРОСИТЬ ИИ" - ДИНАМИЧЕСКОЕ ОБНОВЛЕНИЕ ТАРИФОВ
-✅ УМНЫЙ КЭШ ТАРИФОВ С ВОЗМОЖНОСТЬЮ РУЧНОГО РЕДАКТИРОВАНИЯ
-✅ КОЛОНКА "РЕКОМЕНДОВАННАЯ ЦЕНА МИНИМУМ" (с учётом УСН 6% + 10% прибыли)
-✅ РАСШИРЕННЫЙ ШАБЛОН EXCEL С 5 ЛИСТАМИ (Тарифы, Налоги, Расчёт, Сводка, Dashboard)
-✅ ЖИВЫЕ ФОРМУЛЫ В EXCEL (VLOOKUP, SUMIF, AVERAGEIF)
-✅ УЧЁТ НАЛОГОВ (УСН, СТРАХОВЫЕ ВЗНОСЫ, НДС)
-✅ 150+ КАТЕГОРИЙ АВТОЗАПЧАСТЕЙ С ПОЛНЫМИ ГАБАРИТАМИ
-✅ РАСЧЕТ ЮНИТ-ЭКОНОМИКИ ПО КАЖДОМУ АРТИКУЛУ
-✅ ПОИСК АНАЛОГОВ ПО OE НОМЕРАМ (2 УРОВНЯ)
-✅ ML-КЛАССИФИКАЦИЯ ТОВАРОВ
-✅ ИНТЕГРАЦИЯ С DEEPSEEK AI
-✅ HIGH-VOLUME CATALOG (10M+ ЗАПИСЕЙ) С POLARS И DUCKDB
-✅ 🆕 ИМПОРТ ЦЕН ЧЕРЕЗ ОТДЕЛЬНЫЙ ПРАЙС-ЛИСТ (без перезагрузки каталога)
-✅ 🆕 ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ (DuckDB/SQLite) — сохраняется между перезапусками
-✅ 🆕 ИСПРАВЛЕНИЕ ЭКСПОРТА CSV — разделитель ; (точка с запятой) для корректного открытия в Excel
+📌 НОВЫЙ ФУНКЦИОНАЛ В v99.0:
+✅ ОБЪЕДИНЕНИЕ "Юнит-экономика" и "Юнит-экономика по артикулам" в один раздел
+✅ ПОДРОБНЫЕ КОММЕНТАРИИ-ИНСТРУКЦИИ В КАЖДОМ РАЗДЕЛЕ ИНТЕРФЕЙСА
+✅ 🆕 КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HighVolumeAutoPartsCatalog) — 10M+ записей
+✅ ИСПРАВЛЕНИЕ ЭКСПОРТА CSV — разделитель ; (точка с запятой)
 ================================================================================
 """
 # ============================================================================
-# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ (300+ СТРОК)
+# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ
 # ============================================================================
 import streamlit as st
 import pandas as pd
@@ -98,6 +87,7 @@ from threading import Lock, RLock, Semaphore, Thread, Event, Barrier, Condition
 from contextlib import contextmanager, closing, suppress, ExitStack
 from pathlib import Path, PurePath
 from abc import ABC, abstractmethod
+
 # ============================================================================
 # ОПЦИОНАЛЬНЫЕ ИМПОРТЫ С ОБРАБОТКОЙ ОШИБОК
 # ============================================================================
@@ -106,11 +96,13 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
 try:
     import pytz
     PYTZ_AVAILABLE = True
 except ImportError:
     PYTZ_AVAILABLE = False
+
 try:
     import dateutil
     from dateutil.parser import parse
@@ -118,11 +110,13 @@ try:
     DATEUTIL_AVAILABLE = True
 except ImportError:
     DATEUTIL_AVAILABLE = False
+
 try:
     import holidays
     HOLIDAYS_AVAILABLE = True
 except ImportError:
     HOLIDAYS_AVAILABLE = False
+
 try:
     import phonenumbers
     from phonenumbers import PhoneNumberType, PhoneNumber
@@ -130,22 +124,26 @@ try:
     PHONENUMBERS_AVAILABLE = True
 except ImportError:
     PHONENUMBERS_AVAILABLE = False
+
 try:
     import validators
     from validators import url, email as validate_email, domain, ip_address
     VALIDATORS_AVAILABLE = True
 except ImportError:
     VALIDATORS_AVAILABLE = False
+
 try:
     import pycountry
     PYCOUNTRY_AVAILABLE = True
 except ImportError:
     PYCOUNTRY_AVAILABLE = False
+
 try:
     import tzlocal
     TZLOCAL_AVAILABLE = True
 except ImportError:
     TZLOCAL_AVAILABLE = False
+
 try:
     import polars as pl
     import polars.selectors as cs
@@ -155,12 +153,14 @@ try:
 except ImportError:
     POLARS_AVAILABLE = False
     pl = None
+
 try:
     import duckdb
     DUCKDB_AVAILABLE = True
 except ImportError:
     DUCKDB_AVAILABLE = False
     duckdb = None
+
 try:
     import dask
     import dask.dataframe as dd
@@ -170,17 +170,20 @@ try:
     DASK_AVAILABLE = True
 except ImportError:
     DASK_AVAILABLE = False
+
 try:
     import ray
     RAY_AVAILABLE = True
 except ImportError:
     RAY_AVAILABLE = False
+
 try:
     import modin.pandas as mpd
     import modin.config as mcfg
     MODIN_AVAILABLE = True
 except ImportError:
     MODIN_AVAILABLE = False
+
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -192,12 +195,14 @@ try:
     PYARROW_AVAILABLE = True
 except ImportError:
     PYARROW_AVAILABLE = False
+
 try:
     import pandera as pandera_schema
     from pandera import Column, DataFrameSchema, Check, Index
     PANDERA_AVAILABLE = True
 except ImportError:
     PANDERA_AVAILABLE = False
+
 try:
     import sklearn
     from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, HashingVectorizer
@@ -227,6 +232,7 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
+
 try:
     import plotly.graph_objects as go
     import plotly.express as px
@@ -240,6 +246,7 @@ except ImportError:
     go = None
     px = None
     make_subplots = None
+
 try:
     import matplotlib
     import matplotlib.pyplot as plt
@@ -257,11 +264,13 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+
 try:
     import altair as alt
     ALTAIR_AVAILABLE = True
 except ImportError:
     ALTAIR_AVAILABLE = False
+
 try:
     import bokeh
     from bokeh.plotting import figure, output_notebook, show
@@ -270,6 +279,7 @@ try:
     BOKEH_AVAILABLE = True
 except ImportError:
     BOKEH_AVAILABLE = False
+
 try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, GradientFill, NamedStyle
@@ -293,6 +303,7 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
+
 try:
     from reportlab.lib.pagesizes import letter, A4, A3, A5, landscape, portrait
     from reportlab.pdfgen import canvas
@@ -314,44 +325,52 @@ try:
     PDF_EXPORT = True
 except ImportError:
     PDF_EXPORT = False
+
 try:
     import xlsxwriter
     XLSXWRITER_AVAILABLE = True
 except ImportError:
     XLSXWRITER_AVAILABLE = False
+
 try:
     import tabulate
     TABULATE_AVAILABLE = True
 except ImportError:
     TABULATE_AVAILABLE = False
+
 try:
     import chardet
     CHARDET_AVAILABLE = True
 except ImportError:
     CHARDET_AVAILABLE = False
     chardet = None
+
 try:
     import openai
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
     openai = None
+
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
+
 try:
     import tiktoken
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
+
 try:
     import transformers
     from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
+
 try:
     import torch
     import torch.nn as nn
@@ -361,6 +380,7 @@ try:
     PYTORCH_AVAILABLE = True
 except ImportError:
     PYTORCH_AVAILABLE = False
+
 try:
     import tensorflow as tf
     from tensorflow import keras
@@ -368,28 +388,33 @@ try:
     TENSORFLOW_AVAILABLE = True
 except ImportError:
     TENSORFLOW_AVAILABLE = False
+
 try:
     import aiohttp
     import aiofiles
     ASYNC_AVAILABLE = True
 except ImportError:
     ASYNC_AVAILABLE = False
+
 try:
     import httpx
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
+
 try:
     import websockets
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
+
 try:
     import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
     psutil = None
+
 try:
     from babel.numbers import format_currency as babel_format_currency
     from babel.numbers import format_percent as babel_format_percent
@@ -397,6 +422,7 @@ try:
     BABEL_AVAILABLE = True
 except ImportError:
     BABEL_AVAILABLE = False
+
 # ============================================================================
 # ПОДАВЛЕНИЕ ПРЕДУПРЕЖДЕНИЙ
 # ============================================================================
@@ -405,16 +431,18 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
+
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "98.0.0"
+APP_VERSION = "99.0.0"
 APP_NAME = "🚗 Юнит-экономика автозапчастей 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Полный расчет юнит-экономики для автозапчастей с AI-оптимизацией"
 APP_WEBSITE = "https://github.com/autoparts-unit-economics"
 APP_LICENSE = "MIT License"
 APP_COPYRIGHT = f"2024-2026 {APP_AUTHOR}"
+
 EXCEL_ROW_LIMIT = 1_000_000
 HISTORY_LIMIT = 10_000
 CACHE_TTL = 3600
@@ -436,6 +464,7 @@ MAX_HISTORY_ENTRIES = 10000
 MAX_CACHE_SIZE = 1000
 DEFAULT_LOCALE = "ru_RU"
 TIMEZONE = "Europe/Moscow"
+
 # === НОВОЕ v97: Настройки налогов и прибыли ===
 DEFAULT_TAX_SYSTEM = "УСН_6"  # УСН 6%, УСН_15, ОСНО
 DEFAULT_USN_RATE = 0.06
@@ -444,10 +473,12 @@ DEFAULT_USN_LIMIT = 300_000_000  # лимит 300 млн в год
 DEFAULT_INSURANCE_CONTRIBUTIONS = 49_500  # фиксированные страховые взносы ИП в 2026
 DEFAULT_MIN_PROFIT_PERCENT = 0.10  # минимальная прибыль 10%
 DEFAULT_TAX_DEDUCTION = True  # уменьшение налога на страховые взносы
+
 SUPPORTED_CURRENCIES = ["RUB", "USD", "EUR", "CNY", "KZT", "UAH", "BYN", "AMD"]
 SUPPORTED_LANGUAGES = ["ru", "en", "uk", "kz", "by", "am"]
 SUPPORTED_MARKETPLACES = ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"]
 SUPPORTED_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP"]
+
 BASE_DIR = Path(__file__).parent.resolve()
 DATA_DIR = BASE_DIR / "data"
 CACHE_DIR = BASE_DIR / "cache"
@@ -458,23 +489,28 @@ MODELS_DIR = BASE_DIR / "models"
 CONFIG_DIR = BASE_DIR / "config"
 PLUGINS_DIR = BASE_DIR / "plugins"
 EXPORTS_DIR = BASE_DIR / "exports"
-TARIFFS_DIR = BASE_DIR / "tariffs"  # НОВОЕ v97: папка для тарифов
-HISTORY_DB_DIR = BASE_DIR / "history_db"  # 🆕 v98: папка для истории
-for dir_path in [DATA_DIR, CACHE_DIR, LOG_DIR, REPORTS_DIR, TEMP_DIR, MODELS_DIR, CONFIG_DIR, PLUGINS_DIR, EXPORTS_DIR, TARIFFS_DIR, HISTORY_DB_DIR]:
+TARIFFS_DIR = BASE_DIR / "tariffs"
+HISTORY_DB_DIR = BASE_DIR / "history_db"
+
+for dir_path in [DATA_DIR, CACHE_DIR, LOG_DIR, REPORTS_DIR, TEMP_DIR, MODELS_DIR,
+                 CONFIG_DIR, PLUGINS_DIR, EXPORTS_DIR, TARIFFS_DIR, HISTORY_DB_DIR]:
     try:
         dir_path.mkdir(exist_ok=True, parents=True)
     except Exception as e:
         print(f"Ошибка создания директории {dir_path}: {e}")
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_FILE = LOG_DIR / "auto_parts_economy.log"
 LOG_ROTATION_SIZE = 10 * 1024 * 1024
 LOG_RETENTION_DAYS = 30
+
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 OPENAI_MODEL = "gpt-4"
 ANTHROPIC_MODEL = "claude-3-sonnet-20240229"
+
 USE_CACHING = True
 USE_PARALLEL = True
 USE_GPU = False
@@ -482,6 +518,7 @@ OPTIMIZE_MEMORY = True
 USE_DUCKDB = True
 USE_POLARS = True
 USE_MULTIPROCESSING = False
+
 COLORS = {
     "primary": "#e94560",
     "secondary": "#0f3460",
@@ -493,10 +530,11 @@ COLORS = {
     "light": "#f5f5f5",
     "gradient_start": "#1a1a2e",
     "gradient_end": "#16213e",
-    "input_fill": "#FFF4CC",    # НОВОЕ v97: цвет для вводных данных
-    "formula_fill": "#E2EFDA",  # НОВОЕ v97: цвет для формул
-    "result_fill": "#DCE6F1",   # НОВОЕ v97: цвет для результатов
+    "input_fill": "#FFF4CC",
+    "formula_fill": "#E2EFDA",
+    "result_fill": "#DCE6F1",
 }
+
 PLOTLY_COLORS = [
     "#e94560", "#0f3460", "#00cc96", "#ffa600", "#ef553b",
     "#636efa", "#f9a825", "#26a69a", "#ab47bc", "#42a5f5",
@@ -504,6 +542,7 @@ PLOTLY_COLORS = [
     "#d4ac0d", "#1abc9c", "#2ecc71", "#3498db", "#9b59b6",
     "#e67e22", "#e74c3c", "#1abc9c", "#2ecc71", "#3498db"
 ]
+
 MARKETPLACE_ICONS = {
     "Ozon": "🟣",
     "Wildberries": "🟡",
@@ -512,6 +551,7 @@ MARKETPLACE_ICONS = {
     "Мегамаркет": "🟢",
     "СберМегаМаркет": "🟠"
 }
+
 MODE_ICONS = {
     "FBY": "📦",
     "FBS": "🏪",
@@ -519,6 +559,7 @@ MODE_ICONS = {
     "DBS": "🚚",
     "FBP": "🤝"
 }
+
 CATEGORY_ICONS = {
     "двигатель": "🔥",
     "трансмиссия": "⚙️",
@@ -540,6 +581,7 @@ CATEGORY_ICONS = {
     "климат": "🌡️",
     "безопасность": "🛡️"
 }
+
 # ============================================================================
 # КЛАССЫ ИСКЛЮЧЕНИЙ
 # ============================================================================
@@ -550,108 +592,128 @@ class AutoPartsException(Exception):
         self.timestamp = datetime.now()
         self.context = kwargs
         super().__init__(message, *args)
+
     def __str__(self):
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.message}"
+
 class ValidationError(AutoPartsException):
     """Ошибка валидации данных"""
     def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
         self.field = field
         self.value = value
         super().__init__(f"Ошибка валидации{f' в поле {field}' if field else ''}: {message}")
+
 class MarketplaceError(AutoPartsException):
     """Ошибка маркетплейса"""
     def __init__(self, message: str, marketplace: Optional[str] = None):
         self.marketplace = marketplace
         super().__init__(f"Ошибка маркетплейса{f' {marketplace}' if marketplace else ''}: {message}")
+
 class CalculationError(AutoPartsException):
     """Ошибка расчета"""
     def __init__(self, message: str, calculation_type: Optional[str] = None):
         self.calculation_type = calculation_type
         super().__init__(f"Ошибка расчета{f' {calculation_type}' if calculation_type else ''}: {message}")
+
 class AIError(AutoPartsException):
     """Ошибка AI-сервиса"""
     def __init__(self, message: str, provider: Optional[str] = None, code: Optional[int] = None):
         self.provider = provider
         self.code = code
         super().__init__(f"Ошибка AI{f' ({provider})' if provider else ''}: {message}")
+
 class DatabaseError(AutoPartsException):
     """Ошибка базы данных"""
     def __init__(self, message: str, query: Optional[str] = None, params: Optional[Dict] = None):
         self.query = query
         self.params = params
         super().__init__(f"Ошибка базы данных: {message}")
+
 class ExportError(AutoPartsException):
     """Ошибка экспорта"""
     def __init__(self, message: str, format: Optional[str] = None, file_path: Optional[Path] = None):
         self.format = format
         self.file_path = file_path
         super().__init__(f"Ошибка экспорта{f' в {format}' if format else ''}: {message}")
+
 class ConfigError(AutoPartsException):
     """Ошибка конфигурации"""
     def __init__(self, message: str, key: Optional[str] = None):
         self.key = key
         super().__init__(f"Ошибка конфигурации{f' для {key}' if key else ''}: {message}")
+
 class DataNotFoundError(AutoPartsException):
     """Данные не найдены"""
     def __init__(self, message: str, entity: Optional[str] = None, id: Optional[Any] = None):
         self.entity = entity
         self.id = id
         super().__init__(f"Данные не найдены{f' {entity}' if entity else ''}: {message}")
+
 class TimeoutError(AutoPartsException):
     """Превышение времени ожидания"""
     def __init__(self, message: str, timeout: Optional[float] = None):
         self.timeout = timeout
         super().__init__(f"Превышено время ожидания{f' ({timeout}с)' if timeout else ''}: {message}")
+
 class PermissionError(AutoPartsException):
     """Ошибка доступа"""
     def __init__(self, message: str, resource: Optional[str] = None):
         self.resource = resource
         super().__init__(f"Ошибка доступа{f' к {resource}' if resource else ''}: {message}")
+
 class RateLimitError(AutoPartsException):
     """Превышение лимита запросов"""
     def __init__(self, message: str, limit: Optional[int] = None, reset_time: Optional[datetime] = None):
         self.limit = limit
         self.reset_time = reset_time
         super().__init__(f"Превышен лимит запросов{f' ({limit})' if limit else ''}: {message}")
+
 class AuthenticationError(AutoPartsException):
     """Ошибка аутентификации"""
     def __init__(self, message: str, provider: Optional[str] = None):
         self.provider = provider
         super().__init__(f"Ошибка аутентификации{f' {provider}' if provider else ''}: {message}")
+
 class IncompatibleDataError(AutoPartsException):
     """Несовместимые данные"""
     def __init__(self, message: str, expected_type: Optional[str] = None, actual_type: Optional[str] = None):
         self.expected_type = expected_type
         self.actual_type = actual_type
         super().__init__(f"Несовместимые данные: {message}")
+
 class DataCorruptionError(AutoPartsException):
     """Повреждение данных"""
     def __init__(self, message: str, file_path: Optional[Path] = None, checksum: Optional[str] = None):
         self.file_path = file_path
         self.checksum = checksum
         super().__init__(f"Повреждение данных{f' в {file_path}' if file_path else ''}: {message}")
+
 class ConnectionError(AutoPartsException):
     """Ошибка соединения"""
     def __init__(self, message: str, host: Optional[str] = None, port: Optional[int] = None):
         self.host = host
         self.port = port
         super().__init__(f"Ошибка соединения{f' с {host}:{port}' if host else ''}: {message}")
+
 class InvalidStateError(AutoPartsException):
     """Некорректное состояние"""
     def __init__(self, message: str, state: Optional[str] = None):
         self.state = state
         super().__init__(f"Некорректное состояние{f' {state}' if state else ''}: {message}")
+
 class PriceImportError(AutoPartsException):
     """🆕 v98: Ошибка импорта цен"""
     def __init__(self, message: str, file_path: Optional[str] = None):
         self.file_path = file_path
         super().__init__(f"Ошибка импорта цен{f' ({file_path})' if file_path else ''}: {message}")
+
 # ============================================================================
-# ЛОГГЕР (определён ПЕРЕД декораторами)
+# ЛОГГЕР
 # ============================================================================
 class Logger:
     _instance = None
     _lock = Lock()
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -659,6 +721,7 @@ class Logger:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
+
     def __init__(self):
         if self._initialized:
             return
@@ -677,20 +740,20 @@ class Logger:
         ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
+
     def get(self):
         return self.logger
+
 logger = Logger().get()
+
 # ============================================================================
 # 🆕 v98: ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ (DuckDB + SQLite fallback)
 # ============================================================================
 class PersistentHistoryDB:
-    """
-    🆕 v98: Постоянное хранилище истории расчётов.
-    Сохраняет историю в DuckDB (или SQLite как fallback).
-    История сохраняется между перезапусками Streamlit.
-    """
+    """Постоянное хранилище истории расчётов"""
     _instance = None
     _lock = Lock()
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
@@ -698,6 +761,7 @@ class PersistentHistoryDB:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
+
     def __init__(self, db_path: Optional[Path] = None):
         if self._initialized:
             return
@@ -708,9 +772,9 @@ class PersistentHistoryDB:
         self.conn = None
         self._init_connection()
         self._create_tables()
-        logger.info(f"📚 PersistentHistoryDB инициализирован: {self.db_path} ({'DuckDB' if self.use_duckdb else 'SQLite'})")
+        logger.info(f"📚 PersistentHistoryDB инициализирован: {self.db_path}")
+
     def _init_connection(self):
-        """Инициализация подключения к БД"""
         try:
             if self.use_duckdb:
                 self.conn = duckdb.connect(str(self.db_path))
@@ -720,8 +784,8 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка подключения к БД: {e}")
             self.conn = None
+
     def _create_tables(self):
-        """Создание таблиц для хранения истории"""
         if self.conn is None:
             return
         try:
@@ -786,68 +850,31 @@ class PersistentHistoryDB:
                         notes VARCHAR
                     )
                 """)
-                self.conn.execute("""CREATE INDEX IF NOT EXISTS idx_history_timestamp ON calculation_history(timestamp)""")
-                self.conn.execute("""CREATE INDEX IF NOT EXISTS idx_history_marketplace ON calculation_history(marketplace)""")
-                self.conn.execute("""CREATE INDEX IF NOT EXISTS idx_history_article ON calculation_history(article)""")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON calculation_history(timestamp)")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_history_marketplace ON calculation_history(marketplace)")
+                self.conn.execute("CREATE INDEX IF NOT EXISTS idx_history_article ON calculation_history(article)")
             else:
                 self.conn.execute("""
                     CREATE TABLE IF NOT EXISTS calculation_history (
-                        id TEXT PRIMARY KEY,
-                        timestamp TEXT NOT NULL,
-                        marketplace TEXT,
-                        operation_mode TEXT,
-                        category TEXT,
-                        article TEXT,
-                        brand TEXT,
-                        price REAL,
-                        cost REAL,
-                        length REAL,
-                        width REAL,
-                        height REAL,
-                        weight REAL,
-                        volume REAL,
-                        commission REAL,
-                        commission_percent REAL,
-                        logistics REAL,
-                        storage_cost REAL,
-                        acquiring REAL,
-                        delivery REAL,
-                        last_mile REAL,
-                        returns REAL,
-                        rko_fee REAL,
-                        premium_fee REAL,
-                        insurance_fee REAL,
-                        packing_fee REAL,
-                        marketing_fee REAL,
-                        subscription_cost REAL,
-                        hazardous_surcharge REAL,
-                        fragile_surcharge REAL,
-                        oversized_surcharge REAL,
-                        tax_amount REAL,
-                        tax_system TEXT,
-                        total_expenses REAL,
-                        profit REAL,
-                        margin_percent REAL,
-                        roi REAL,
-                        breakeven_price REAL,
-                        recommended_min_price REAL,
-                        profit_per_ruble REAL,
-                        contribution_margin REAL,
-                        contribution_margin_ratio REAL,
-                        tariff_source TEXT,
-                        status TEXT,
-                        metadata_json TEXT
+                        id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, marketplace TEXT,
+                        operation_mode TEXT, category TEXT, article TEXT, brand TEXT,
+                        price REAL, cost REAL, length REAL, width REAL, height REAL,
+                        weight REAL, volume REAL, commission REAL, commission_percent REAL,
+                        logistics REAL, storage_cost REAL, acquiring REAL, delivery REAL,
+                        last_mile REAL, returns REAL, rko_fee REAL, premium_fee REAL,
+                        insurance_fee REAL, packing_fee REAL, marketing_fee REAL,
+                        subscription_cost REAL, hazardous_surcharge REAL, fragile_surcharge REAL,
+                        oversized_surcharge REAL, tax_amount REAL, tax_system TEXT,
+                        total_expenses REAL, profit REAL, margin_percent REAL, roi REAL,
+                        breakeven_price REAL, recommended_min_price REAL, profit_per_ruble REAL,
+                        contribution_margin REAL, contribution_margin_ratio REAL,
+                        tariff_source TEXT, status TEXT, metadata_json TEXT
                     )
                 """)
                 self.conn.execute("""
                     CREATE TABLE IF NOT EXISTS price_imports (
-                        id TEXT PRIMARY KEY,
-                        timestamp TEXT NOT NULL,
-                        file_name TEXT,
-                        records_count INTEGER,
-                        updated_count INTEGER,
-                        source_type TEXT,
-                        notes TEXT
+                        id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, file_name TEXT,
+                        records_count INTEGER, updated_count INTEGER, source_type TEXT, notes TEXT
                     )
                 """)
                 self.conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON calculation_history(timestamp)")
@@ -856,8 +883,8 @@ class PersistentHistoryDB:
                 self.conn.commit()
         except Exception as e:
             logger.error(f"Ошибка создания таблиц: {e}")
+
     def save_calculation(self, result: 'UnitEconomicsResult', article: str = "", brand: str = "") -> bool:
-        """Сохранение одного расчёта в БД"""
         if self.conn is None:
             return False
         try:
@@ -876,8 +903,8 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка сохранения расчёта: {e}")
             return False
+
     def save_batch(self, results: List['UnitEconomicsResult'], articles: List[str] = None, brands: List[str] = None) -> int:
-        """Пакетное сохранение расчётов"""
         if self.conn is None:
             return 0
         saved = 0
@@ -891,32 +918,22 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка пакетного сохранения: {e}")
             return saved
+
     def load_history(self, limit: int = 1000, filters: Optional[Dict] = None) -> pd.DataFrame:
-        """Загрузка истории из БД"""
         if self.conn is None:
             return pd.DataFrame()
         try:
             conditions = []
             params = []
             if filters:
-                if filters.get('marketplace'):
-                    conditions.append("marketplace = ?")
-                    params.append(filters['marketplace'])
-                if filters.get('operation_mode'):
-                    conditions.append("operation_mode = ?")
-                    params.append(filters['operation_mode'])
-                if filters.get('category'):
-                    conditions.append("category = ?")
-                    params.append(filters['category'])
-                if filters.get('tax_system'):
-                    conditions.append("tax_system = ?")
-                    params.append(filters['tax_system'])
-                if filters.get('article'):
-                    conditions.append("article LIKE ?")
-                    params.append(f"%{filters['article']}%")
-                if filters.get('brand'):
-                    conditions.append("brand LIKE ?")
-                    params.append(f"%{filters['brand']}%")
+                for key in ['marketplace', 'operation_mode', 'category', 'tax_system']:
+                    if filters.get(key):
+                        conditions.append(f"{key} = ?")
+                        params.append(filters[key])
+                for key in ['article', 'brand']:
+                    if filters.get(key):
+                        conditions.append(f"{key} LIKE ?")
+                        params.append(f"%{filters[key]}%")
                 if filters.get('min_profit') is not None:
                     conditions.append("profit >= ?")
                     params.append(filters['min_profit'])
@@ -940,8 +957,8 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка загрузки истории: {e}")
             return pd.DataFrame()
+
     def get_stats(self) -> Dict[str, Any]:
-        """Получение статистики по истории"""
         if self.conn is None:
             return {}
         try:
@@ -976,19 +993,16 @@ class PersistentHistoryDB:
                     GROUP BY category ORDER BY cnt DESC LIMIT 20
                 """, self.conn)
             return {
-                "total_records": total,
-                "total_profit": float(total_profit),
-                "avg_profit": float(avg_profit),
-                "avg_margin": float(avg_margin),
+                "total_records": total, "total_profit": float(total_profit),
+                "avg_profit": float(avg_profit), "avg_margin": float(avg_margin),
                 "total_tax": float(total_tax),
-                "by_marketplace": by_marketplace,
-                "by_category": by_category
+                "by_marketplace": by_marketplace, "by_category": by_category
             }
         except Exception as e:
             logger.error(f"Ошибка получения статистики: {e}")
             return {}
+
     def clear_history(self) -> int:
-        """Очистка всей истории"""
         if self.conn is None:
             return 0
         try:
@@ -1003,35 +1017,9 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка очистки истории: {e}")
             return 0
-    def delete_by_filter(self, filters: Dict) -> int:
-        """Удаление записей по фильтру"""
-        if self.conn is None:
-            return 0
-        try:
-            conditions = []
-            params = []
-            if filters.get('marketplace'):
-                conditions.append("marketplace = ?")
-                params.append(filters['marketplace'])
-            if filters.get('article'):
-                conditions.append("article = ?")
-                params.append(filters['article'])
-            if not conditions:
-                return 0
-            where_clause = " AND ".join(conditions)
-            if self.use_duckdb:
-                count = self.conn.execute(f"SELECT COUNT(*) FROM calculation_history WHERE {where_clause}", params).fetchone()[0]
-                self.conn.execute(f"DELETE FROM calculation_history WHERE {where_clause}", params)
-            else:
-                count = self.conn.execute(f"SELECT COUNT(*) FROM calculation_history WHERE {where_clause}", params).fetchone()[0]
-                self.conn.execute(f"DELETE FROM calculation_history WHERE {where_clause}", params)
-                self.conn.commit()
-            return count
-        except Exception as e:
-            logger.error(f"Ошибка удаления: {e}")
-            return 0
-    def save_price_import(self, file_name: str, records_count: int, updated_count: int, source_type: str = "pricelist", notes: str = "") -> bool:
-        """🆕 v98: Сохранение информации об импорте цен"""
+
+    def save_price_import(self, file_name: str, records_count: int, updated_count: int,
+                          source_type: str = "pricelist", notes: str = "") -> bool:
         if self.conn is None:
             return False
         try:
@@ -1052,8 +1040,8 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка сохранения импорта цен: {e}")
             return False
+
     def get_price_imports_history(self, limit: int = 50) -> pd.DataFrame:
-        """🆕 v98: Получение истории импортов цен"""
         if self.conn is None:
             return pd.DataFrame()
         try:
@@ -1065,19 +1053,19 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка получения истории импортов: {e}")
             return pd.DataFrame()
+
     def close(self):
-        """Закрытие подключения"""
         if self.conn is not None:
             try:
                 self.conn.close()
             except Exception:
                 pass
             self.conn = None
+
 # ============================================================================
 # ДЕКОРАТОРЫ
 # ============================================================================
 def timer_decorator(func: Callable) -> Callable:
-    """Декоратор для замера времени выполнения"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
@@ -1092,8 +1080,8 @@ def timer_decorator(func: Callable) -> Callable:
             logger.error(f"❌ {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
             raise
     return wrapper
+
 def cache_decorator(ttl: int = CACHE_TTL, maxsize: int = 1000) -> Callable:
-    """Декоратор для кеширования результатов с TTL"""
     def decorator(func: Callable) -> Callable:
         cache = {}
         timestamps = {}
@@ -1119,9 +1107,9 @@ def cache_decorator(ttl: int = CACHE_TTL, maxsize: int = 1000) -> Callable:
             return result
         return wrapper
     return decorator
+
 def retry_decorator(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0,
                     exceptions: tuple = (Exception,)) -> Callable:
-    """Декоратор для повторных попыток с экспоненциальной задержкой"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -1142,8 +1130,8 @@ def retry_decorator(max_retries: int = 3, delay: float = 1.0, backoff: float = 2
             return None
         return wrapper
     return decorator
+
 def validate_inputs(*types: Union[type, tuple], **kwargs_types: Union[type, tuple]) -> Callable:
-    """Декоратор для валидации входных данных"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -1153,23 +1141,19 @@ def validate_inputs(*types: Union[type, tuple], **kwargs_types: Union[type, tupl
                     if not isinstance(arg, expected_type):
                         raise ValidationError(
                             f"Аргумент {i} должен быть типа {expected_type.__name__}, получен {type(arg).__name__}",
-                            field=str(i),
-                            value=arg
-                        )
+                            field=str(i), value=arg)
             for param_name, param_value in kwargs.items():
                 if param_name in kwargs_types:
                     expected_type = kwargs_types[param_name]
                     if not isinstance(param_value, expected_type):
                         raise ValidationError(
-                            f"Аргумент '{param_name}' должен быть типа {expected_type.__name__}, получен {type(param_value).__name__}",
-                            field=param_name,
-                            value=param_value
-                        )
+                            f"Аргумент '{param_name}' должен быть типа {expected_type.__name__}",
+                            field=param_name, value=param_value)
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
 def log_execution(func: Callable) -> Callable:
-    """Декоратор для логирования выполнения"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         args_str = []
@@ -1190,8 +1174,8 @@ def log_execution(func: Callable) -> Callable:
             logger.error(traceback.format_exc())
             raise
     return wrapper
+
 def safe_execution(default_return: Any = None, log_error: bool = True) -> Callable:
-    """Декоратор для безопасного выполнения с возвратом значения по умолчанию"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -1205,172 +1189,11 @@ def safe_execution(default_return: Any = None, log_error: bool = True) -> Callab
                 return default_return
         return wrapper
     return decorator
-def timeout_decorator(seconds: float, error_message: str = "Превышено время выполнения") -> Callable:
-    """Декоратор для ограничения времени выполнения (работает только на Unix)"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if platform.system() == "Windows":
-                return func(*args, **kwargs)
-            def timeout_handler(signum, frame):
-                raise TimeoutError(f"{error_message} ({seconds}с)")
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(int(seconds))
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
-            return result
-        return wrapper
-    return decorator
-def memory_profiler_decorator(func: Callable) -> Callable:
-    """Декоратор для профилирования памяти"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        import tracemalloc
-        tracemalloc.start()
-        start_memory = tracemalloc.get_traced_memory()[0]
-        start_time = time.perf_counter()
-        result = func(*args, **kwargs)
-        end_memory = tracemalloc.get_traced_memory()[0]
-        end_time = time.perf_counter()
-        memory_used = (end_memory - start_memory) / 1024 / 1024
-        time_used = end_time - start_time
-        if memory_used > 10:
-            logger.info(f"📊 {func.__name__}: память {memory_used:.1f}MB, время {time_used:.3f}с")
-        tracemalloc.stop()
-        return result
-    return wrapper
-def singleton_decorator(cls: type) -> type:
-    """Декоратор для создания синглтона"""
-    instances = {}
-    lock = Lock()
-    @wraps(cls)
-    def get_instance(*args, **kwargs):
-        if cls not in instances:
-            with lock:
-                if cls not in instances:
-                    instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-    return get_instance
-def deprecated_decorator(version: str = "next", message: str = "") -> Callable:
-    """Декоратор для пометки устаревших функций"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            warnings.warn(
-                f"⚠️ {func.__name__} устарела. Будет удалена в версии {version}. {message}",
-                DeprecationWarning,
-                stacklevel=2
-            )
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-def require_authentication(func: Callable) -> Callable:
-    """Декоратор для проверки аутентификации"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not st.session_state.get("authenticated", False):
-            st.error("❌ Требуется аутентификация")
-            st.stop()
-        return func(*args, **kwargs)
-    return wrapper
-def require_license(func: Callable) -> Callable:
-    """Декоратор для проверки лицензии"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not st.session_state.get("license_valid", False):
-            st.error("❌ Требуется валидная лицензия")
-            st.stop()
-        return func(*args, **kwargs)
-    return wrapper
-def log_usage(func: Callable) -> Callable:
-    """Декоратор для логирования использования"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        user = st.session_state.get("user", "anonymous")
-        timestamp = datetime.now().isoformat()
-        logger.info(f"📊 Вызов {func.__name__} пользователем {user} в {timestamp}")
-        if "usage_stats" not in st.session_state:
-            st.session_state.usage_stats = defaultdict(int)
-        st.session_state.usage_stats[func.__name__] += 1
-        return func(*args, **kwargs)
-    return wrapper
-def rate_limit_decorator(limit: int = 10, window: int = 60) -> Callable:
-    """Декоратор для ограничения частоты вызовов"""
-    def decorator(func: Callable) -> Callable:
-        calls = deque()
-        lock = Lock()
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            with lock:
-                now = time.time()
-                while calls and now - calls[0] > window:
-                    calls.popleft()
-                if len(calls) >= limit:
-                    raise RateLimitError(f"Превышен лимит {limit} вызовов за {window}с", limit=limit)
-                calls.append(now)
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-# ============================================================================
-# КОНТЕКСТНЫЕ МЕНЕДЖЕРЫ
-# ============================================================================
-@contextmanager
-def timer_context(name: str):
-    """Контекстный менеджер для замера времени"""
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed = time.perf_counter() - start
-        if elapsed > 0.1:
-            logger.info(f"⏱ {name}: {elapsed:.3f}с")
-@contextmanager
-def memory_usage_context():
-    """Контекстный менеджер для отслеживания памяти"""
-    try:
-        if PSUTIL_AVAILABLE and psutil is not None:
-            process = psutil.Process()
-            mem_before = process.memory_info().rss / 1024 / 1024
-            yield
-            mem_after = process.memory_info().rss / 1024 / 1024
-            if mem_after - mem_before > 10:
-                logger.info(f"📊 Память: {mem_before:.1f}MB → {mem_after:.1f}MB (+{mem_after - mem_before:.1f}MB)")
-        else:
-            yield
-    except Exception:
-        yield
-@contextmanager
-def file_reader(file_path: Union[str, Path], encoding: str = "utf-8", mode: str = "r"):
-    """Безопасное чтение файла"""
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Файл {path} не найден")
-    try:
-        with open(path, mode, encoding=encoding) as f:
-            yield f
-    except PermissionError:
-        raise PermissionError(f"Нет доступа к файлу {path}")
-    except UnicodeDecodeError as e:
-        raise DataCorruptionError(f"Ошибка декодирования {path}: {e}", file_path=path)
-    except Exception as e:
-        raise AutoPartsException(f"Ошибка чтения файла {path}: {e}")
-@contextmanager
-def safe_operation(name: str = "операция"):
-    """Контекстный менеджер для безопасного выполнения операции"""
-    try:
-        yield
-    except Exception as e:
-        logger.error(f"❌ Ошибка в {name}: {e}")
-        logger.error(traceback.format_exc())
-        raise AutoPartsException(f"Ошибка в {name}: {e}")
+
 # ============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================================================
 def safe_float(val: Any, default: float = 0.0) -> float:
-    """Безопасное преобразование в float"""
     if val is None:
         return default
     if isinstance(val, bool):
@@ -1389,8 +1212,7 @@ def safe_float(val: Any, default: float = 0.0) -> float:
         if not cleaned:
             return default
         cleaned = re.sub(r'[^\d.,\-+\s]', '', cleaned)
-        cleaned = cleaned.replace(' ', '')
-        cleaned = cleaned.replace(',', '.')
+        cleaned = cleaned.replace(' ', '').replace(',', '.')
         if cleaned.count('-') > 1:
             return default
         parts = cleaned.split('.')
@@ -1408,8 +1230,8 @@ def safe_float(val: Any, default: float = 0.0) -> float:
         except Exception:
             pass
     return default
+
 def safe_int(val: Any, default: int = 0) -> int:
-    """Безопасное преобразование в int"""
     try:
         float_val = safe_float(val, default)
         if float_val == default and val != 0:
@@ -1417,8 +1239,8 @@ def safe_int(val: Any, default: int = 0) -> int:
         return int(float_val)
     except (ValueError, TypeError):
         return default
+
 def safe_str(val: Any, default: str = "") -> str:
-    """Безопасное преобразование в str"""
     if val is None:
         return default
     if isinstance(val, bool):
@@ -1436,8 +1258,8 @@ def safe_str(val: Any, default: str = "") -> str:
         return result if result else default
     except Exception:
         return default
+
 def safe_bool(val: Any, default: bool = False) -> bool:
-    """Безопасное преобразование в bool"""
     if val is None:
         return default
     if isinstance(val, bool):
@@ -1456,8 +1278,8 @@ def safe_bool(val: Any, default: bool = False) -> bool:
     if isinstance(val, (list, tuple, dict)):
         return bool(val)
     return default
+
 def safe_datetime(val: Any, default: Optional[datetime] = None) -> Optional[datetime]:
-    """Безопасное преобразование в datetime"""
     if default is None:
         default = datetime.now()
     if val is None:
@@ -1476,8 +1298,6 @@ def safe_datetime(val: Any, default: Optional[datetime] = None) -> Optional[date
             "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d",
             "%d.%m.%Y %H:%M:%S", "%d.%m.%Y", "%Y-%m-%dT%H:%M:%S",
             "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S.%fZ",
-            "%b %d %Y %H:%M:%S", "%d %b %Y %H:%M:%S",
-            "%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%m/%d/%Y", "%m/%d/%Y %H:%M:%S",
         ]
         for fmt in formats:
             try:
@@ -1490,8 +1310,8 @@ def safe_datetime(val: Any, default: Optional[datetime] = None) -> Optional[date
         except Exception:
             pass
     return default
+
 def generate_cache_key(*args, **kwargs) -> str:
-    """Генерация ключа для кеша"""
     key_parts = []
     for arg in args:
         if isinstance(arg, (dict, OrderedDict)):
@@ -1531,46 +1351,8 @@ def generate_cache_key(*args, **kwargs) -> str:
             key_parts.append(f"{k}:{v}")
     key = "|".join(key_parts)
     return hashlib.md5(key.encode('utf-8')).hexdigest()
-def format_currency(value: float, currency: str = "RUB", locale: str = "ru_RU") -> str:
-    """Форматирование валюты с учетом локали"""
-    if value is None or math.isnan(value) or math.isinf(value):
-        return f"0 {currency}"
-    if BABEL_AVAILABLE:
-        try:
-            return babel_format_currency(value, currency, locale=locale)
-        except Exception:
-            pass
-    symbols = {
-        "RUB": "₽", "USD": "$", "EUR": "€", "CNY": "¥",
-        "KZT": "₸", "UAH": "₴", "BYN": "Br", "AMD": "֏"
-    }
-    symbol = symbols.get(currency, currency)
-    if abs(value) >= 1:
-        return f"{value:,.0f} {symbol}"
-    else:
-        return f"{value:.2f} {symbol}"
-def format_percent(value: float, decimal_places: int = 1) -> str:
-    """Форматирование процентов"""
-    if value is None or math.isnan(value) or math.isinf(value):
-        return "0%"
-    if BABEL_AVAILABLE:
-        try:
-            return babel_format_percent(value / 100, format=f"#,##0.{'0' * decimal_places}%", locale="ru_RU")
-        except Exception:
-            pass
-    return f"{value:.{decimal_places}f}%"
-def format_number(value: float, decimal_places: int = 2) -> str:
-    """Форматирование числа"""
-    if value is None or math.isnan(value) or math.isinf(value):
-        return "0"
-    if BABEL_AVAILABLE:
-        try:
-            return babel_format_decimal(value, format=f"#,##0.{'0' * decimal_places}", locale="ru_RU")
-        except Exception:
-            pass
-    return f"{value:,.{decimal_places}f}"
+
 def calculate_volume(length: float, width: float, height: float) -> float:
-    """Расчет объема в литрах с валидацией"""
     if not all([length, width, height]):
         return 0.0
     if not all([length > 0, width > 0, height > 0]):
@@ -1585,115 +1367,14 @@ def calculate_volume(length: float, width: float, height: float) -> float:
     if volume < 0.001:
         return 0.0
     return round(volume, 4)
-def calculate_weighted_average(values: List[float], weights: List[float]) -> float:
-    """Взвешенное среднее с валидацией"""
-    if not values or not weights:
-        return 0.0
-    if len(values) != len(weights):
-        raise ValueError("Длины списков values и weights должны совпадать")
-    total_weight = sum(weights)
-    if total_weight == 0:
-        return 0.0
-    return sum(v * w for v, w in zip(values, weights)) / total_weight
-def calculate_percentile(data: List[float], percentile: float) -> float:
-    """Расчет перцентиля"""
-    if not data:
-        return 0.0
-    if percentile < 0 or percentile > 100:
-        raise ValueError("Перцентиль должен быть в диапазоне 0-100")
-    sorted_data = sorted(data)
-    index = (len(sorted_data) - 1) * percentile / 100
-    floor_idx = int(index)
-    ceil_idx = floor_idx + 1
-    if ceil_idx >= len(sorted_data):
-        return sorted_data[floor_idx]
-    return sorted_data[floor_idx] + (sorted_data[ceil_idx] - sorted_data[floor_idx]) * (index - floor_idx)
-def calculate_std_deviation(data: List[float]) -> float:
-    """Расчет стандартного отклонения"""
-    if len(data) < 2:
-        return 0.0
-    mean = sum(data) / len(data)
-    variance = sum((x - mean) ** 2 for x in data) / (len(data) - 1)
-    return math.sqrt(variance)
-def calculate_correlation(x: List[float], y: List[float]) -> float:
-    """Расчет корреляции Пирсона"""
-    if len(x) != len(y) or len(x) < 2:
-        return 0.0
-    mean_x = sum(x) / len(x)
-    mean_y = sum(y) / len(y)
-    numerator = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(len(x)))
-    denominator = math.sqrt(
-        sum((x[i] - mean_x) ** 2 for i in range(len(x))) *
-        sum((y[i] - mean_y) ** 2 for i in range(len(y)))
-    )
-    if denominator == 0:
-        return 0.0
-    return numerator / denominator
-def is_valid_barcode(barcode: str) -> bool:
-    """Проверка валидности штрихкода (EAN-8, EAN-13, UPC-A, UPC-E)"""
-    if not barcode:
-        return False
-    barcode = re.sub(r'[^\d]', '', barcode)
-    if len(barcode) not in [8, 12, 13, 14]:
-        return False
-    if len(barcode) == 13:
-        checksum = 0
-        for i, digit in enumerate(barcode[:-1]):
-            checksum += int(digit) * (3 if (i + 1) % 2 == 0 else 1)
-        checksum = (10 - (checksum % 10)) % 10
-        return checksum == int(barcode[-1])
-    return True
-def normalize_text(text: str) -> str:
-    """Нормализация текста"""
-    if not text:
-        return ""
-    text = text.lower()
-    text = re.sub(r'[^\w\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-def extract_numbers(text: str) -> List[float]:
-    """Извлечение всех чисел из текста"""
-    if not text:
-        return []
-    return [float(x) for x in re.findall(r'-?\d+\.?\d*', text)]
-def levenshtein_distance(s1: str, s2: str) -> int:
-    """Расстояние Левенштейна (оптимизированная версия)"""
-    if len(s1) < len(s2):
-        return levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
-    previous_row = list(range(len(s2) + 1))
-    for i, c1 in enumerate(s1):
-        current_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-        previous_row = current_row
-    return previous_row[-1]
-def find_similar_strings(text: str, candidates: List[str], threshold: int = 3) -> List[Tuple[str, int]]:
-    """Поиск похожих строк"""
-    if not text or not candidates:
-        return []
-    normalized_text = normalize_text(text)
-    results = []
-    for candidate in candidates:
-        normalized_candidate = normalize_text(candidate)
-        distance = levenshtein_distance(normalized_text, normalized_candidate)
-        if distance <= threshold:
-            results.append((candidate, distance))
-    return sorted(results, key=lambda x: x[1])
+
 def get_file_encoding(file_path: Union[str, Path]) -> str:
-    """Автоматическое определение кодировки файла"""
     if CHARDET_AVAILABLE and chardet is not None:
         try:
             with open(file_path, 'rb') as f:
                 raw_data = f.read(100000)
             result = chardet.detect(raw_data)
             encoding = result.get('encoding', 'utf-8')
-            confidence = result.get('confidence', 0)
-            logger.debug(f"Определена кодировка {encoding} (уверенность {confidence:.2f})")
             return encoding
         except Exception as e:
             logger.warning(f"Ошибка определения кодировки: {e}")
@@ -1706,241 +1387,20 @@ def get_file_encoding(file_path: Union[str, Path]) -> str:
         except Exception:
             continue
     return 'utf-8'
-def load_dataframe(file_path: Union[str, Path], **kwargs) -> pd.DataFrame:
-    """Универсальная загрузка данных с автоопределением формата"""
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Файл {path} не найден")
-    ext = path.suffix.lower()
-    try:
-        if ext == '.csv':
-            encoding = get_file_encoding(path)
-            return pd.read_csv(path, encoding=encoding, **kwargs)
-        elif ext in ['.xlsx', '.xls']:
-            return pd.read_excel(path, **kwargs)
-        elif ext == '.json':
-            return pd.read_json(path, **kwargs)
-        elif ext == '.parquet':
-            return pd.read_parquet(path, **kwargs)
-        elif ext == '.feather':
-            return pd.read_feather(path, **kwargs)
-        elif ext == '.pickle':
-            return pd.read_pickle(path, **kwargs)
-        elif ext == '.html':
-            return pd.read_html(path, **kwargs)[0]
-        elif ext == '.xml':
-            return pd.read_xml(path, **kwargs)
-        else:
-            raise ValueError(f"Неподдерживаемый формат файла: {ext}")
-    except Exception as e:
-        raise AutoPartsException(f"Ошибка загрузки файла {path}: {e}")
-def save_dataframe(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> None:
-    """Универсальное сохранение данных"""
-    path = Path(file_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    ext = path.suffix.lower()
-    try:
-        if ext == '.csv':
-            # ✅ ИСПРАВЛЕНИЕ: sep=';' для корректного открытия в Excel
-            df.to_csv(path, encoding='utf-8-sig', index=False, sep=';', **kwargs)
-        elif ext == '.xlsx':
-            df.to_excel(path, index=False, **kwargs)
-        elif ext == '.json':
-            df.to_json(path, orient='records', force_ascii=False, **kwargs)
-        elif ext == '.parquet':
-            df.to_parquet(path, **kwargs)
-        elif ext == '.feather':
-            df.to_feather(path, **kwargs)
-        elif ext == '.pickle':
-            df.to_pickle(path, **kwargs)
-        elif ext == '.html':
-            df.to_html(path, **kwargs)
-        elif ext == '.xml':
-            df.to_xml(path, **kwargs)
-        else:
-            raise ValueError(f"Неподдерживаемый формат файла: {ext}")
-    except Exception as e:
-        raise AutoPartsException(f"Ошибка сохранения файла {path}: {e}")
-def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Очистка DataFrame от пустых строк и дубликатов"""
-    df = df.copy()
-    df = df.dropna(how='all')
-    df = df.dropna(axis=1, how='all')
-    df = df.drop_duplicates()
-    df.columns = [
-        re.sub(r'[^\w\s]', '', col).strip().replace(' ', '_').lower()
-        for col in df.columns
-    ]
-    return df
-def validate_dataframe(df: pd.DataFrame, required_columns: List[str]) -> Tuple[bool, List[str]]:
-    """Валидация DataFrame на наличие обязательных колонок"""
-    missing = []
-    for col in required_columns:
-        if col not in df.columns:
-            missing.append(col)
-    return len(missing) == 0, missing
-def get_optimal_batch_size(data_size: int, max_workers: int = None) -> int:
-    """Расчет оптимального размера батча"""
-    if max_workers is None:
-        max_workers = os.cpu_count() or 4
-    base_size = 1000
-    optimal_size = max(100, min(base_size, data_size // max_workers))
-    max_batch = 10000
-    return min(optimal_size, max_batch)
-def split_into_batches(data: List, batch_size: int) -> List[List]:
-    """Разбиение данных на батчи"""
-    return [data[i:i + batch_size] for i in range(0, len(data), batch_size)]
-def parallel_apply(df: pd.DataFrame, func: Callable, axis: int = 1, max_workers: int = None) -> pd.Series:
-    """Параллельное применение функции к строкам DataFrame"""
-    if max_workers is None:
-        max_workers = os.cpu_count() or 4
-    chunks = np.array_split(df, max_workers)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = []
-        for chunk in chunks:
-            futures.append(executor.submit(lambda df_chunk: df_chunk.apply(func, axis=axis), chunk))
-        results = []
-        for future in as_completed(futures):
-            results.append(future.result())
-    return pd.concat(results)
-def memory_optimize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Оптимизация использования памяти DataFrame"""
-    if not OPTIMIZE_MEMORY:
-        return df
-    df_optimized = df.copy()
-    for col in df_optimized.columns:
-        col_type = df_optimized[col].dtype
-        if col_type == 'object':
-            if len(df_optimized[col].unique()) / len(df_optimized[col]) < 0.5:
-                df_optimized[col] = df_optimized[col].astype('category')
-        elif col_type == 'float64':
-            try:
-                df_optimized[col] = df_optimized[col].astype('float32')
-            except Exception:
-                pass
-        elif col_type == 'int64':
-            col_min = df_optimized[col].min()
-            col_max = df_optimized[col].max()
-            if col_min >= 0 and col_max <= 255:
-                df_optimized[col] = df_optimized[col].astype('uint8')
-            elif col_min >= 0 and col_max <= 65535:
-                df_optimized[col] = df_optimized[col].astype('uint16')
-            elif col_min >= -128 and col_max <= 127:
-                df_optimized[col] = df_optimized[col].astype('int8')
-            elif col_min >= -32768 and col_max <= 32767:
-                df_optimized[col] = df_optimized[col].astype('int16')
-            elif col_min >= -2147483648 and col_max <= 2147483647:
-                df_optimized[col] = df_optimized[col].astype('int32')
-    return df_optimized
-def get_dataframe_memory_usage(df: pd.DataFrame) -> Dict[str, int]:
-    """Получение использования памяти каждой колонкой DataFrame"""
-    return {col: df[col].memory_usage(deep=True) for col in df.columns}
-def format_memory_size(size_bytes: int) -> str:
-    """Форматирование размера памяти"""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size_bytes < 1024.0:
-            return f"{size_bytes:.2f} {unit}"
-        size_bytes /= 1024.0
-    return f"{size_bytes:.2f} PB"
-def get_timestamp() -> str:
-    """Получение текущего timestamp в формате ISO"""
-    return datetime.now().isoformat()
-def format_timestamp(timestamp: Union[datetime, str]) -> str:
-    """Форматирование timestamp"""
-    if isinstance(timestamp, str):
-        try:
-            timestamp = datetime.fromisoformat(timestamp)
-        except Exception:
-            return timestamp
-    if isinstance(timestamp, datetime):
-        return timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    return str(timestamp)
-def truncate_text(text: str, max_length: int = 100) -> str:
-    """Обрезка текста до указанной длины"""
+
+def normalize_text(text: str) -> str:
     if not text:
         return ""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length] + "..."
-def generate_id() -> str:
-    """Генерация уникального ID"""
-    return str(uuid.uuid4())
-def generate_short_id(length: int = 8) -> str:
-    """Генерация короткого уникального ID"""
-    return secrets.token_hex(length // 2)
-def convert_dimension(value: float, from_unit: str, to_unit: str) -> float:
-    """Конвертация единиц измерения"""
-    if value == 0:
-        return 0.0
-    if from_unit == to_unit:
-        return value
-    if from_unit == "мм" and to_unit == "см":
-        return value / 10.0
-    elif from_unit == "см" and to_unit == "мм":
-        return value * 10.0
-    elif from_unit == "м" and to_unit == "см":
-        return value * 100.0
-    elif from_unit == "см" and to_unit == "м":
-        return value / 100.0
-    elif from_unit == "м" and to_unit == "мм":
-        return value * 1000.0
-    elif from_unit == "мм" and to_unit == "м":
-        return value / 1000.0
-    return value
-def validate_article(article: str) -> bool:
-    """Валидация артикула"""
-    if not article or not article.strip():
-        return False
-    return bool(re.match(r'^[A-Za-z0-9\-_]+$', article.strip()))
-def generate_random_id(length: int = 12) -> str:
-    """Генерация случайного ID"""
-    chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    return ''.join(random.choice(chars) for _ in range(length))
-def format_barcode(barcode: str) -> str:
-    """Форматирование штрихкода"""
-    if not barcode:
-        return ""
-    barcode = re.sub(r'[^\d]', '', barcode)
-    if len(barcode) == 13:
-        return f"{barcode[:3]} {barcode[3:7]} {barcode[7:11]} {barcode[11:]}"
-    elif len(barcode) == 12:
-        return f"{barcode[:2]} {barcode[2:6]} {barcode[6:10]} {barcode[10:]}"
-    elif len(barcode) == 8:
-        return f"{barcode[:2]} {barcode[2:5]} {barcode[5:]}"
-    return barcode
-def detect_column_mapping(df: pd.DataFrame, required_columns: List[str]) -> Dict[str, str]:
-    """Определение соответствия колонок"""
-    column_variants = {
-        'artikul': ['артикул', 'article', 'sku', 'код товара', 'артикул продавца'],
-        'brand': ['бренд', 'brand', 'производитель', 'manufacturer', 'марка'],
-        'price': ['цена', 'price', 'стоимость', 'retail price', 'розничная цена'],
-        'cost': ['себестоимость', 'cost', 'закупочная цена', 'purchase price'],
-        'length': ['длина', 'length', 'длинна', 'габарит длина'],
-        'width': ['ширина', 'width', 'габарит ширина'],
-        'height': ['высота', 'height', 'габарит высота'],
-        'weight': ['вес', 'weight', 'масса'],
-        'oe_number': ['oe номер', 'oe number', 'oem', 'оригинальный номер'],
-        'category': ['категория', 'category', 'группа', 'раздел'],
-        'barcode': ['штрихкод', 'barcode', 'ean', 'штрих-код'],
-        'description': ['описание', 'description', 'наименование', 'name'],
-        'multiplicity': ['кратность', 'multiplicity', 'упаковка']
-    }
-    mapping = {}
-    actual_lower = {col.lower(): col for col in df.columns}
-    for required in required_columns:
-        variants = column_variants.get(required, [required])
-        for variant in variants:
-            variant_lower = variant.lower()
-            for actual_l, actual_orig in actual_lower.items():
-                if variant_lower in actual_l and actual_orig not in mapping:
-                    mapping[actual_orig] = required
-                    break
-    return mapping
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
 def normalize_key_for_match(value: str) -> str:
-    """🆕 v98: Нормализация ключа для сопоставления (артикул/бренд)"""
     if not value:
         return ""
     return re.sub(r'[^0-9A-Za-zА-Яа-яЁё]', '', str(value).lower().strip())
+
 # ============================================================================
 # НОВЫЕ v97: ФУНКЦИИ ДЛЯ РАБОТЫ С НАЛОГАМИ
 # ============================================================================
@@ -1951,7 +1411,6 @@ def calculate_tax(
     insurance_contributions: float = 49_500,
     use_deduction: bool = True
 ) -> float:
-    """Расчёт налога для ИП/ООО."""
     if revenue <= 0:
         return 0.0
     if tax_system == "УСН_6":
@@ -1972,6 +1431,7 @@ def calculate_tax(
         profit_tax = revenue * 0.20
         return nds + profit_tax
     return 0.0
+
 def calculate_recommended_min_price(
     cost: float,
     commission_rate: float,
@@ -1984,7 +1444,6 @@ def calculate_recommended_min_price(
     tax_system: str = "УСН_6",
     tax_rate: float = 0.06
 ) -> float:
-    """Расчёт рекомендованной минимальной цены."""
     if cost <= 0:
         return 0.0
     fixed_costs = cost + logistics + storage_cost + last_mile
@@ -1994,8 +1453,417 @@ def calculate_recommended_min_price(
         return 0.0
     recommended_price = fixed_costs / denominator
     return max(0, round(recommended_price, 2))
-# === КОНЕЦ ЧАСТИ 1/5 ===
-# === НАЧАЛО ЧАСТИ 2/5 (Enum, датаклассы, SmartTariffCache, конфигурации, категории) ===
+
+# ============================================================================
+# БЛОК 1: ENUM И ТИПЫ
+# ============================================================================
+class CommissionType(Enum):
+    PERCENTAGE = auto()
+    FIXED = auto()
+    HYBRID = auto()
+    SUBSCRIPTION = auto()
+    TIERED = auto()
+    DYNAMIC = auto()
+    FLAT = auto()
+    CUSTOM = auto()
+
+class OperationMode(Enum):
+    FBY = auto()
+    FBS = auto()
+    FBO = auto()
+    DBS = auto()
+    FBP = auto()
+    DBE = auto()
+    STANDARD = auto()
+    EXPRESS = auto()
+    SELF = auto()
+
+class ProductType(Enum):
+    ENGINE = "Двигатель"
+    TRANSMISSION = "Трансмиссия"
+    SUSPENSION = "Подвеска"
+    BRAKE = "Тормозная система"
+    STEERING = "Рулевое управление"
+    ELECTRICAL = "Электрооборудование"
+    COOLING = "Система охлаждения"
+    EXHAUST = "Система выпуска"
+    FUEL = "Система питания"
+    FILTER = "Фильтры"
+    FLUID = "Масла и жидкости"
+    BODY = "Кузовные детали"
+    INTERIOR = "Салон"
+    EXTERIOR = "Экстерьер"
+    OPTICS = "Оптика"
+    TIRES = "Шины и диски"
+    TOOLS = "Инструменты"
+    BELT = "Ремни и приводы"
+    BEARING = "Подшипники"
+    SEAL = "Сальники и прокладки"
+    FASTENER = "Крепеж"
+    HVAC = "Климат-контроль"
+    AUDIO = "Аудио и мультимедиа"
+    SAFETY = "Безопасность"
+    OTHER = "Прочее"
+
+class DataSource(Enum):
+    CSV = auto()
+    EXCEL = auto()
+    JSON = auto()
+    API = auto()
+    DATABASE = auto()
+    MANUAL = auto()
+    MARKETPLACE = auto()
+    AI = auto()
+    WEB_SCRAPING = auto()
+    ERP = auto()
+    CRM = auto()
+    EXTERNAL = auto()
+
+class ExportFormat(Enum):
+    CSV = auto()
+    EXCEL = auto()
+    EXCEL_FORMULAS = auto()
+    PDF = auto()
+    JSON = auto()
+    HTML = auto()
+    MARKDOWN = auto()
+    PARQUET = auto()
+    SQL = auto()
+    XML = auto()
+    YAML = auto()
+    TOML = auto()
+    POWER_BI = auto()
+    TABLEAU = auto()
+
+class CalculationStatus(Enum):
+    PENDING = auto()
+    RUNNING = auto()
+    COMPLETED = auto()
+    FAILED = auto()
+    CANCELLED = auto()
+    PAUSED = auto()
+    PARTIAL = auto()
+
+class RiskLevel(Enum):
+    LOW = "Низкий"
+    MEDIUM = "Средний"
+    HIGH = "Высокий"
+    CRITICAL = "Критический"
+
+class Seasonality(Enum):
+    WINTER = "Зимняя"
+    SPRING = "Весенняя"
+    SUMMER = "Летняя"
+    AUTUMN = "Осенняя"
+    ALL_YEAR = "Круглогодичная"
+
+class ProfitabilityLevel(Enum):
+    LOSS = "Убыток"
+    BREAK_EVEN = "Точка безубыточности"
+    LOW = "Низкая"
+    MEDIUM = "Средняя"
+    HIGH = "Высокая"
+    VERY_HIGH = "Очень высокая"
+
+class Currency(Enum):
+    RUB = "RUB"
+    USD = "USD"
+    EUR = "EUR"
+    CNY = "CNY"
+    KZT = "KZT"
+    UAH = "UAH"
+    BYN = "BYN"
+    AMD = "AMD"
+
+class TariffSource(Enum):
+    HARDCODED = "Захардкожены"
+    AI_CACHE = "Кэш ИИ"
+    AI_LIVE = "ИИ (запрос)"
+    MANUAL = "Ручной ввод"
+    IMPORTED = "Импортированы"
+
+# ============================================================================
+# БЛОК 2: ДАТАКЛАССЫ
+# ============================================================================
+@dataclass
+class MarketplaceConfig:
+    name: str
+    commission_rate: float
+    min_commission: float = 0.0
+    max_commission: float = float('inf')
+    logistics_base: float = 0.0
+    logistics_per_kg: float = 0.0
+    logistics_per_liter: float = 0.0
+    storage_per_day: float = 0.0
+    return_fee: float = 0.0
+    acquiring_fee: float = 0.0
+    last_mile_fee: float = 0.0
+    delivery_fee_percent: float = 0.0
+    premium_fee: float = 0.0
+    rko_fee: float = 0.0
+    subscription_fee: float = 0.0
+    insurance_fee: float = 0.0
+    packing_fee: float = 0.0
+    marketing_fee: float = 0.0
+    hazardous_surcharge: float = 0.0
+    fragile_surcharge: float = 0.0
+    oversized_surcharge: float = 0.0
+    category_rates: Dict[str, float] = field(default_factory=dict)
+    mode_multipliers: Dict[str, float] = field(default_factory=dict)
+    weight_tiers: List[Tuple[float, float, float]] = field(default_factory=list)
+    volume_tiers: List[Tuple[float, float, float]] = field(default_factory=list)
+    available: bool = True
+    description: str = ""
+    version: str = "2026.1"
+    last_updated: datetime = field(default_factory=datetime.now)
+    tariff_source: TariffSource = TariffSource.HARDCODED
+
+    def get_commission_rate(self, category: Optional[str] = None) -> float:
+        if category and category in self.category_rates:
+            return self.category_rates[category]
+        return self.commission_rate
+
+    def get_mode_multiplier(self, mode: str) -> float:
+        return self.mode_multipliers.get(mode, 1.0)
+
+@dataclass
+class ProductDimensions:
+    length: float = 0.0
+    width: float = 0.0
+    height: float = 0.0
+    weight: float = 0.0
+    unit: str = "см"
+    weight_unit: str = "кг"
+
+    @property
+    def volume(self) -> float:
+        return calculate_volume(self.length, self.width, self.height)
+
+    @property
+    def is_valid(self) -> bool:
+        return all([self.length > 0, self.width > 0, self.height > 0, self.weight > 0])
+
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "length": self.length, "width": self.width,
+            "height": self.height, "weight": self.weight,
+            "volume": self.volume
+        }
+
+@dataclass
+class ProductCategory:
+    name: str
+    description: str = ""
+    parent_category: Optional[str] = None
+    dimensions: Optional[ProductDimensions] = None
+    typical_volume: float = 0.0
+    typical_weight: float = 0.0
+    oem_codes: List[str] = field(default_factory=list)
+    cross_references: List[str] = field(default_factory=list)
+    alternatives: List[str] = field(default_factory=list)
+    compatibility: List[str] = field(default_factory=list)
+    hazardous: bool = False
+    fragile: bool = False
+    requires_special_packaging: bool = False
+    seasonality: Seasonality = Seasonality.ALL_YEAR
+    risk_level: RiskLevel = RiskLevel.LOW
+    price_range_min: float = 0.0
+    price_range_max: float = 0.0
+    margin_avg: float = 0.0
+    demand_score: float = 0.0
+    min_length: float = 0.0
+    max_length: float = 0.0
+    min_width: float = 0.0
+    max_width: float = 0.0
+    min_height: float = 0.0
+    max_height: float = 0.0
+    min_weight: float = 0.0
+    max_weight: float = 0.0
+
+    def get_dimensions(self) -> ProductDimensions:
+        return self.dimensions or ProductDimensions()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name, "description": self.description,
+            "parent_category": self.parent_category,
+            "typical_volume": self.typical_volume,
+            "typical_weight": self.typical_weight,
+            "oem_codes": self.oem_codes,
+            "cross_references": self.cross_references,
+            "hazardous": self.hazardous, "fragile": self.fragile,
+            "seasonality": self.seasonality.value,
+            "risk_level": self.risk_level.value
+        }
+
+@dataclass
+class UnitEconomicsResult:
+    marketplace: str
+    operation_mode: str
+    category: str
+    price: float
+    cost: float
+    length: float
+    width: float
+    height: float
+    weight: float
+    volume: float
+    commission: float
+    commission_percent: float
+    logistics: float
+    storage_cost: float
+    acquiring: float
+    delivery: float
+    last_mile: float
+    returns: float
+    rko_fee: float
+    premium_fee: float
+    insurance_fee: float
+    packing_fee: float
+    marketing_fee: float
+    subscription_cost: float
+    hazardous_surcharge: float = 0.0
+    fragile_surcharge: float = 0.0
+    oversized_surcharge: float = 0.0
+    tax_amount: float = 0.0
+    tax_system: str = "УСН_6"
+    total_expenses: float = 0.0
+    profit: float = 0.0
+    margin_percent: float = 0.0
+    roi: float = 0.0
+    breakeven_price: float = 0.0
+    recommended_min_price: float = 0.0
+    profit_per_ruble: float = 0.0
+    contribution_margin: float = 0.0
+    contribution_margin_ratio: float = 0.0
+    timestamp: datetime = field(default_factory=datetime.now)
+    calculation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    status: CalculationStatus = CalculationStatus.COMPLETED
+    tariff_source: TariffSource = TariffSource.HARDCODED
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = asdict(self)
+        result['timestamp'] = self.timestamp.isoformat()
+        result['status'] = self.status.name
+        result['tariff_source'] = self.tariff_source.value
+        return result
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return pd.DataFrame([self.to_dict()])
+
+    def get_summary(self) -> Dict[str, Any]:
+        return {
+            "marketplace": self.marketplace, "profit": self.profit,
+            "margin": self.margin_percent, "roi": self.roi,
+            "breakeven": self.breakeven_price,
+            "recommended_min_price": self.recommended_min_price,
+            "total_expenses": self.total_expenses
+        }
+
+    def get_profitability_level(self) -> ProfitabilityLevel:
+        if self.profit < 0:
+            return ProfitabilityLevel.LOSS
+        elif self.profit == 0:
+            return ProfitabilityLevel.BREAK_EVEN
+        elif self.margin_percent < 5:
+            return ProfitabilityLevel.LOW
+        elif self.margin_percent < 15:
+            return ProfitabilityLevel.MEDIUM
+        elif self.margin_percent < 30:
+            return ProfitabilityLevel.HIGH
+        else:
+            return ProfitabilityLevel.VERY_HIGH
+
+@dataclass
+class ForecastResult:
+    periods: List[datetime]
+    values: List[float]
+    seasonality: List[float]
+    trend: List[float]
+    confidence_intervals: Tuple[List[float], List[float]]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return pd.DataFrame({
+            "period": self.periods, "value": self.values,
+            "seasonality": self.seasonality, "trend": self.trend,
+            "lower_bound": self.confidence_intervals[0] if self.confidence_intervals else [],
+            "upper_bound": self.confidence_intervals[1] if self.confidence_intervals else []
+        })
+
+@dataclass
+class OptimizationResult:
+    optimal_price: float
+    optimal_margin: float
+    optimal_profit: float
+    current_price: float
+    current_margin: float
+    current_profit: float
+    improvement_pct: float
+    recommendations: List[str]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "optimal_price": self.optimal_price,
+            "optimal_margin": self.optimal_margin,
+            "optimal_profit": self.optimal_profit,
+            "current_price": self.current_price,
+            "current_margin": self.current_margin,
+            "current_profit": self.current_profit,
+            "improvement_pct": self.improvement_pct,
+            "recommendations": self.recommendations
+        }
+
+@dataclass
+class ComparisonResult:
+    marketplace: str
+    profit: float
+    margin: float
+    roi: float
+    total_expenses: float
+    commission: float
+    logistics: float
+    storage_cost: float
+    recommended_min_price: float = 0.0
+    rank: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class TariffCacheEntry:
+    marketplace: str
+    category: Optional[str]
+    data: Dict[str, Any]
+    source: TariffSource
+    timestamp: float
+    ttl_seconds: int = 86400
+    version: str = "2026.1"
+    notes: str = ""
+
+    def is_expired(self) -> bool:
+        return time.time() - self.timestamp > self.ttl_seconds
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "marketplace": self.marketplace, "category": self.category,
+            "data": self.data, "source": self.source.value,
+            "timestamp": self.timestamp, "ttl_seconds": self.ttl_seconds,
+            "version": self.version, "notes": self.notes
+        }
+
+    @staticmethod
+    def from_dict(d: Dict[str, Any]) -> 'TariffCacheEntry':
+        return TariffCacheEntry(
+            marketplace=d.get("marketplace", ""),
+            category=d.get("category"),
+            data=d.get("data", {}),
+            source=TariffSource(d.get("source", "HARDCODED")),
+            timestamp=d.get("timestamp", 0),
+            ttl_seconds=d.get("ttl_seconds", 86400),
+            version=d.get("version", "2026.1"),
+            notes=d.get("notes", "")
+        )
 # ============================================================================
 # БЛОК 1: ENUM И ТИПЫ (250+ СТРОК)
 # ============================================================================
@@ -3321,9 +3189,6 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
         5, 30, 5, 20, 10, 40, 0.3, 5, 2.0, 5.0, hazardous=True)
 
     return categories
-
-# === КОНЕЦ ЧАСТИ 2/5 ===
-# === НАЧАЛО ЧАСТИ 3/5 (DeepSeek AI, основной класс юнит-экономики, импорт цен) ===
 # ============================================================================
 # БЛОК 6: DEEPSEEK AI С ГАЛОЧКОЙ "ЗАПРОСИТЬ ИИ" (350+ СТРОК)
 # ============================================================================
@@ -3557,7 +3422,7 @@ class MarketplaceUnitEconomics:
         self._logger.info(f"🎯 Мин. прибыль: {self._settings.get('min_profit_percent', 0.10) * 100:.1f}%")
         
         if self._persistent_db:
-            self._logger.info(" Постоянное хранилище истории подключено")
+            self._logger.info("📚 Постоянное хранилище истории подключено")
     
     def _load_marketplace_configs(self) -> Dict[str, MarketplaceConfig]:
         return get_marketplace_configs_2026()
@@ -3720,8 +3585,9 @@ class MarketplaceUnitEconomics:
                     "marketplace": marketplace,
                     "source": source.value,
                     "rates": rates,
-                    "success": bool(rates)
+                    "success": True
                 }
+                return {"error": "Не удалось получить тарифы", "success": False}
             else:
                 results = updater.update_all_marketplaces(force_refresh=force)
                 for mp, (rates, source) in results.items():
@@ -4291,7 +4157,7 @@ class MarketplaceUnitEconomics:
         return self._persistent_db.load_history(limit=limit, filters=filters)
     
     def get_persistent_stats(self) -> Dict[str, Any]:
-        """ v98: Получение статистики из постоянного хранилища"""
+        """🆕 v98: Получение статистики из постоянного хранилища"""
         if not self._persistent_db:
             return {}
         return self._persistent_db.get_stats()
@@ -4401,8 +4267,7 @@ class MarketplaceUnitEconomics:
         df = pd.DataFrame([r.to_dict() for r in self._history])
         
         if format == ExportFormat.CSV:
-            # ✅ ИСПРАВЛЕНИЕ: sep=';' для корректного открытия в Excel
-            return df.to_csv(index=False, encoding='utf-8-sig', sep=';').encode('utf-8-sig')
+            return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
         elif format == ExportFormat.EXCEL:
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -4425,7 +4290,7 @@ class MarketplaceUnitEconomics:
 # ============================================================================
 class PriceImporter:
     """
-     v98: Импорт цен из отдельного прайс-листа без перезагрузки каталога.
+    🆕 v98: Импорт цен из отдельного прайс-листа без перезагрузки каталога.
     Поддерживает Excel и CSV, автоопределение кодировки и колонок.
     """
     
@@ -4544,7 +4409,23 @@ class PriceImporter:
         markup_percent: float = 0.0
     ) -> Dict[str, Any]:
         """
-         v98: Импорт цен из прайс-листа в каталог.
+        🆕 v98: Импорт цен из прайс-листа в каталог.
+        
+        Args:
+            catalog_df: DataFrame каталога (будет обновлён)
+            price_df: DataFrame прайс-листа
+            article_col_catalog: Колонка артикула в каталоге
+            brand_col_catalog: Колонка бренда в каталоге
+            price_col_catalog: Колонка цены в каталоге (будет обновлена)
+            article_col_price: Колонка артикула в прайсе
+            brand_col_price: Колонка бренда в прайсе (опционально)
+            price_col_price: Колонка цены в прайсе
+            update_mode: 'overwrite' (перезаписать все) или 'only_empty' (только пустые)
+            apply_markup: Применить наценку к импортированным ценам
+            markup_percent: Процент наценки
+            
+        Returns:
+            Статистика импорта
         """
         result = {
             "success": False,
@@ -4567,21 +4448,24 @@ class PriceImporter:
             
             result["total_in_pricelist"] = len(price_df)
             
+            # Нормализуем значения для сопоставления
             catalog_df = catalog_df.copy()
             price_df = price_df.copy()
             
             catalog_df['_norm_article'] = catalog_df[article_col_catalog].apply(normalize_key_for_match)
             catalog_df['_norm_brand'] = catalog_df[brand_col_catalog].apply(normalize_key_for_match) if brand_col_catalog else ""
-            price_df['_norm_article'] = price_df[article_col_price].apply(normalize_key_for_match)
             
+            price_df['_norm_article'] = price_df[article_col_price].apply(normalize_key_for_match)
             if brand_col_price:
                 price_df['_norm_brand'] = price_df[brand_col_price].apply(normalize_key_for_match)
             else:
                 price_df['_norm_brand'] = ""
             
+            # Фильтруем невалидные строки в прайсе
             price_df = price_df[price_df['_norm_article'] != ""]
             price_df = price_df[price_df[price_col_price].notna()]
             
+            # Создаём словарь цен из прайса
             price_dict = {}
             for _, row in price_df.iterrows():
                 art = row['_norm_article']
@@ -4591,9 +4475,11 @@ class PriceImporter:
                 if price_val > 0:
                     key = (art, br) if br else (art, None)
                     price_dict[key] = price_val
+                    # Также сохраняем только по артикулу (для случая без бренда)
                     if br:
                         price_dict[(art, None)] = price_val
             
+            # Обновляем цены в каталоге
             updated_count = 0
             matched_count = 0
             not_found_count = 0
@@ -4606,6 +4492,7 @@ class PriceImporter:
                     result["skipped"] += 1
                     continue
                 
+                # Ищем цену: сначала по артикулу+бренду, потом только по артикулу
                 new_price = None
                 if (art, br) in price_dict:
                     new_price = price_dict[(art, br)]
@@ -4620,17 +4507,21 @@ class PriceImporter:
                 if new_price is None:
                     continue
                 
+                # Применяем наценку если нужно
                 if apply_markup and markup_percent > 0:
                     new_price = new_price * (1 + markup_percent / 100)
                 
+                # Режим обновления
                 current_price = safe_float(row.get(price_col_catalog, 0))
                 if update_mode == "only_empty" and current_price > 0:
                     result["skipped"] += 1
                     continue
                 
+                # Обновляем цену
                 catalog_df.at[idx, price_col_catalog] = round(new_price, 2)
                 updated_count += 1
             
+            # Удаляем служебные колонки
             catalog_df = catalog_df.drop(columns=['_norm_article', '_norm_brand'], errors='ignore')
             
             result["success"] = True
@@ -4662,37 +4553,1025 @@ class PriceImporter:
         if not self._persistent_db:
             return pd.DataFrame()
         return self._persistent_db.get_price_imports_history(limit=limit)
+# ============================================================================
+# БЛОК 8: HIGH-VOLUME CATALOG (POLARS + DUCKDB) (700+ СТРОК)
+# ============================================================================
+class HighVolumeAutoPartsCatalog:
+    """High-Volume каталог автозапчастей с поддержкой 10M+ записей."""
+    def __init__(self):
+        self.data_dir = Path("./auto_parts_data")
+        self.data_dir.mkdir(exist_ok=True)
+        self.cloud_config = self.load_cloud_config()
+        self.price_rules = self.load_price_rules()
+        self.exclusion_rules = self.load_exclusion_rules()
+        self.category_mapping = self.load_category_mapping()
+        self.db_path = self.data_dir / "catalog.duckdb"
+        if POLARS_AVAILABLE and DUCKDB_AVAILABLE:
+            try:
+                self.conn = duckdb.connect(database=str(self.db_path))
+                self.setup_database()
+            except Exception as e:
+                logger.error(f"Ошибка подключения к DuckDB: {e}")
+                self.conn = None
+        else:
+            self.conn = None
+            logger.warning("HighVolume режим недоступен: установите polars и duckdb")
+    
+    def load_cloud_config(self) -> Dict[str, Any]:
+        config_path = self.data_dir / "cloud_config.json"
+        default_config = {
+            "enabled": False, "provider": "s3", "bucket": "",
+            "region": "", "sync_interval": 3600, "last_sync": 0
+        }
+        if config_path.exists():
+            try:
+                return json.loads(config_path.read_text(encoding='utf-8'))
+            except Exception as e:
+                logger.error(f"Ошибка чтения cloud_config.json: {e}")
+        else:
+            config_path.write_text(json.dumps(
+                default_config, indent=2, ensure_ascii=False), encoding='utf-8')
+        return default_config
+    
+    def save_cloud_config(self):
+        config_path = self.data_dir / "cloud_config.json"
+        self.cloud_config["last_sync"] = int(time.time())
+        config_path.write_text(json.dumps(
+            self.cloud_config, indent=2, ensure_ascii=False), encoding='utf-8')
+    
+    def load_price_rules(self) -> Dict[str, Any]:
+        price_rules_path = self.data_dir / "price_rules.json"
+        default_rules = {
+            "global_markup": 0.2, "brand_markups": {},
+            "min_price": 0.0, "max_price": 99999.0
+        }
+        if price_rules_path.exists():
+            try:
+                return json.loads(price_rules_path.read_text(encoding='utf-8'))
+            except Exception as e:
+                logger.error(f"Ошибка чтения price_rules.json: {e}")
+        else:
+            price_rules_path.write_text(json.dumps(
+                default_rules, indent=2, ensure_ascii=False), encoding='utf-8')
+        return default_rules
+    
+    def save_price_rules(self):
+        price_rules_path = self.data_dir / "price_rules.json"
+        price_rules_path.write_text(json.dumps(
+            self.price_rules, indent=2, ensure_ascii=False), encoding='utf-8')
+    
+    def load_exclusion_rules(self) -> List[str]:
+        exclusion_path = self.data_dir / "exclusion_rules.txt"
+        if exclusion_path.exists():
+            try:
+                return [line.strip() for line in exclusion_path.read_text(encoding='utf-8').splitlines() if line.strip()]
+            except Exception as e:
+                logger.error(f"Ошибка чтения exclusion_rules.txt: {e}")
+        else:
+            content = "Кузов\nСтекла\nМасла"
+            exclusion_path.write_text(content, encoding='utf-8')
+            return ["Кузов", "Стекла", "Масла"]
+    
+    def save_exclusion_rules(self):
+        exclusion_path = self.data_dir / "exclusion_rules.txt"
+        exclusion_path.write_text("\n".join(self.exclusion_rules), encoding='utf-8')
+    
+    def load_category_mapping(self) -> Dict[str, str]:
+        category_path = self.data_dir / "category_mapping.txt"
+        default_mapping = {
+            "Радиатор": "Охлаждение", "Шаровая опора": "Подвеска",
+            "Фильтр масляный": "Фильтры", "Тормозные колодки": "Тормоза"
+        }
+        if category_path.exists():
+            try:
+                mapping = {}
+                for line in category_path.read_text(encoding='utf-8').splitlines():
+                    if line.strip() and "|" in line:
+                        key, value = line.split("|", 1)
+                        mapping[key.strip()] = value.strip()
+                return mapping
+            except Exception as e:
+                logger.error(f"Ошибка чтения category_mapping.txt: {e}")
+        else:
+            content = "\n".join([f"{k}|{v}" for k, v in default_mapping.items()])
+            category_path.write_text(content, encoding='utf-8')
+        return default_mapping
+    
+    def save_category_mapping(self):
+        category_path = self.data_dir / "category_mapping.txt"
+        content = "\n".join([f"{k}|{v}" for k, v in self.category_mapping.items()])
+        category_path.write_text(content, encoding='utf-8')
+    
+    def setup_database(self):
+        if not self.conn:
+            return
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS oe (
+                oe_number_norm VARCHAR PRIMARY KEY,
+                oe_number VARCHAR,
+                name VARCHAR,
+                applicability VARCHAR,
+                category VARCHAR
+            )
+        """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS parts (
+                artikul_norm VARCHAR,
+                brand_norm VARCHAR,
+                artikul VARCHAR,
+                brand VARCHAR,
+                multiplicity INTEGER,
+                barcode VARCHAR,
+                length DOUBLE,
+                width DOUBLE,
+                height DOUBLE,
+                weight DOUBLE,
+                image_url VARCHAR,
+                dimensions_str VARCHAR,
+                description VARCHAR,
+                PRIMARY KEY (artikul_norm, brand_norm)
+            )
+        """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS cross_references (
+                oe_number_norm VARCHAR,
+                artikul_norm VARCHAR,
+                brand_norm VARCHAR,
+                PRIMARY KEY (oe_number_norm, artikul_norm, brand_norm)
+            )
+        """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS prices (
+                artikul_norm VARCHAR,
+                brand_norm VARCHAR,
+                price DOUBLE,
+                currency VARCHAR DEFAULT 'RUB',
+                PRIMARY KEY (artikul_norm, brand_norm)
+            )
+        """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS metadata (
+                key VARCHAR PRIMARY KEY,
+                value VARCHAR
+            )
+        """)
+        self.create_indexes()
+    
+    def create_indexes(self):
+        if not self.conn:
+            return
+        try:
+            indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_oe_number_norm ON oe(oe_number_norm)",
+                "CREATE INDEX IF NOT EXISTS idx_parts_keys ON parts(artikul_norm, brand_norm)",
+                "CREATE INDEX IF NOT EXISTS idx_cross_oe ON cross_references(oe_number_norm)",
+                "CREATE INDEX IF NOT EXISTS idx_cross_artikul ON cross_references(artikul_norm, brand_norm)",
+                "CREATE INDEX IF NOT EXISTS idx_prices_keys ON prices(artikul_norm, brand_norm)"
+            ]
+            for index_sql in indexes:
+                try:
+                    self.conn.execute(index_sql)
+                except Exception as e:
+                    logger.warning(f"Не удалось создать индекс: {e}")
+        except Exception as e:
+            logger.warning(f"Ошибка создания индексов: {e}")
+    
+    @staticmethod
+    def normalize_key(series) -> "pl.Series":
+        if not POLARS_AVAILABLE:
+            return series
+        return (series
+            .fill_null("")
+            .cast(pl.Utf8)
+            .str.replace_all("'", "")
+            .str.replace_all(r"[^0-9A-Za-zА-Яа-яЁё`\-\s]", "")
+            .str.replace_all(r"\s+", " ")
+            .str.strip_chars()
+            .str.to_lowercase())
+    
+    @staticmethod
+    def clean_values(series) -> "pl.Series":
+        if not POLARS_AVAILABLE:
+            return series
+        return (series
+            .fill_null("")
+            .cast(pl.Utf8)
+            .str.replace_all("'", "")
+            .str.replace_all(r"[^0-9A-Za-zА-Яа-яЁё`\-\s]", "")
+            .str.replace_all(r"\s+", " ")
+            .str.strip_chars())
+    
+    def determine_category_vectorized(self, name_series) -> "pl.Series":
+        if not POLARS_AVAILABLE:
+            return name_series
+        name_lower = name_series.str.to_lowercase()
+        categorization_expr = pl.when(pl.lit(False)).then(pl.lit(None))
+        for key, category in self.category_mapping.items():
+            categorization_expr = categorization_expr.when(
+                name_lower.str.contains(key.lower())
+            ).then(pl.lit(category))
+        categories_map = {
+            'Фильтр': 'фильтр|filter',
+            'Тормоза': 'тормоз|brake|колодк|диск|суппорт',
+            'Подвеска': 'амортизатор|стойк|spring|подвеск|рычаг',
+            'Двигатель': 'двигатель|engine|свеч|поршень|клапан',
+            'Трансмиссия': 'трансмиссия|сцеплен|коробк|transmission',
+            'Электрика': 'аккумулятор|генератор|стартер|провод|ламп',
+            'Рулевое': 'рулевой|тяга|наконечник|steering',
+            'Выпуск': 'глушитель|катализатор|выхлоп|exhaust',
+            'Охлаждение': 'радиатор|вентилятор|термостат|cooling',
+            'Топливо': 'топливный|бензонасос|форсунк|fuel'
+        }
+        for category, pattern in categories_map.items():
+            categorization_expr = categorization_expr.when(
+                name_lower.str.contains(pattern, literal=False)
+            ).then(pl.lit(category))
+        return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
+    
+    def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
+        column_variants = {
+            'oe_number': ['oe номер', 'oe', 'оe', 'номер', 'code', 'OE'],
+            'artikul': ['артикул', 'article', 'sku'],
+            'brand': ['бренд', 'brand', 'производитель', 'manufacturer'],
+            'name': ['наименование', 'название', 'name', 'описание', 'description'],
+            'applicability': ['применимость', 'автомобиль', 'vehicle', 'applicability'],
+            'barcode': ['штрих-код', 'barcode', 'штрихкод', 'ean', 'eac13'],
+            'multiplicity': ['кратность шт', 'кратность', 'multiplicity'],
+            'length': ['длина (см)', 'длина', 'length', 'длинна'],
+            'width': ['ширина (см)', 'ширина', 'width'],
+            'height': ['высота (см)', 'высота', 'height'],
+            'weight': ['вес (кг)', 'вес, кг', 'вес', 'weight'],
+            'image_url': ['ссылка', 'url', 'изображение', 'image', 'картинка'],
+            'dimensions_str': ['весогабариты', 'размеры', 'dimensions', 'size'],
+            'price': ['цена', 'price', 'рекомендованная цена', 'retail price'],
+            'currency': ['валюта', 'currency']
+        }
+        actual_lower = {col.lower(): col for col in actual_columns}
+        mapping = {}
+        for expected in expected_columns:
+            variants = column_variants.get(expected, [expected])
+            for variant in variants:
+                variant_lower = variant.lower()
+                for actual_l, actual_orig in actual_lower.items():
+                    if variant_lower in actual_l and actual_orig not in mapping:
+                        mapping[actual_orig] = expected
+                        break
+        return mapping
+    
+    def read_and_prepare_file(self, file_path: str, file_type: str) -> "pl.DataFrame":
+        if not POLARS_AVAILABLE:
+            logger.warning("Polars не доступен")
+            return pl.DataFrame()
+        logger.info(f"Обработка файла: {file_type} ({file_path})")
+        try:
+            if not os.path.exists(file_path):
+                logger.error(f"Файл не найден: {file_path}")
+                return pl.DataFrame()
+            df = pl.read_excel(file_path, engine='calamine')
+            if df.is_empty():
+                logger.warning(f"Пустой файл: {file_path}")
+                return pl.DataFrame()
+        except Exception as e:
+            logger.exception(f"Ошибка чтения файла {file_path}: {e}")
+            return pl.DataFrame()
+        schemas = {
+            'oe': ['oe_number', 'artikul', 'brand', 'name', 'applicability'],
+            'cross': ['oe_number', 'artikul', 'brand'],
+            'barcode': ['artikul', 'brand', 'barcode', 'multiplicity'],
+            'dimensions': ['artikul', 'brand', 'length', 'width', 'height', 'weight', 'dimensions_str'],
+            'images': ['artikul', 'brand', 'image_url'],
+            'prices': ['artikul', 'brand', 'price', 'currency']
+        }
+        expected_cols = schemas.get(file_type, [])
+        column_mapping = self.detect_columns(df.columns, expected_cols)
+        if not column_mapping:
+            logger.warning(f"Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
+            return pl.DataFrame()
+        df = df.rename(column_mapping)
+        for col in ['artikul', 'brand', 'oe_number']:
+            if col in df.columns:
+                df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
+        key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
+        if key_cols:
+            df = df.unique(subset=key_cols, keep='first')
+        for col in ['artikul', 'brand', 'oe_number']:
+            if col in df.columns:
+                df = df.with_columns(self.normalize_key(pl.col(col)).alias(f"{col}_norm"))
+        return df
+    
+    def upsert_data(self, table_name: str, df: "pl.DataFrame", pk: List[str]):
+        if not self.conn or df.is_empty():
+            return
+        df = df.unique(keep='first')
+        temp_view_name = f"temp_{table_name}_{int(time.time())}"
+        try:
+            self.conn.register(temp_view_name, df.to_arrow())
+        except Exception as e:
+            logger.error(f"Ошибка регистрации временной таблицы: {e}")
+            return
+        try:
+            pk_cols_csv = ", ".join(f'"{c}"' for c in pk)
+            delete_sql = f"""
+                DELETE FROM {table_name}
+                WHERE ({pk_cols_csv}) IN (SELECT {pk_cols_csv} FROM {temp_view_name});
+            """
+            self.conn.execute(delete_sql)
+            insert_sql = f"INSERT INTO {table_name} SELECT * FROM {temp_view_name};"
+            self.conn.execute(insert_sql)
+            logger.info(f"Успешно upsert {len(df)} записей в таблицу {table_name}.")
+        except Exception as e:
+            logger.error(f"Ошибка при UPSERT в {table_name}: {e}")
+        finally:
+            try:
+                self.conn.unregister(temp_view_name)
+            except Exception:
+                pass
+    
+    def upsert_prices(self, price_df: "pl.DataFrame"):
+        if not self.conn or price_df.is_empty():
+            return
+        if 'artikul' in price_df.columns and 'brand' in price_df.columns:
+            price_df = price_df.with_columns([
+                self.normalize_key(pl.col('artikul')).alias('artikul_norm'),
+                self.normalize_key(pl.col('brand')).alias('brand_norm')
+            ])
+        if 'currency' not in price_df.columns:
+            price_df = price_df.with_columns(pl.lit('RUB').alias('currency'))
+        price_df = price_df.filter(
+            (pl.col('price') >= self.price_rules['min_price']) &
+            (pl.col('price') <= self.price_rules['max_price'])
+        )
+        self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
+    
+    def process_and_load_data(self, dataframes: Dict[str, "pl.DataFrame"]):
+        if not self.conn:
+            logger.warning("⚠️ База данных не доступна")
+            return
+        logger.info("🔄 Начало загрузки и обновления данных в базе...")
+        steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
+        num_steps = len(steps)
+        step_counter = 0
+        if 'oe' in dataframes:
+            step_counter += 1
+            logger.info(f"({step_counter}/{num_steps}) Обработка OE данных...")
+            df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
+            oe_df = df.select(['oe_number_norm', 'oe_number', 'name', 'applicability']).unique(
+                subset=['oe_number_norm'], keep='first')
+            if 'name' in oe_df.columns:
+                oe_df = oe_df.with_columns(self.determine_category_vectorized(pl.col('name')))
+            else:
+                oe_df = oe_df.with_columns(category=pl.lit('Разное'))
+            self.upsert_data('oe', oe_df, ['oe_number_norm'])
+            cross_df_from_oe = df.filter(pl.col('artikul_norm') != "").select(
+                ['oe_number_norm', 'artikul_norm', 'brand_norm']).unique()
+            self.upsert_data('cross_references', cross_df_from_oe, [
+                'oe_number_norm', 'artikul_norm', 'brand_norm'])
+        if 'cross' in dataframes:
+            step_counter += 1
+            logger.info(f"({step_counter}/{num_steps}) Обработка кроссов...")
+            df = dataframes['cross'].filter(
+                (pl.col('oe_number_norm') != "") & (pl.col('artikul_norm') != ""))
+            cross_df_from_cross = df.select(
+                ['oe_number_norm', 'artikul_norm', 'brand_norm']).unique()
+            self.upsert_data('cross_references', cross_df_from_cross, [
+                'oe_number_norm', 'artikul_norm', 'brand_norm'])
+        if 'prices' in dataframes:
+            price_df = dataframes['prices']
+            if not price_df.is_empty():
+                logger.info("💰 Обработка цен...")
+                self.upsert_prices(price_df)
+                logger.info(f"✅ Успешно обновлено {len(price_df)} ценовых записей")
+        step_counter += 1
+        logger.info(f"({step_counter}/{num_steps}) Сборка и обновление данных по артикулам...")
+        parts_df = None
+        file_priority = ['oe', 'barcode', 'images', 'dimensions']
+        key_files = {ftype: df for ftype, df in dataframes.items() if ftype in file_priority}
+        if key_files:
+            all_parts = pl.concat([
+                df.select(['artikul', 'artikul_norm', 'brand', 'brand_norm'])
+                for df in key_files.values() if 'artikul_norm' in df.columns and 'brand_norm' in df.columns
+            ]).filter(pl.col('artikul_norm') != "").unique(subset=['artikul_norm', 'brand_norm'], keep='first')
+            parts_df = all_parts
+            for ftype in file_priority:
+                if ftype not in key_files:
+                    continue
+                df = key_files[ftype]
+                if df.is_empty() or 'artikul_norm' not in df.columns:
+                    continue
+                join_cols = [col for col in df.columns if col not in [
+                    'artikul', 'artikul_norm', 'brand', 'brand_norm']]
+                if not join_cols:
+                    continue
+                existing_cols = set(parts_df.columns)
+                join_cols = [col for col in join_cols if col not in existing_cols]
+                if not join_cols:
+                    continue
+                df_subset = df.select(['artikul_norm', 'brand_norm'] + join_cols).unique(
+                    subset=['artikul_norm', 'brand_norm'], keep='first')
+                parts_df = parts_df.join(
+                    df_subset, on=['artikul_norm', 'brand_norm'], how='left', coalesce=True)
+        if parts_df is not None and not parts_df.is_empty():
+            if 'multiplicity' not in parts_df.columns:
+                parts_df = parts_df.with_columns(multiplicity=pl.lit(1).cast(pl.Int32))
+            else:
+                parts_df = parts_df.with_columns(pl.col('multiplicity').fill_null(1).cast(pl.Int32))
+            for col in ['length', 'width', 'height']:
+                if col not in parts_df.columns:
+                    parts_df = parts_df.with_columns(pl.lit(None).cast(pl.Float64).alias(col))
+            if 'dimensions_str' not in parts_df.columns:
+                parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
+            parts_df = parts_df.with_columns([
+                pl.col('length').cast(pl.Utf8).fill_null('').alias('_length_str'),
+                pl.col('width').cast(pl.Utf8).fill_null('').alias('_width_str'),
+                pl.col('height').cast(pl.Utf8).fill_null('').alias('_height_str'),
+            ])
+            parts_df = parts_df.with_columns(
+                dimensions_str=pl.when(
+                    (pl.col('dimensions_str').is_not_null()) &
+                    (pl.col('dimensions_str').cast(pl.Utf8) != '')
+                ).then(pl.col('dimensions_str').cast(pl.Utf8)).otherwise(
+                    pl.concat_str([
+                        pl.col('_length_str'), pl.lit('x'),
+                        pl.col('_width_str'), pl.lit('x'),
+                        pl.col('_height_str')
+                    ], separator='')
+                )
+            )
+            parts_df = parts_df.drop(['_length_str', '_width_str', '_height_str'])
+            if 'artikul' not in parts_df.columns:
+                parts_df = parts_df.with_columns(artikul=pl.lit(''))
+            if 'brand' not in parts_df.columns:
+                parts_df = parts_df.with_columns(brand=pl.lit(''))
+            parts_df = parts_df.with_columns([
+                pl.col('artikul').cast(pl.Utf8).fill_null('').alias('_artikul_str'),
+                pl.col('brand').cast(pl.Utf8).fill_null('').alias('_brand_str'),
+                pl.col('multiplicity').cast(pl.Utf8).alias('_multiplicity_str'),
+            ])
+            parts_df = parts_df.with_columns(
+                description=pl.concat_str([
+                    pl.lit('Артикул: '), pl.col('_artikul_str'),
+                    pl.lit(', Бренд: '), pl.col('_brand_str'),
+                    pl.lit(', Кратность: '), pl.col('_multiplicity_str'),
+                    pl.lit(' шт.')
+                ], separator='')
+            )
+            parts_df = parts_df.drop(['_artikul_str', '_brand_str', '_multiplicity_str'])
+            final_columns = [
+                'artikul_norm', 'brand_norm', 'artikul', 'brand', 'multiplicity', 'barcode',
+                'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 'description'
+            ]
+            select_exprs = [pl.col(c) if c in parts_df.columns else pl.lit(None).alias(c) for c in final_columns]
+            parts_df = parts_df.select(select_exprs)
+            self.upsert_data('parts', parts_df, ['artikul_norm', 'brand_norm'])
+        logger.info("✅ Обновление базы данных завершено!")
+    
+    def merge_all_data_parallel(self, file_paths: Dict[str, str], max_workers: int = 4) -> Dict[str, "pl.DataFrame"]:
+        if not POLARS_AVAILABLE:
+            return {}
+        results = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {}
+            for key, path in file_paths.items():
+                if path and os.path.exists(path):
+                    futures[executor.submit(self.read_and_prepare_file, path, key)] = key
+            for fut in as_completed(futures):
+                key = futures[fut]
+                try:
+                    df = fut.result()
+                    if not df.is_empty():
+                        results[key] = df
+                        logger.info(f"Обработан {key}")
+                except Exception as e:
+                    logger.error(f"Ошибка обработки {key}: {e}")
+        return results
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        if not self.conn:
+            return {}
+        stats = {}
+        try:
+            stats['parts'] = self.conn.execute("SELECT COUNT(*) FROM parts").fetchone()[0]
+            stats['oe'] = self.conn.execute("SELECT COUNT(*) FROM oe").fetchone()[0]
+            stats['cross'] = self.conn.execute("SELECT COUNT(*) FROM cross_references").fetchone()[0]
+            stats['prices'] = self.conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
+            stats['brands'] = self.conn.execute("SELECT COUNT(DISTINCT brand) FROM parts").fetchone()[0]
+            stats['unique_parts'] = self.conn.execute(
+                "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
+            avg_price = self.conn.execute("SELECT AVG(price) FROM prices").fetchone()[0]
+            stats['avg_price'] = round(avg_price, 2) if avg_price else 0
+            top_brands = self.conn.execute(
+                "SELECT brand, COUNT(*) as cnt FROM parts GROUP BY brand ORDER BY cnt DESC LIMIT 10").pl()
+            stats['top_brands'] = top_brands.to_pandas() if not top_brands.is_empty() else pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Ошибка сбора статистики: {e}")
+        return stats
+    
+    def delete_by_brand(self, brand_norm: str) -> int:
+        if not self.conn:
+            return 0
+        try:
+            count_result = self.conn.execute(
+                "SELECT COUNT(*) FROM parts WHERE brand_norm = ?", [brand_norm]).fetchone()
+            deleted_count = count_result[0] if count_result else 0
+            if deleted_count == 0:
+                return 0
+            self.conn.execute("DELETE FROM parts WHERE brand_norm = ?", [brand_norm])
+            self.conn.execute(
+                "DELETE FROM cross_references WHERE (artikul_norm, brand_norm) NOT IN (SELECT DISTINCT artikul_norm, brand_norm FROM parts)")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Error deleting by brand {brand_norm}: {e}")
+            raise
+    
+    def delete_by_artikul(self, artikul_norm: str) -> int:
+        if not self.conn:
+            return 0
+        try:
+            count_result = self.conn.execute(
+                "SELECT COUNT(*) FROM parts WHERE artikul_norm = ?", [artikul_norm]).fetchone()
+            deleted_count = count_result[0] if count_result else 0
+            if deleted_count == 0:
+                return 0
+            self.conn.execute("DELETE FROM parts WHERE artikul_norm = ?", [artikul_norm])
+            self.conn.execute(
+                "DELETE FROM cross_references WHERE (artikul_norm, brand_norm) NOT IN (SELECT DISTINCT artikul_norm, brand_norm FROM parts)")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Error deleting by artikul {artikul_norm}: {e}")
+            raise
 
-# === КОНЕЦ ЧАСТИ 3/5 ===
-# === НАЧАЛО ЧАСТИ 4/5 (HighVolumeAutoPartsCatalog, CatalogEnhancer, CategoryClassifier, UI функции загрузки данных, юнит-экономика) ===
+
+# ============================================================================
+# БЛОК 9: CATALOG ENHANCER (ПОИСК АНАЛОГОВ 2 УРОВНЯ) (400+ СТРОК)
+# ============================================================================
+class CatalogEnhancer:
+    """Обогащение каталога: поиск аналогов по OE номерам (2 уровня)"""
+    def __init__(self, db_path: Optional[str] = None):
+        self.data_dir = Path("./catalog_data")
+        self.data_dir.mkdir(exist_ok=True)
+        self.db_path = Path(db_path) if db_path else self.data_dir / "catalog.duckdb"
+        self.conn = None
+        self.stats = {
+            "oe_loaded": 0, "parts_loaded": 0, "cross_loaded": 0,
+            "analog_searches": 0, "enrichments": 0
+        }
+        if DUCKDB_AVAILABLE:
+            try:
+                self.conn = duckdb.connect(database=str(self.db_path))
+                self._setup_database()
+                logger.info("CatalogEnhancer инициализирован с DuckDB")
+            except Exception as e:
+                logger.error(f"Ошибка инициализации DuckDB: {e}")
+                self.conn = None
+        else:
+            logger.warning("DuckDB не установлен")
+    
+    def _setup_database(self):
+        if not self.conn:
+            return
+        try:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS oe (
+                    oe_number_norm VARCHAR PRIMARY KEY,
+                    oe_number VARCHAR,
+                    name VARCHAR,
+                    applicability VARCHAR,
+                    category VARCHAR
+                )
+            """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS parts (
+                    artikul_norm VARCHAR,
+                    brand_norm VARCHAR,
+                    artikul VARCHAR,
+                    brand VARCHAR,
+                    multiplicity INTEGER,
+                    barcode VARCHAR,
+                    length DOUBLE,
+                    width DOUBLE,
+                    height DOUBLE,
+                    weight DOUBLE,
+                    image_url VARCHAR,
+                    dimensions_str VARCHAR,
+                    description VARCHAR,
+                    PRIMARY KEY (artikul_norm, brand_norm)
+                )
+            """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS cross_references (
+                    oe_number_norm VARCHAR,
+                    artikul_norm VARCHAR,
+                    brand_norm VARCHAR,
+                    PRIMARY KEY (oe_number_norm, artikul_norm, brand_norm)
+                )
+            """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS prices (
+                    artikul_norm VARCHAR,
+                    brand_norm VARCHAR,
+                    price DOUBLE,
+                    currency VARCHAR DEFAULT 'RUB',
+                    PRIMARY KEY (artikul_norm, brand_norm)
+                )
+            """)
+            logger.info("Таблицы каталога созданы")
+        except Exception as e:
+            logger.error(f"Ошибка создания таблиц: {e}")
+    
+    def normalize_key(self, value: str) -> str:
+        if not value:
+            return ""
+        return re.sub(r'[^0-9A-Za-zА-Яа-яЁё]', '', value.lower().strip())
+    
+    def load_oe_data(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+        try:
+            df['oe_number_norm'] = df['oe_number'].apply(self.normalize_key)
+            df = df[df['oe_number_norm'] != ""]
+            self.conn.execute("DELETE FROM oe")
+            for _, row in df.iterrows():
+                self.conn.execute(
+                    "INSERT INTO oe VALUES (?, ?, ?, ?, ?)",
+                    [row['oe_number_norm'], row.get('oe_number', ''),
+                     row.get('name', ''), row.get('applicability', ''),
+                     row.get('category', 'Разное')]
+                )
+            self.stats['oe_loaded'] = len(df)
+            logger.info(f"Загружено {len(df)} OE записей")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки OE данных: {e}")
+    
+    def load_parts_data(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+        try:
+            df['artikul_norm'] = df['artikul'].apply(self.normalize_key)
+            df['brand_norm'] = df['brand'].apply(self.normalize_key)
+            df = df[(df['artikul_norm'] != "") & (df['brand_norm'] != "")]
+            self.conn.execute("DELETE FROM parts")
+            for _, row in df.iterrows():
+                self.conn.execute(
+                    "INSERT INTO parts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [row['artikul_norm'], row['brand_norm'], row.get('artikul', ''),
+                     row.get('brand', ''), row.get('multiplicity', 1),
+                     row.get('barcode', ''), row.get('length', 0.0),
+                     row.get('width', 0.0), row.get('height', 0.0),
+                     row.get('weight', 0.0), row.get('image_url', ''),
+                     row.get('dimensions_str', ''), row.get('description', '')]
+                )
+            self.stats['parts_loaded'] = len(df)
+            logger.info(f"Загружено {len(df)} записей деталей")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки данных деталей: {e}")
+    
+    def load_cross_references(self, df: pd.DataFrame):
+        if not self.conn or df.empty:
+            return
+        try:
+            df['oe_number_norm'] = df['oe_number'].apply(self.normalize_key)
+            df['artikul_norm'] = df['artikul'].apply(self.normalize_key)
+            df['brand_norm'] = df['brand'].apply(self.normalize_key)
+            df = df[(df['oe_number_norm'] != "") & (df['artikul_norm'] != "")]
+            self.conn.execute("DELETE FROM cross_references")
+            for _, row in df.iterrows():
+                self.conn.execute(
+                    "INSERT INTO cross_references VALUES (?, ?, ?)",
+                    [row['oe_number_norm'], row['artikul_norm'], row['brand_norm']]
+                )
+            self.stats['cross_loaded'] = len(df)
+            logger.info(f"Загружено {len(df)} кросс-ссылок")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки кросс-ссылок: {e}")
+    
+    def get_analog_data(self, artikul: str, brand: str) -> Dict[str, Any]:
+        """Поиск аналогов по OE номерам (2 уровня)"""
+        self.stats['analog_searches'] += 1
+        if not self.conn:
+            return {"error": "DuckDB не доступен"}
+        artikul_norm = self.normalize_key(artikul)
+        brand_norm = self.normalize_key(brand)
+        if not artikul_norm or not brand_norm:
+            return {"error": "Не указан артикул или бренд"}
+        try:
+            query = f"""
+                WITH PartDetails AS (
+                    SELECT
+                        cr.artikul_norm,
+                        cr.brand_norm,
+                        STRING_AGG(DISTINCT oe.oe_number, ', ') AS oe_list
+                    FROM cross_references cr
+                    LEFT JOIN oe ON cr.oe_number_norm = oe.oe_number_norm
+                    WHERE cr.artikul_norm = '{artikul_norm}' AND cr.brand_norm = '{brand_norm}'
+                    GROUP BY cr.artikul_norm, cr.brand_norm
+                ),
+                AnalogParts AS (
+                    SELECT DISTINCT
+                        p.artikul, p.brand, p.description,
+                        p.length, p.width, p.height, p.weight,
+                        p.dimensions_str, p.image_url
+                    FROM cross_references cr
+                    JOIN parts p ON cr.artikul_norm = p.artikul_norm AND cr.brand_norm = p.brand_norm
+                    WHERE cr.oe_number_norm IN (
+                        SELECT oe_number_norm
+                        FROM cross_references
+                        WHERE artikul_norm = '{artikul_norm}' AND brand_norm = '{brand_norm}'
+                    )
+                    AND NOT (cr.artikul_norm = '{artikul_norm}' AND cr.brand_norm = '{brand_norm}')
+                    LIMIT 50
+                )
+                SELECT
+                    (SELECT COUNT(*) FROM AnalogParts) AS analog_count,
+                    (SELECT oe_list FROM PartDetails) AS oe_list,
+                    (SELECT * FROM AnalogParts LIMIT 20) AS analogs
+            """
+            result = self.conn.execute(query).df()
+            if result.empty or result.iloc[0]['analog_count'] == 0:
+                return {
+                    "artikul": artikul, "brand": brand,
+                    "analog_count": 0, "analogs": [],
+                    "has_analogs": False, "oe_list": ""
+                }
+            row = result.iloc[0]
+            analog_count = int(row['analog_count']) if not pd.isna(row['analog_count']) else 0
+            analogs = []
+            if analog_count > 0:
+                analog_query = f"""
+                    SELECT DISTINCT
+                        p.artikul, p.brand, p.description,
+                        p.length, p.width, p.height, p.weight,
+                        p.dimensions_str, p.image_url
+                    FROM cross_references cr
+                    JOIN parts p ON cr.artikul_norm = p.artikul_norm AND cr.brand_norm = p.brand_norm
+                    WHERE cr.oe_number_norm IN (
+                        SELECT oe_number_norm
+                        FROM cross_references
+                        WHERE artikul_norm = '{artikul_norm}' AND brand_norm = '{brand_norm}'
+                    )
+                    AND NOT (cr.artikul_norm = '{artikul_norm}' AND cr.brand_norm = '{brand_norm}')
+                    LIMIT 20
+                """
+                analog_df = self.conn.execute(analog_query).df()
+                for _, arow in analog_df.iterrows():
+                    analogs.append({
+                        "artikul": safe_str(arow.get('artikul', '')),
+                        "brand": safe_str(arow.get('brand', '')),
+                        "description": safe_str(arow.get('description', '')),
+                        "length": safe_float(arow.get('length', 0)),
+                        "width": safe_float(arow.get('width', 0)),
+                        "height": safe_float(arow.get('height', 0)),
+                        "weight": safe_float(arow.get('weight', 0)),
+                        "dimensions_str": safe_str(arow.get('dimensions_str', '')),
+                        "image_url": safe_str(arow.get('image_url', ''))
+                    })
+            return {
+                "artikul": artikul, "brand": brand,
+                "analog_count": analog_count, "analogs": analogs,
+                "has_analogs": analog_count > 0,
+                "oe_list": safe_str(row.get('oe_list', ''))
+            }
+        except Exception as e:
+            logger.error(f"Ошибка получения аналогов: {e}")
+            return {"error": str(e)}
+    
+    def enhance_catalog_data(self, df: pd.DataFrame,
+                             artikul_col: str = "Артикул",
+                             brand_col: str = "Бренд") -> pd.DataFrame:
+        """Обогащение каталога: добавление информации об аналогах"""
+        if df.empty:
+            return df
+        if artikul_col not in df.columns or brand_col not in df.columns:
+            logger.warning(f"Колонки {artikul_col} или {brand_col} не найдены")
+            return df
+        self.stats['enrichments'] += 1
+        df_copy = df.copy()
+        new_columns = ['analog_count', 'has_analogs', 'analog_list', 'oe_list']
+        for col in new_columns:
+            if col not in df_copy.columns:
+                df_copy[col] = None
+        for idx, row in df_copy.iterrows():
+            artikul = safe_str(row.get(artikul_col, ''))
+            brand = safe_str(row.get(brand_col, ''))
+            if artikul and brand:
+                data = self.get_analog_data(artikul, brand)
+                if not data.get('error'):
+                    df_copy.at[idx, 'analog_count'] = data.get('analog_count', 0)
+                    df_copy.at[idx, 'has_analogs'] = data.get('has_analogs', False)
+                    df_copy.at[idx, 'oe_list'] = data.get('oe_list', '')
+                    if data.get('analogs'):
+                        analog_str = ', '.join([
+                            f"{a['artikul']} ({a['brand']})"
+                            for a in data['analogs'][:5]
+                            if a.get('artikul')
+                        ])
+                        df_copy.at[idx, 'analog_list'] = analog_str
+        return df_copy
+    
+    def get_stats(self) -> Dict:
+        return self.stats.copy()
+
+
+# ============================================================================
+# БЛОК 10: ML-КЛАССИФИКАТОР КАТЕГОРИЙ (300+ СТРОК)
+# ============================================================================
+class CategoryClassifier:
+    """ML-классификатор категорий автозапчастей"""
+    def __init__(self, model_path: str = "category_model.pkl"):
+        self.model_path = model_path
+        self.model = None
+        self.categories = [
+            "Двигатель", "Трансмиссия", "Подвеска", "Тормозная система",
+            "Рулевое управление", "Электрооборудование", "Система охлаждения",
+            "Система выпуска", "Система питания", "Фильтры",
+            "Масла и жидкости", "Кузовные детали", "Оптика",
+            "Шины и диски", "Инструменты", "Ремни и приводы",
+            "Подшипники", "Сальники и прокладки", "Крепеж",
+            "Климат-контроль", "Аудио и мультимедиа", "Безопасность",
+            "Прочее"
+        ]
+        self.accuracy = 0.0
+        self.cache = {}
+        self.logger = logging.getLogger('CategoryClassifier')
+        self._load_model()
+    
+    def _load_model(self):
+        if os.path.exists(self.model_path) and SKLEARN_AVAILABLE:
+            try:
+                self.model = joblib.load(self.model_path)
+                self.categories = self.model.classes_ if hasattr(self.model, 'classes_') else self.categories
+                self.logger.info(f"ML-модель загружена, категорий: {len(self.categories)}")
+                return
+            except Exception as e:
+                self.logger.warning(f"Ошибка загрузки модели: {e}")
+        self._train_model()
+    
+    def _train_model(self):
+        if not SKLEARN_AVAILABLE:
+            self.logger.warning("Scikit-learn не установлен, используется fallback классификатор")
+            return
+        try:
+            X = []
+            y = []
+            category_keywords = {
+                "Двигатель": ["двигатель", "мотор", "двс", "поршень", "шатун", "клапан", "гбц"],
+                "Трансмиссия": ["коробка", "кпп", "сцепление", "привод", "дифференциал", "акпп"],
+                "Подвеска": ["амортизатор", "пружина", "рычаг", "сайлентблок", "шаровая", "стабилизатор"],
+                "Тормозная система": ["колодки", "диск", "барабан", "суппорт", "гтц", "абс"],
+                "Рулевое управление": ["рейка", "тяга", "наконечник", "руль", "гур"],
+                "Электрооборудование": ["генератор", "стартер", "аккумулятор", "свеча", "провод"],
+                "Система охлаждения": ["радиатор", "помпа", "термостат", "вентилятор", "бачок"],
+                "Система выпуска": ["глушитель", "катализатор", "резонатор", "гофра", "лямбда"],
+                "Система питания": ["насос", "фильтр", "форсунка", "дроссель", "тнвд"],
+                "Фильтры": ["фильтр", "масляный", "воздушный", "салонный", "топливный"],
+                "Масла и жидкости": ["масло", "жидкость", "смазка", "антифриз", "тормозуха"],
+                "Кузовные детали": ["бампер", "капот", "крыло", "дверь", "стекло", "фара"],
+                "Шины и диски": ["шина", "диск", "колесо", "покрышка", "резина"],
+                "Инструменты": ["инструмент", "ключ", "домкрат", "насос"],
+                "Прочее": []
+            }
+            for category, keywords in category_keywords.items():
+                for keyword in keywords:
+                    if keyword:
+                        X.append(keyword)
+                        y.append(category)
+                        X.append(keyword + " " + category)
+                        y.append(category)
+            if X:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.2, random_state=42
+                )
+                self.model = Pipeline([
+                    ('tfidf', TfidfVectorizer(max_features=2000, ngram_range=(1, 2))),
+                    ('clf', MultinomialNB(alpha=0.1))
+                ])
+                self.model.fit(X_train, y_train)
+                self.categories = self.model.classes_
+                y_pred = self.model.predict(X_test)
+                self.accuracy = accuracy_score(y_test, y_pred)
+                joblib.dump(self.model, self.model_path)
+                self.logger.info(f"ML-модель обучена на {len(X)} примерах, точность: {self.accuracy:.2%}")
+        except Exception as e:
+            self.logger.error(f"Ошибка обучения модели: {e}")
+            self.model = None
+    
+    def predict(self, name: str) -> Tuple[str, float]:
+        """Предсказание категории для товара"""
+        if not isinstance(name, str):
+            name = str(name)
+        if not name or not name.strip():
+            return "Прочее", 0.0
+        name_lower = name.lower()
+        if name_lower in self.cache:
+            return self.cache[name_lower]
+        if SKLEARN_AVAILABLE and self.model is not None:
+            try:
+                pred = self.model.predict([name_lower])[0]
+                probs = self.model.predict_proba([name_lower])[0]
+                confidence = max(probs) * 100
+                if confidence > 30:
+                    result = (pred, confidence)
+                    self.cache[name_lower] = result
+                    return result
+            except Exception as e:
+                self.logger.warning(f"ML prediction error: {e}")
+        best_category = "Прочее"
+        best_score = 0.0
+        category_keywords = {
+            "Двигатель": ["двигатель", "мотор", "двс", "поршень", "шатун", "клапан", "гбц"],
+            "Трансмиссия": ["коробка", "кпп", "сцепление", "привод", "дифференциал"],
+            "Подвеска": ["амортизатор", "пружина", "рычаг", "сайлентблок", "шаровая"],
+            "Тормозная система": ["колодки", "диск", "барабан", "суппорт", "гтц"],
+            "Электрооборудование": ["генератор", "стартер", "аккумулятор", "свеча"],
+            "Система охлаждения": ["радиатор", "помпа", "термостат", "вентилятор"],
+            "Система выпуска": ["глушитель", "катализатор", "резонатор", "гофра"],
+            "Система питания": ["насос", "фильтр", "форсунка", "дроссель"],
+            "Фильтры": ["фильтр", "масляный", "воздушный", "салонный"],
+            "Масла и жидкости": ["масло", "жидкость", "смазка", "антифриз"],
+            "Кузовные детали": ["бампер", "капот", "крыло", "дверь", "стекло"],
+            "Шины и диски": ["шина", "диск", "колесо", "покрышка"],
+            "Инструменты": ["инструмент", "ключ", "домкрат"],
+            "Прочее": []
+        }
+        for category, keywords in category_keywords.items():
+            score = 0.0
+            for keyword in keywords:
+                if keyword in name_lower:
+                    weight = len(keyword) / 10.0
+                    if name_lower.startswith(keyword):
+                        weight *= 1.5
+                    score += weight
+            if score > best_score:
+                best_score = score
+                best_category = category
+        confidence = min(best_score * 15, 100.0)
+        result = (best_category, round(confidence, 1))
+        self.cache[name_lower] = result
+        return result
+    
+    def predict_batch(self, names: List[str]) -> List[Tuple[str, float]]:
+        """Пакетное предсказание категорий"""
+        results = []
+        for name in names:
+            cat, conf = self.predict(name)
+            results.append((cat, conf))
+        return results
 # ============================================================================
 # БЛОК 11: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ
 # ============================================================================
 def show_data_upload_interface():
-    """Интерфейс загрузки данных с автоопределением кодировки"""
-    st.header("📁 Загрузка данных каталога")
+    """
+    📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ
+    ============================
+    Этот раздел позволяет загрузить основной каталог товаров.
+    
+    ПОШАГОВАЯ ИНСТРУКЦИЯ:
+    1. Подготовьте файл Excel или CSV с данными товаров
+    2. Убедитесь, что в файле есть обязательные колонки:
+       - Артикул (или article/sku)
+       - Бренд (или brand/производитель)
+       - Цена (или price/стоимость)
+       - Себестоимость (или cost)
+    3. Нажмите кнопку "Загрузите файл каталога"
+    4. Выберите ваш файл
+    5. Дождитесь сообщения "✅ Успешно загружено"
+    
+    ОПЦИОНАЛЬНЫЕ КОЛОНКИ (для расширенного функционала):
+    - Длина, Ширина, Высота, Вес - для расчета логистики
+    - OE номер - для поиска аналогов
+    - Категория - для классификации
+    - Штрихкод, Описание, Кратность
+    """
+    st.header("📁 Шаг 1: Загрузка данных каталога")
+    
     st.info("""
-📋 **Инструкция по загрузке данных:**
-**ОБЯЗАТЕЛЬНЫЕ колонки:**
-- `Артикул` или `article` или `sku` - идентификатор товара
-- `Бренд` или `brand` или `производитель` - бренд товара
-- `Цена` или `price` или `стоимость` - цена продажи
-- `Себестоимость` или `cost` - себестоимость товара
-**ОПЦИОНАЛЬНЫЕ колонки (для расширенной функциональности):**
-- `Длина`, `Ширина`, `Высота`, `Вес` - габариты для расчета логистики
-- `OE номер` - оригинальный номер запчасти (для поиска аналогов)
-- `Категория` - категория товара (для классификации)
-- `Штрихкод`, `Описание`, `Кратность`
-""")
+    📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
+    
+    **ШАГ 1:** Подготовьте файл с данными товаров (Excel или CSV)
+    
+    **ШАГ 2:** Убедитесь, что файл содержит обязательные колонки:
+    - ✅ Артикул (идентификатор товара)
+    - ✅ Бренд (производитель)
+    - ✅ Цена (цена продажи)
+    - ✅ Себестоимость (закупочная цена)
+    
+    **ШАГ 3:** Нажмите кнопку ниже и выберите файл
+    
+    **ШАГ 4:** Дождитесь успешной загрузки
+    """)
+    
     uploaded_file = st.file_uploader(
-        "Загрузите файл каталога (Excel или CSV)",
+        "📤 Загрузите файл каталога (Excel или CSV)",
         type=['xlsx', 'xls', 'csv'],
-        key="data_upload_file"
+        key="data_upload_file",
+        help="Поддерживаются форматы: .xlsx, .xls, .csv"
     )
+    
     if uploaded_file is not None:
         try:
             df = None
             file_name = uploaded_file.name.lower()
+            
+            # Определяем формат файла и читаем его
             if file_name.endswith('.csv'):
                 encodings_to_try = [
                     'utf-8-sig', 'utf-8', 'cp1251', 'windows-1251',
@@ -4700,6 +5579,7 @@ def show_data_upload_interface():
                     'mac_cyrillic', 'cp866'
                 ]
                 separators = [',', ';', '\t', '|', ':', '^']
+                
                 for encoding in encodings_to_try:
                     if df is not None and not df.empty:
                         break
@@ -4721,6 +5601,7 @@ def show_data_upload_interface():
                                 break
                         except Exception:
                             continue
+                
                 if df is None or df.empty:
                     if CHARDET_AVAILABLE and chardet is not None:
                         try:
@@ -4745,8 +5626,10 @@ def show_data_upload_interface():
                                         continue
                         except Exception as e:
                             logger.warning(f"Ошибка chardet: {e}")
+                
                 if df is None or df.empty:
                     raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
+                    
             elif file_name.endswith(('.xlsx', '.xls')):
                 excel_engines = ['openpyxl', 'xlrd']
                 for engine in excel_engines:
@@ -4758,6 +5641,7 @@ def show_data_upload_interface():
                             break
                     except Exception:
                         continue
+                
                 if df is None or df.empty:
                     available_engines = ['openpyxl', 'xlrd', 'odf']
                     for engine in available_engines:
@@ -4770,23 +5654,35 @@ def show_data_upload_interface():
                             continue
                     else:
                         raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
+            
             if df is None or df.empty:
                 st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
                 return
+            
+            # Очищаем данные
             df = df.dropna(how='all')
             df = df.dropna(axis=0, how='all')
+            
             if df.empty:
                 st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
                 return
+            
             df.columns = df.columns.str.strip()
             st.session_state.uploaded_data = df
+            
             st.success(f"✅ Успешно загружено {len(df)} товаров")
-            st.subheader("📊 Предпросмотр данных")
+            
+            # Предпросмотр данных
+            st.subheader("👁️ Предпросмотр данных (первые 10 строк)")
             st.dataframe(df.head(10), use_container_width=True, key="upload_preview_table")
-            st.subheader("📊 Статистика данных")
+            
+            # Статистика данных
+            st.subheader("📊 Статистика загруженных данных")
             stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+            
             with stats_col1:
-                st.metric("📦 Товаров", len(df))
+                st.metric("📦 Всего товаров", len(df))
+            
             with stats_col2:
                 price_col = None
                 for col in df.columns:
@@ -4801,6 +5697,7 @@ def show_data_upload_interface():
                         st.metric("💰 Средняя цена", "Ошибка")
                 else:
                     st.metric("💰 Средняя цена", "—")
+            
             with stats_col3:
                 cost_col = None
                 for col in df.columns:
@@ -4815,6 +5712,7 @@ def show_data_upload_interface():
                         st.metric("💵 Средняя себестоимость", "Ошибка")
                 else:
                     st.metric("💵 Средняя себестоимость", "—")
+            
             with stats_col4:
                 brand_col = None
                 for col in df.columns:
@@ -4824,13 +5722,16 @@ def show_data_upload_interface():
                 if brand_col:
                     try:
                         unique_brands = df[brand_col].nunique()
-                        st.metric("🏷️ Брендов", unique_brands)
+                        st.metric("🏷️ Уникальных брендов", unique_brands)
                     except Exception:
                         st.metric("🏷️ Брендов", "Ошибка")
                 else:
                     st.metric("🏷️ Брендов", "—")
-            st.subheader("🔧 Действия с данными")
+            
+            # Действия с данными
+            st.subheader("🔧 Доступные действия")
             action_col1, action_col2, action_col3 = st.columns(3)
+            
             with action_col1:
                 if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
                     with st.spinner("Классификация товаров..."):
@@ -4850,19 +5751,24 @@ def show_data_upload_interface():
                             st.dataframe(category_counts, use_container_width=True, key="category_counts")
                         else:
                             st.warning("⚠️ Не найдена колонка с названием товара")
+            
             with action_col2:
                 if st.button("📊 Обогатить каталог", type="primary", key="upload_enrich_button"):
-                    st.info("ℹ️ Перейдите на вкладку '📊 Обогащение каталога' для поиска аналогов")
+                    st.info("ℹ️ Перейдите в раздел '📊 Обогащение каталога' для поиска аналогов")
+            
             with action_col3:
                 if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
                     if st.session_state.get('uploaded_data') is not None:
                         del st.session_state.uploaded_data
                     st.success("✅ Данные очищены")
                     st.rerun()
+                    
         except Exception as e:
             st.error(f"❌ Ошибка загрузки файла: {str(e)}")
             with st.expander("📋 Подробности ошибки", expanded=True):
                 st.code(traceback.format_exc())
+    
+    # Кнопка скачивания шаблона
     if st.button("📥 Скачать шаблон данных"):
         template_df = pd.DataFrame({
             "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
@@ -4877,43 +5783,157 @@ def show_data_upload_interface():
             "OE номер": ["123456", "654321", "789012"],
             "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
         })
-        # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
-        csv = template_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+        csv = template_df.to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
             label="📥 Скачать шаблон CSV",
-            data=csv.encode('utf-8-sig'),
+            data=csv,
             file_name="шаблон_каталога.csv",
-            mime="text/csv;charset=utf-8",
+            mime="text/csv",
             key="download_template"
         )
 
+
 # ============================================================================
-# БЛОК 12: ЮНИТ-ЭКОНОМИКА (ОДИН ТОВАР) - v98 С НАЛОГАМИ
+# БЛОК 12: ЮНИТ-ЭКОНОМИКА (ОБЪЕДИНЁННЫЙ РАЗДЕЛ)
 # ============================================================================
 def show_unit_economics_interface():
-    """Интерфейс расчета юнит-экономики для одного товара (v98)"""
-    st.header("📊 Юнит-экономика маркетплейсов 2026")
-    unit_economics = MarketplaceUnitEconomics()
+    """
+    📊 РАЗДЕЛ 2: ЮНИТ-ЭКОНОМИКА (ОБЪЕДИНЁННЫЙ)
+    ============================================
+    Этот раздел позволяет рассчитать юнит-экономику двумя способами:
+    
+    СПОСОБ 1: Расчет для одного товара
+    - Введите параметры вручную
+    - Получите детальный расчет
+    - Сравните маркетплейсы
+    
+    СПОСОБ 2: Расчет по всему каталогу
+    - Загрузите каталог в разделе "Загрузка данных"
+    - Система автоматически рассчитает юнит-экономику для каждого товара
+    - Экспортируйте результаты в Excel с формулами
+    
+    ПОШАГОВАЯ ИНСТРУКЦИЯ:
+    1. Выберите способ расчета (один товар или каталог)
+    2. Заполните параметры
+    3. Нажмите "Рассчитать"
+    4. Проанализируйте результаты
+    5. Экспортируйте в Excel при необходимости
+    """
+    st.header("📊 Шаг 2: Расчет юнит-экономики")
+    
     st.info("""
-💡 **Режимы работы:**
-- **FBY** - доставка силами маркетплейса (самый дешевый)
-- **FBS** - доставка силами продавца (базовый)
-- **FBO** - доставка силами оператора (средний)
-- **DBS** - доставка силами продавца (дорогой)
-- **FBP** - доставка силами платформы (чуть дешевле)
-""")
+    💡 **ДВА СПОСОБА РАСЧЕТА:**
+    
+    **Способ 1:** Расчет для одного товара (введите данные вручную)
+    **Способ 2:** Расчет по всему каталогу (загрузите файл в разделе "Загрузка данных")
+    
+    Выберите способ ниже:
+    """)
+    
+    # Выбор способа расчета
+    calculation_mode = st.radio(
+        "🎯 Выберите способ расчета:",
+        ["📝 Один товар (вручную)", "📦 Весь каталог (из файла)"],
+        horizontal=True,
+        key="calc_mode"
+    )
+    
+    if calculation_mode == "📝 Один товар (вручную)":
+        show_single_product_calculation()
+    else:
+        show_catalog_calculation()
+
+
+def show_single_product_calculation():
+    """
+    📝 СПОСОБ 1: Расчет для одного товара
+    =====================================
+    Введите параметры товара вручную для детального расчета.
+    """
+    st.subheader("📝 Расчет для одного товара")
+    
+    st.info("""
+    📋 **ИНСТРУКЦИЯ:**
+    1. Введите цену продажи и себестоимость
+    2. Укажите вес товара
+    3. Выберите маркетплейс и режим работы
+    4. Нажмите "Рассчитать"
+    5. Проанализируйте результаты
+    """)
+    
+    unit_economics = MarketplaceUnitEconomics()
+    
     col1, col2 = st.columns(2)
+    
     with col1:
-        price = st.number_input("💰 Цена продажи (₽)", min_value=0.0, value=1000.0, step=10.0, key="ue_price")
-        cost = st.number_input("💵 Себестоимость (₽)", min_value=0.0, value=500.0, step=10.0, key="ue_cost")
-        weight = st.number_input("⚖️ Вес (кг)", min_value=0.0, value=1.0, step=0.1, key="ue_weight")
+        st.markdown("### 💰 Финансовые параметры")
+        price = st.number_input(
+            "💰 Цена продажи (₽)",
+            min_value=0.0,
+            value=1000.0,
+            step=10.0,
+            key="ue_price",
+            help="Цена, по которой вы продаете товар"
+        )
+        cost = st.number_input(
+            "💵 Себестоимость (₽)",
+            min_value=0.0,
+            value=500.0,
+            step=10.0,
+            key="ue_cost",
+            help="Закупочная цена товара"
+        )
+        weight = st.number_input(
+            "⚖️ Вес (кг)",
+            min_value=0.0,
+            value=1.0,
+            step=0.1,
+            key="ue_weight",
+            help="Вес товара в килограммах"
+        )
+    
     with col2:
-        volume = st.number_input("📦 Объем (литры)", min_value=0.0, value=5.0, step=0.5, key="ue_volume")
-        marketplace = st.selectbox("🏪 Маркетплейс", list(unit_economics._configs.keys()), key="ue_marketplace")
-        operation_mode = st.selectbox("📦 Режим работы", ["FBY", "FBS", "FBO", "DBS", "FBP"], key="ue_mode")
-        category = st.text_input("📂 Категория (опционально)", placeholder="например: двигатель", key="ue_category")
+        st.markdown("### 🏪 Параметры маркетплейса")
+        volume = st.number_input(
+            "📦 Объем (литры)",
+            min_value=0.0,
+            value=5.0,
+            step=0.5,
+            key="ue_volume",
+            help="Объем товара в литрах (Длина × Ширина × Высота / 1000)"
+        )
+        marketplace = st.selectbox(
+            "🏪 Маркетплейс",
+            list(unit_economics._configs.keys()),
+            key="ue_marketplace",
+            help="Выберите маркетплейс для расчета"
+        )
+        operation_mode = st.selectbox(
+            "📦 Режим работы",
+            ["FBY", "FBS", "FBO", "DBS", "FBP"],
+            key="ue_mode",
+            help="FBY - самый дешевый, FBS - базовый"
+        )
+        category = st.text_input(
+            "📂 Категория (опционально)",
+            placeholder="например: двигатель",
+            key="ue_category",
+            help="Категория товара для точного расчета комиссии"
+        )
+    
+    # Настройки налогов
     with st.expander("💰 Настройки налогов и прибыли"):
+        st.info("""
+        📋 **НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ:**
+        
+        Выберите систему налогообложения и укажите параметры:
+        - УСН 6% - налог с доходов
+        - УСН 15% - налог с разницы доходов и расходов
+        - ОСНО - общая система (НДС + налог на прибыль)
+        """)
+        
         col_t1, col_t2, col_t3 = st.columns(3)
+        
         with col_t1:
             tax_system = st.selectbox(
                 "Система налогообложения",
@@ -4922,6 +5942,7 @@ def show_unit_economics_interface():
                 key="ue_tax_system",
                 help="УСН 6% - с доходов; УСН 15% - доходы-расходы; ОСНО - НДС + прибыль"
             )
+        
         with col_t2:
             min_profit_percent = st.number_input(
                 "Желаемая прибыль (%)",
@@ -4932,6 +5953,7 @@ def show_unit_economics_interface():
                 key="ue_min_profit",
                 help="Минимальная прибыль после уплаты налогов и всех комиссий"
             ) / 100
+        
         with col_t3:
             annual_revenue = st.number_input(
                 "Годовая выручка (₽)",
@@ -4941,7 +5963,10 @@ def show_unit_economics_interface():
                 key="ue_annual_revenue",
                 help="Для расчёта 1% налога сверх лимита 300 млн"
             )
+    
     is_premium = st.checkbox("⭐ Премиум-раздел (доп. комиссия)", key="ue_premium")
+    
+    # Кнопка расчета
     if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_calc"):
         with st.spinner("Расчет юнит-экономики..."):
             economics = unit_economics.calculate_unit_economics(
@@ -4955,31 +5980,48 @@ def show_unit_economics_interface():
                 min_profit_percent=min_profit_percent,
                 annual_revenue=annual_revenue
             )
+        
+        # Отображение результатов
+        st.subheader("📊 Результаты расчета")
+        
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
             st.metric("💰 Прибыль", f"{economics.profit:.2f} ₽", delta=f"{economics.profit_per_ruble:.2f} ₽/₽")
+        
         with col2:
             st.metric("📈 Маржа", f"{economics.margin_percent:.2f}%")
+        
         with col3:
             st.metric("📊 ROI", f"{economics.roi:.2f}%")
+        
         with col4:
             st.metric("⚖️ Точка безубыточности", f"{economics.breakeven_price:.2f} ₽")
+        
+        # Рекомендованная минимальная цена
         st.subheader("💎 Рекомендованная минимальная цена")
+        
         col_rec1, col_rec2, col_rec3 = st.columns(3)
+        
         with col_rec1:
             st.metric(
                 "🎯 Мин. цена (с учётом налога и 10% прибыли)",
                 f"{economics.recommended_min_price:.2f} ₽",
                 delta=f"{economics.recommended_min_price - price:.2f} ₽"
             )
+        
         with col_rec2:
             st.metric(f"💵 Налог ({tax_system})", f"{economics.tax_amount:.2f} ₽")
+        
         with col_rec3:
             if price < economics.recommended_min_price:
                 st.warning(f"⚠️ Цена ниже рекомендованной на {economics.recommended_min_price - price:.2f} ₽")
             else:
                 st.success(f"✅ Цена выше минимальной на {price - economics.recommended_min_price:.2f} ₽")
+        
+        # Детализация расходов
         st.subheader("📋 Детализация расходов")
+        
         expenses_data = {
             "Статья расходов": [
                 "Себестоимость", "Комиссия", "Подписка", "Логистика",
@@ -5020,19 +6062,27 @@ def show_unit_economics_interface():
                 f"{economics.total_expenses/price*100:.1f}%"
             ]
         }
+        
         st.dataframe(pd.DataFrame(expenses_data), use_container_width=True, key="ue_expenses_table")
+        
+        # Сравнение маркетплейсов
         st.subheader("🏆 Сравнение всех маркетплейсов")
+        
         comparison_df = unit_economics.calculate_for_all_marketplaces(
             price=price, cost=cost, weight=weight, category=category if category else None,
             operation_mode=operation_mode, tax_system=tax_system,
             min_profit_percent=min_profit_percent, annual_revenue=annual_revenue
         )
+        
         st.dataframe(comparison_df, use_container_width=True, key="ue_comparison_table")
+        
         if not comparison_df.empty:
             best_idx = comparison_df['profit'].idxmax()
             best = comparison_df.loc[best_idx]
             st.success(f"🏆 Оптимальный маркетплейс: **{best['marketplace']}** "
                        f"(прибыль: {best['profit']:.2f} ₽, маржа: {best['margin_percent']:.2f}%)")
+        
+        # Визуализация
         if PLOTLY_AVAILABLE and go is not None:
             try:
                 fig = go.Figure()
@@ -5061,28 +6111,34 @@ def show_unit_economics_interface():
             except Exception as e:
                 logger.warning(f"Ошибка визуализации: {e}")
 
-# ============================================================================
-# БЛОК 13: ЮНИТ-ЭКОНОМИКА ПО АРТИКУЛАМ (v98)
-# ============================================================================
-def show_unit_economics_by_article_interface():
-    """Интерфейс для расчета юнит-экономики по каждому артикулу (v98)"""
-    st.header("📊 Юнит-экономика по артикулам")
+
+def show_catalog_calculation():
+    """
+    📦 СПОСОБ 2: Расчет по всему каталогу
+    =====================================
+    Автоматический расчет юнит-экономики для всех товаров из загруженного файла.
+    """
+    st.subheader("📦 Расчет по всему каталогу")
+    
     if st.session_state.get('uploaded_data') is None:
         st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
         return
+    
     df = st.session_state.uploaded_data.copy()
+    
     st.info("""
-📊 **Расчет юнит-экономики для каждого товара**
-Для каждого артикула в каталоге будут рассчитаны:
-- 💰 Прибыль по каждому маркетплейсу
-- 📈 Маржинальность
-- 📊 ROI
-- ⚖️ Точка безубыточности
-- 💎 **Рекомендованная минимальная цена** (с учётом налога + 10% прибыли)
-- 📋 Детализация всех расходов
-""")
+    📋 **ИНСТРУКЦИЯ:**
+    1. Убедитесь, что данные загружены
+    2. Выберите маркетплейсы для расчета
+    3. Укажите режим работы
+    4. Нажмите "Рассчитать"
+    5. Экспортируйте результаты в Excel
+    """)
+    
     st.subheader("⚙️ Параметры расчета")
+    
     col1, col2, col3 = st.columns(3)
+    
     with col1:
         unit_economics = MarketplaceUnitEconomics()
         available_marketplaces = list(unit_economics._configs.keys())
@@ -5090,23 +6146,47 @@ def show_unit_economics_by_article_interface():
             "🏪 Маркетплейсы для расчета",
             options=available_marketplaces,
             default=available_marketplaces[:3],
-            key="ue_article_marketplaces"
+            key="ue_article_marketplaces",
+            help="Выберите один или несколько маркетплейсов"
         )
         if not selected_marketplaces:
             st.warning("⚠️ Выберите хотя бы один маркетплейс")
             return
+    
     with col2:
-        operation_mode = st.selectbox("📦 Режим работы", ["FBY", "FBS", "FBO", "DBS", "FBP"], key="ue_article_mode")
-        days_in_storage = st.number_input("📦 Дней хранения", min_value=1, max_value=365, value=30, step=1, key="ue_article_days_storage")
+        operation_mode = st.selectbox(
+            "📦 Режим работы",
+            ["FBY", "FBS", "FBO", "DBS", "FBP"],
+            key="ue_article_mode"
+        )
+        days_in_storage = st.number_input(
+            "📦 Дней хранения",
+            min_value=1,
+            max_value=365,
+            value=30,
+            step=1,
+            key="ue_article_days_storage"
+        )
+    
     with col3:
         apply_markup = st.checkbox("💰 Применить наценку", value=False, key="ue_article_apply_markup")
         if apply_markup:
-            markup_percent = st.number_input("Наценка (%)", min_value=0.0, max_value=500.0, value=20.0, step=5.0, key="ue_article_markup_percent")
+            markup_percent = st.number_input(
+                "Наценка (%)",
+                min_value=0.0,
+                max_value=500.0,
+                value=20.0,
+                step=5.0,
+                key="ue_article_markup_percent"
+            )
         else:
             markup_percent = 0.0
         is_premium = st.checkbox("⭐ Премиум-раздел", value=False, key="ue_article_premium")
+    
+    # Настройки налогов
     with st.expander("💰 Настройки налогов и прибыли"):
         col_t1, col_t2, col_t3 = st.columns(3)
+        
         with col_t1:
             tax_system = st.selectbox(
                 "Система налогообложения",
@@ -5114,6 +6194,7 @@ def show_unit_economics_by_article_interface():
                 index=0,
                 key="ue_article_tax_system"
             )
+        
         with col_t2:
             min_profit_percent = st.number_input(
                 "Желаемая прибыль (%)",
@@ -5123,6 +6204,7 @@ def show_unit_economics_by_article_interface():
                 step=1.0,
                 key="ue_article_min_profit"
             ) / 100
+        
         with col_t3:
             annual_revenue = st.number_input(
                 "Годовая выручка (₽)",
@@ -5131,76 +6213,104 @@ def show_unit_economics_by_article_interface():
                 step=100000.0,
                 key="ue_article_annual_revenue"
             )
+    
+    # Определение колонок
     st.subheader("📋 Определение колонок в данных")
+    
     col1, col2, col3, col4 = st.columns(4)
+    
     with col1:
         article_col = st.selectbox("Артикул", options=df.columns, key="ue_article_col")
+    
     with col2:
         price_options = [col for col in df.columns if any(w in col.lower() for w in ['цена', 'price', 'стоимость'])]
         if not price_options:
             price_options = df.columns.tolist()
         price_col = st.selectbox("Цена продажи", options=price_options, key="ue_price_col")
+    
     with col3:
         cost_options = [col for col in df.columns if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная'])]
         if not cost_options:
             cost_options = df.columns.tolist()
         cost_col = st.selectbox("Себестоимость", options=cost_options, key="ue_cost_col")
+    
     with col4:
         category_options = [col for col in df.columns if any(w in col.lower() for w in ['категория', 'category', 'группа'])]
         category_options = ['Не выбрано'] + category_options
         category_col = st.selectbox("Категория (опционально)", options=category_options, key="ue_category_col")
+    
+    # Габариты
     st.subheader("📏 Габариты (опционально)")
+    
     col1, col2, col3, col4 = st.columns(4)
+    
     with col1:
         length_options = [col for col in df.columns if any(w in col.lower() for w in ['длина', 'length', 'длинна'])]
         length_options = ['Не выбрано'] + length_options
         length_col = st.selectbox("Длина (см)", options=length_options, key="ue_length_col")
+    
     with col2:
         width_options = [col for col in df.columns if any(w in col.lower() for w in ['ширина', 'width'])]
         width_options = ['Не выбрано'] + width_options
         width_col = st.selectbox("Ширина (см)", options=width_options, key="ue_width_col")
+    
     with col3:
         height_options = [col for col in df.columns if any(w in col.lower() for w in ['высота', 'height'])]
         height_options = ['Не выбрано'] + height_options
         height_col = st.selectbox("Высота (см)", options=height_options, key="ue_height_col")
+    
     with col4:
         weight_options = [col for col in df.columns if any(w in col.lower() for w in ['вес', 'weight'])]
         weight_options = ['Не выбрано'] + weight_options
         weight_col = st.selectbox("Вес (кг)", options=weight_options, key="ue_weight_col")
+    
+    # Кнопка расчета
     if st.button("🚀 Рассчитать юнит-экономику по артикулам", type="primary", key="ue_calc_articles"):
         with st.spinner("Расчет юнит-экономики для всех товаров..."):
             try:
                 filtered_df = df.copy()
+                
                 if filtered_df.empty:
                     st.warning("⚠️ Нет данных для расчета")
                     return
+                
                 st.info(f"📊 Расчет для {len(filtered_df)} товаров")
+                
                 results = []
                 progress_bar = st.progress(0, text="Расчет юнит-экономики...")
                 total_rows = len(filtered_df)
+                
                 for idx, row in filtered_df.iterrows():
                     if idx % max(1, total_rows // 20) == 0:
                         progress_bar.progress(idx / total_rows, text=f"Расчет {idx+1}/{total_rows}...")
+                    
                     article = safe_str(row.get(article_col, ''))
                     price = safe_float(row.get(price_col, 0))
                     cost = safe_float(row.get(cost_col, 0))
+                    
                     if price <= 0 or cost <= 0:
                         continue
+                    
                     length = safe_float(row.get(length_col, 0)) if length_col != 'Не выбрано' else 0
                     width = safe_float(row.get(width_col, 0)) if width_col != 'Не выбрано' else 0
                     height = safe_float(row.get(height_col, 0)) if height_col != 'Не выбрано' else 0
                     weight = safe_float(row.get(weight_col, 0)) if weight_col != 'Не выбрано' else 0
+                    
                     if length > 0 and width > 0 and height > 0:
                         volume = (length * width * height) / 1000.0
                     else:
                         volume = 5.0
+                    
                     if weight <= 0:
                         weight = 1.0
+                    
                     category = None
                     if category_col != 'Не выбрано' and category_col in df.columns:
                         category = safe_str(row.get(category_col, ''))
+                    
                     final_price = price * (1 + markup_percent / 100) if apply_markup else price
                     brand = safe_str(row.get('Бренд', '')) if 'Бренд' in df.columns else ""
+                    
                     for marketplace in selected_marketplaces:
                         economics = unit_economics.calculate_unit_economics(
                             price=final_price,
@@ -5215,6 +6325,7 @@ def show_unit_economics_by_article_interface():
                             article=article,
                             brand=brand
                         )
+                        
                         row_data = {
                             'Артикул': article,
                             'Бренд': brand,
@@ -5245,40 +6356,68 @@ def show_unit_economics_by_article_interface():
                             'Итого_расходов': economics.total_expenses
                         }
                         results.append(row_data)
+                
                 progress_bar.progress(1.0, text="Расчет завершен!")
                 progress_bar.empty()
+                
                 if not results:
                     st.error("❌ Не удалось рассчитать юнит-экономику ни для одного товара")
                     return
+                
                 df_results = pd.DataFrame(results)
                 st.session_state.ue_article_results = df_results
+                
                 st.success(f"✅ Рассчитано {len(df_results)} записей по {len(selected_marketplaces)} маркетплейсам")
+                
+                # Сводная статистика
                 st.subheader("📊 Сводная статистика")
+                
                 col1, col2, col3, col4 = st.columns(4)
+                
                 with col1:
                     total_profit = df_results['Прибыль'].sum()
                     st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
+                
                 with col2:
                     avg_profit = df_results['Прибыль'].mean()
                     st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
+                
                 with col3:
                     avg_margin = df_results['Маржа_%'].mean()
                     st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
+                
                 with col4:
                     best_mp = df_results.groupby('Маркетплейс')['Прибыль'].sum().idxmax()
                     st.metric("🏆 Лучший МП", best_mp)
+                
+                # Результаты расчета
                 st.subheader("📋 Результаты расчета")
+                
                 display_cols = ['Артикул', 'Маркетплейс', 'Цена_с_наценкой', 'Прибыль', 'Маржа_%',
                                 'Рекомендованная_мин_цена', 'Налог', 'Точка_безубыточности']
                 available_display = [col for col in display_cols if col in df_results.columns]
-                sort_col = st.selectbox("Сортировать по:", options=available_display,
-                                        index=available_display.index('Прибыль') if 'Прибыль' in available_display else 0,
-                                        key="ue_sort_col")
-                sort_order = st.radio("Порядок:", ["По убыванию", "По возрастанию"], horizontal=True, key="ue_sort_order")
+                
+                sort_col = st.selectbox(
+                    "Сортировать по:",
+                    options=available_display,
+                    index=available_display.index('Прибыль') if 'Прибыль' in available_display else 0,
+                    key="ue_sort_col"
+                )
+                sort_order = st.radio(
+                    "Порядок:",
+                    ["По убыванию", "По возрастанию"],
+                    horizontal=True,
+                    key="ue_sort_order"
+                )
+                
                 sorted_df = df_results.sort_values(sort_col, ascending=(sort_order == "По возрастанию"))
                 st.dataframe(sorted_df[available_display], use_container_width=True, key="ue_results_table")
+                
+                # Экспорт результатов
                 st.subheader("📤 Экспорт результатов")
+                
                 export_col1, export_col2 = st.columns(2)
+                
                 with export_col1:
                     if st.button("📥 Экспорт в Excel С ФОРМУЛАМИ", key="ue_export_excel_formulas"):
                         with st.spinner("Генерация Excel с формулами..."):
@@ -5297,37 +6436,388 @@ def show_unit_economics_by_article_interface():
                                     os.remove(output_path)
                                 except Exception:
                                     pass
+                
                 with export_col2:
                     if st.button("📥 Экспорт в CSV", key="ue_export_csv"):
-                        # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
-                        csv = df_results.to_csv(index=False, encoding='utf-8-sig', sep=';')
+                        csv = df_results.to_csv(index=False, encoding='utf-8-sig')
                         st.download_button(
                             label="📥 Скачать CSV",
-                            data=csv.encode('utf-8-sig'),
+                            data=csv,
                             file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv;charset=utf-8",
+                            mime="text/csv",
                             key="ue_download_csv"
                         )
+                        
             except Exception as e:
                 st.error(f"❌ Ошибка при расчете: {str(e)}")
                 st.code(traceback.format_exc())
                 logger.error(f"UE by article error: {traceback.format_exc()}")
 
+
 # ============================================================================
-# БЛОК 14: AI ТАРИФЫ - v98 С ГАЛОЧКОЙ "ЗАПРОСИТЬ ИИ"
+# БЛОК 13: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME)
+# ============================================================================
+def show_catalog_grouping_interface():
+    """
+    🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
+    =====================================
+    Этот раздел позволяет работать с большими каталогами (10M+ записей).
+    
+    ВОЗМОЖНОСТИ:
+    - Загрузка данных из Excel/CSV
+    - Группировка по категориям
+    - Поиск и фильтрация
+    - Экспорт в различных форматах
+    - Статистика и аналитика
+    
+    ПОШАГОВАЯ ИНСТРУКЦИЯ:
+    1. Загрузите файл с каталогом
+    2. Дождитесь обработки
+    3. Используйте фильтры для поиска
+    4. Экспортируйте результаты
+    """
+    st.header("🗂️ Шаг 3: Каталог для группировки")
+    
+    st.info("""
+    📋 **О РАЗДЕЛЕ:**
+    
+    Этот раздел предназначен для работы с большими каталогами товаров.
+    
+    **Возможности:**
+    - ✅ Загрузка каталогов до 10 миллионов записей
+    - ✅ Автоматическая группировка по категориям
+    - ✅ Поиск и фильтрация товаров
+    - ✅ Экспорт в Excel, CSV, Parquet
+    - ✅ Статистика и аналитика
+    
+    **Инструкция:**
+    1. Загрузите файл с каталогом
+    2. Дождитесь обработки
+    3. Используйте фильтры
+    4. Экспортируйте результаты
+    """)
+    
+    # Проверка доступности библиотек
+    if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
+        st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
+        return
+    
+    # Инициализация каталога
+    if 'high_volume_catalog' not in st.session_state:
+        st.session_state.high_volume_catalog = HighVolumeAutoPartsCatalog()
+    
+    catalog = st.session_state.high_volume_catalog
+    
+    if not catalog.conn:
+        st.error("❌ Ошибка подключения к базе данных")
+        return
+    
+    # Меню раздела
+    st.sidebar.title("🧭 Меню каталога")
+    option = st.sidebar.radio(
+        "Выберите раздел",
+        ["📥 Загрузка данных", " Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", "🔧 Управление"],
+        key="catalog_menu"
+    )
+    
+    if option == "📥 Загрузка данных":
+        show_catalog_upload(catalog)
+    elif option == "🔍 Поиск и фильтрация":
+        show_catalog_search(catalog)
+    elif option == "📊 Статистика":
+        show_catalog_statistics(catalog)
+    elif option == "📤 Экспорт":
+        show_catalog_export(catalog)
+    elif option == "🔧 Управление":
+        show_catalog_management(catalog)
+
+
+def show_catalog_upload(catalog):
+    """Загрузка данных в каталог"""
+    st.subheader("📥 Загрузка данных")
+    
+    st.info("""
+    📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
+    
+    1. Подготовьте файлы с данными:
+       - Основные данные (OE номера, названия)
+       - Кросс-ссылки (связи OE ↔ Артикул)
+       - Штрих-коды
+       - Габариты и вес
+       - Изображения (URL)
+       - Цены
+    
+    2. Загрузите файлы в соответствующие поля
+    
+    3. Нажмите "Обработать и загрузить"
+    
+    4. Дождитесь завершения обработки
+    """)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        oe_file = st.file_uploader("📄 Основные данные (OE)", type=['xlsx'], key="hv_oe")
+        cross_file = st.file_uploader("🔗 Кросс-ссылки (OE→Артикул)", type=['xlsx'], key="hv_cross")
+        barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
+    
+    with col2:
+        weight_dims_file = st.file_uploader("📏 Вес и габариты", type=['xlsx'], key="hv_dims")
+        images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
+        prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
+    
+    uploaded_files = {
+        'oe': oe_file,
+        'cross': cross_file,
+        'barcode': barcode_file,
+        'dimensions': weight_dims_file,
+        'images': images_file,
+        'prices': prices_file
+    }
+    
+    if st.button("🚀 Обработать и загрузить", key="hv_load"):
+        saved_paths = {}
+        for key, file in uploaded_files.items():
+            if file:
+                path = catalog.data_dir / f"{key}_{int(time.time())}.xlsx"
+                with open(path, "wb") as f:
+                    f.write(file.getbuffer())
+                saved_paths[key] = str(path)
+        
+        if saved_paths:
+            with st.spinner("Обработка файлов..."):
+                dataframes = catalog.merge_all_data_parallel(saved_paths)
+            
+            with st.spinner("Загрузка данных в базу..."):
+                catalog.process_and_load_data(dataframes)
+            
+            st.success("✅ Данные успешно загружены!")
+        else:
+            st.warning("⚠️ Загрузите хотя бы один файл")
+
+
+def show_catalog_search(catalog):
+    """Поиск и фильтрация в каталоге"""
+    st.subheader("🔍 Поиск и фильтрация")
+    
+    st.info("""
+    🔍 **ПОИСК В КАТАЛОГЕ:**
+    
+    Используйте фильтры для поиска товаров:
+    - По артикулу
+    - По бренду
+    - По категории
+    - По OE номеру
+    """)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        search_artikul = st.text_input("🔢 Артикул", key="search_artikul")
+        search_brand = st.text_input("🏷️ Бренд", key="search_brand")
+    
+    with col2:
+        search_oe = st.text_input("🔗 OE номер", key="search_oe")
+        search_category = st.text_input("📂 Категория", key="search_category")
+    
+    if st.button("🔍 Найти", key="catalog_search"):
+        query_parts = []
+        params = []
+        
+        if search_artikul:
+            query_parts.append("artikul LIKE ?")
+            params.append(f"%{search_artikul}%")
+        
+        if search_brand:
+            query_parts.append("brand LIKE ?")
+            params.append(f"%{search_brand}%")
+        
+        if search_oe:
+            query_parts.append("""
+                artikul_norm IN (
+                    SELECT artikul_norm FROM cross_references 
+                    WHERE oe_number_norm LIKE ?
+                )
+            """)
+            params.append(f"%{search_oe}%")
+        
+        if query_parts:
+            where_clause = " AND ".join(query_parts)
+            query = f"SELECT * FROM parts WHERE {where_clause} LIMIT 100"
+            
+            try:
+                df = catalog.conn.execute(query, params).df()
+                st.dataframe(df, use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ Ошибка поиска: {e}")
+
+
+def show_catalog_statistics(catalog):
+    """Статистика каталога"""
+    st.subheader("📊 Статистика каталога")
+    
+    stats = catalog.get_statistics()
+    
+    if stats:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("📦 Уникальных товаров", f"{stats.get('unique_parts', 0):,}")
+        
+        with col2:
+            st.metric("🏷️ Брендов", f"{stats.get('brands', 0):,}")
+        
+        with col3:
+            st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
+        
+        if 'top_brands' in stats and not stats['top_brands'].empty:
+            st.subheader("🏆 Топ 10 брендов")
+            st.dataframe(stats['top_brands'], use_container_width=True)
+
+
+def show_catalog_export(catalog):
+    """Экспорт каталога"""
+    st.subheader("📤 Экспорт каталога")
+    
+    st.info("""
+    📤 **ЭКСПОРТ ДАННЫХ:**
+    
+    Выберите формат и параметры экспорта:
+    - Excel (.xlsx) - с формулами
+    - CSV - универсальный формат
+    - Parquet - для больших данных
+    """)
+    
+    total = catalog.conn.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
+    ).fetchone()[0]
+    
+    st.info(f"📊 Всего записей: {total}")
+    
+    if total == 0:
+        st.warning("⚠️ Нет данных для экспорта")
+        return
+    
+    format_choice = st.radio(
+        "📄 Формат экспорта",
+        ["CSV", "Excel", "Parquet"],
+        key="hv_format"
+    )
+    
+    include_prices = st.checkbox("💰 Включить цены", value=True, key="hv_prices_include")
+    apply_markup = st.checkbox("💹 Применить наценку", value=True, disabled=not include_prices, key="hv_markup")
+    
+    if st.button("🚀 Экспортировать", key="hv_export_btn"):
+        output_path = catalog.data_dir / f"export.{format_choice.lower()}"
+        
+        with st.spinner("Генерация файла..."):
+            if format_choice == "CSV":
+                catalog.export_to_csv_optimized(str(output_path), None, include_prices, apply_markup)
+            elif format_choice == "Excel":
+                catalog.export_to_excel_optimized(str(output_path), None, include_prices, apply_markup)
+            elif format_choice == "Parquet":
+                catalog.export_to_parquet(str(output_path), None, include_prices, apply_markup)
+        
+        if output_path.exists():
+            with open(output_path, "rb") as f:
+                st.download_button(
+                    "⬇️ Скачать файл",
+                    f,
+                    file_name=output_path.name,
+                    key="hv_download"
+                )
+
+
+def show_catalog_management(catalog):
+    """Управление каталогом"""
+    st.subheader("🔧 Управление каталогом")
+    
+    st.warning("⚠️ Операции необратимы!")
+    
+    management_option = st.radio(
+        "Выберите действие:",
+        ["🗑️ Удалить по бренду", "🗑️ Удалить по артикулу"],
+        key="hv_management"
+    )
+    
+    if management_option == "🗑️ Удалить по бренду":
+        try:
+            brands_result = catalog.conn.execute(
+                "SELECT DISTINCT brand FROM parts WHERE brand IS NOT NULL ORDER BY brand"
+            ).fetchall()
+            available_brands = [row[0] for row in brands_result] if brands_result else []
+        except Exception as e:
+            st.error(f"Ошибка: {e}")
+            return
+        
+        if not available_brands:
+            st.info("Нет данных")
+            return
+        
+        selected_brand = st.selectbox("Бренд", available_brands, key="hv_delete_brand")
+        
+        if st.checkbox("Подтверждаю удаление", key="hv_confirm_brand"):
+            if st.button("Удалить", key="hv_delete_brand_btn"):
+                brand_norm = catalog.normalize_key(pl.Series([selected_brand]))[0]
+                deleted = catalog.delete_by_brand(brand_norm)
+                st.success(f"✅ Удалено {deleted} записей")
+                st.rerun()
+    
+    elif management_option == "🗑️ Удалить по артикулу":
+        artikul_input = st.text_input("Артикул", key="hv_delete_artikul")
+        
+        if artikul_input:
+            artikul_norm = catalog.normalize_key(pl.Series([artikul_input]))[0]
+            count = catalog.conn.execute(
+                "SELECT COUNT(*) FROM parts WHERE artikul_norm = ?", [artikul_norm]
+            ).fetchone()[0]
+            
+            st.info(f"Найдено {count} записей для артикула '{artikul_input}'")
+            
+            if st.checkbox("Подтверждаю", key="hv_confirm_artikul"):
+                if st.button("Удалить", key="hv_delete_artikul_btn"):
+                    deleted = catalog.delete_by_artikul(artikul_norm)
+                    st.success(f"✅ Удалено {deleted} записей")
+                    st.rerun()
+
+
+# ============================================================================
+# БЛОК 14: AI ТАРИФЫ
 # ============================================================================
 def show_ai_tariffs_interface():
-    """Интерфейс управления тарифами через DeepSeek AI (v98)"""
-    st.header("🤖 Управление тарифами через DeepSeek AI")
+    """
+    🤖 РАЗДЕЛ 4: AI ТАРИФЫ
+    ======================
+    Обновление тарифов маркетплейсов через искусственный интеллект.
+    
+    ИНСТРУКЦИЯ:
+    1. Введите API ключ DeepSeek
+    2. Выберите маркетплейс
+    3. Поставьте галочку "Запросить ИИ"
+    4. Нажмите "Обновить тарифы"
+    """
+    st.header("🤖 Шаг 4: AI Тарифы")
+    
     st.info("""
-🚀 **DeepSeek AI обновляет тарифы для автозапчастей**
-**Как работает:**
-- ✅ Если галочка **"Запросить ИИ"** установлена — тарифы запрашиваются у DeepSeek AI
-- ✅ Если галочка **НЕ установлена** — используются тарифы из кэша (или захардкоженные)
-- ✅ Данные кэшируются на 24 часа с возможностью ручного редактирования
-- ✅ Сохраняется история всех изменений тарифов
-""")
+    🤖 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ ИИ:**
+    
+    Этот раздел позволяет обновить тарифы маркетплейсов с помощью AI.
+    
+    **Инструкция:**
+    1. Получите API ключ на platform.deepseek.com
+    2. Введите ключ в поле ниже
+    3. Выберите маркетплейс
+    4. Поставьте галочку "Запросить ИИ"
+    5. Нажмите "Обновить тарифы"
+    
+    **Важно:**
+    - Без галочки используются кэшированные тарифы
+    - С галочкой - запрашиваются актуальные тарифы у AI
+    - Данные кэшируются на 24 часа
+    """)
+    
     unit_economics = MarketplaceUnitEconomics()
+    
     api_key = st.text_input(
         "🔑 API ключ DeepSeek",
         type="password",
@@ -5335,21 +6825,26 @@ def show_ai_tariffs_interface():
         help="Получите API ключ на platform.deepseek.com",
         key="ai_api_key"
     )
+    
     if api_key:
         os.environ['DEEPSEEK_API_KEY'] = api_key
+    
     col1, col2, col3 = st.columns(3)
+    
     with col1:
         marketplace = st.selectbox(
             "🏪 Маркетплейс",
             ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "Все маркетплейсы"],
             key="ai_marketplace"
         )
+    
     with col2:
         category = st.text_input(
             "📂 Категория (опционально)",
             placeholder="например: двигатель",
             key="ai_category"
         )
+    
     with col3:
         force_refresh = st.checkbox(
             "🔄 Запросить ИИ (принудительное обновление)",
@@ -5357,10 +6852,12 @@ def show_ai_tariffs_interface():
             key="ai_force_refresh",
             help="Если установлено — тарифы будут запрошены у DeepSeek AI. Если нет — используются кэшированные."
         )
+    
     if st.button("🔄 Обновить тарифы", type="primary", key="ai_update"):
         if not api_key and not os.environ.get('DEEPSEEK_API_KEY'):
             st.error("❌ Введите API ключ DeepSeek")
             return
+        
         with st.spinner("Обновление тарифов..."):
             if marketplace == "Все маркетплейсы":
                 result = unit_economics.refresh_tariffs_from_ai(
@@ -5385,8 +6882,12 @@ def show_ai_tariffs_interface():
                         st.json(result.get('rates', {}))
                 else:
                     st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+    
     st.divider()
+    
+    # Текущие тарифы
     st.subheader("📊 Текущие тарифы маркетплейсов")
+    
     tariff_data = []
     for mp_name, config in unit_economics._configs.items():
         tariff_data.append({
@@ -5400,289 +6901,73 @@ def show_ai_tariffs_interface():
             "Источник": config.tariff_source.value,
             "Обновлено": config.last_updated.strftime("%Y-%m-%d %H:%M")
         })
+    
     st.dataframe(pd.DataFrame(tariff_data), use_container_width=True, key="ai_tariffs_table")
-    st.divider()
-    st.subheader("📊 Статистика кэша тарифов")
-    cache_stats = unit_economics.get_tariff_cache_statistics()
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📦 Всего записей", cache_stats.get('total_entries', 0))
-    with col2:
-        st.metric("⏰ Устаревших", cache_stats.get('expired_count', 0))
-    with col3:
-        st.metric("📝 Записей в истории", cache_stats.get('history_count', 0))
-    with col4:
-        st.metric("🤖 AI запросов", unit_economics._stats.get('ai_requests', 0))
-    with st.expander("📜 История изменений тарифов"):
-        history = unit_economics.get_tariff_cache_history(limit=20)
-        if history:
-            st.dataframe(pd.DataFrame(history), use_container_width=True, key="ai_history_table")
-        else:
-            st.info("📜 История пуста")
-    st.divider()
-    st.subheader("🔧 Управление кэшем")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("🗑️ Очистить устаревшие", key="ai_clear_expired"):
-            count = unit_economics._tariff_cache.clear_expired()
-            st.success(f"✅ Удалено {count} устаревших записей")
-            st.rerun()
-    with col2:
-        if st.button("🗑️ Очистить весь кэш", key="ai_clear_all"):
-            if st.checkbox("Подтверждаю полную очистку", key="ai_confirm_clear"):
-                count = unit_economics._tariff_cache.clear_all()
-                st.success(f"✅ Удалено {count} записей")
-                st.rerun()
-    with col3:
-        if st.button("📥 Экспорт кэша", key="ai_export_cache"):
-            export_path = TARIFFS_DIR / f"tariffs_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            if unit_economics._tariff_cache.export_to_file(export_path):
-                with open(export_path, "rb") as f:
-                    st.download_button(
-                        label="📥 Скачать кэш",
-                        data=f,
-                        file_name=export_path.name,
-                        mime="application/json",
-                        key="ai_download_cache"
-                    )
-                st.success(f"✅ Кэш экспортирован: {export_path}")
 
-# ============================================================================
-# 🆕 v98: БЛОК 14.5 - ИНТЕРФЕЙС ИМПОРТА ЦЕН
-# ============================================================================
-def show_price_import_interface():
-    """🆕 v98: Интерфейс импорта цен из прайс-листа"""
-    st.header("💰 Импорт цен из прайс-листа")
-    st.info("""
-📋 **Импорт цен без перезагрузки каталога**
-Этот раздел позволяет обновить цены в загруженном каталоге через отдельный прайс-лист:
-- ✅ Загружается только файл с ценами (не весь каталог)
-- ✅ Автоматическое сопоставление по артикулу и бренду
-- ✅ Поддержка Excel и CSV (автоопределение кодировки)
-- ✅ Режимы: полная перезапись или обновление только пустых цен
-- ✅ Опциональная наценка на импортированные цены
-- ✅ История всех импортов сохраняется
-""")
-    if st.session_state.get('uploaded_data') is None:
-        st.warning("⚠️ Сначала загрузите каталог в разделе '📁 Загрузка данных'")
-        return
-    catalog_df = st.session_state.uploaded_data
-    st.success(f"✅ Каталог загружен: {len(catalog_df)} товаров")
-    # === Инициализация импортера ===
-    if 'price_importer' not in st.session_state:
-        st.session_state.price_importer = PriceImporter()
-    importer = st.session_state.price_importer
-    # === Загрузка прайс-листа ===
-    st.subheader("📤 Загрузка прайс-листа")
-    price_file = st.file_uploader(
-        "Загрузите файл с ценами (Excel или CSV)",
-        type=['xlsx', 'xls', 'csv'],
-        key="price_import_file",
-        help="Файл должен содержать как минимум колонки: артикул и цена"
-    )
-    if price_file is not None:
-        try:
-            price_df, format_info = importer.read_pricelist_file(price_file)
-            if price_df is None or price_df.empty:
-                st.error(f"❌ Не удалось прочитать файл: {format_info}")
-                return
-            st.success(f"✅ Прайс-лист загружен: {len(price_df)} записей ({format_info})")
-            # === Автоопределение колонок ===
-            st.subheader("🔍 Определение колонок в прайс-листе")
-            detected = importer.detect_price_columns(price_df)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                article_col_price = st.selectbox(
-                    "📋 Колонка с артикулом",
-                    options=price_df.columns.tolist(),
-                    index=price_df.columns.tolist().index(detected['article']) if detected['article'] in price_df.columns else 0,
-                    key="price_import_article_col"
-                )
-            with col2:
-                brand_options = ['Не использовать'] + price_df.columns.tolist()
-                brand_idx = brand_options.index(detected['brand']) if detected['brand'] and detected['brand'] in price_df.columns else 0
-                brand_col_price_sel = st.selectbox(
-                    "🏷️ Колонка с брендом (опционально)",
-                    options=brand_options,
-                    index=brand_idx,
-                    key="price_import_brand_col"
-                )
-                brand_col_price = None if brand_col_price_sel == 'Не использовать' else brand_col_price_sel
-            with col3:
-                price_col_price = st.selectbox(
-                    "💰 Колонка с ценой",
-                    options=price_df.columns.tolist(),
-                    index=price_df.columns.tolist().index(detected['price']) if detected['price'] in price_df.columns else 0,
-                    key="price_import_price_col"
-                )
-            # === Предпросмотр прайс-листа ===
-            st.subheader("📊 Предпросмотр прайс-листа")
-            st.dataframe(price_df.head(10), use_container_width=True, key="price_import_preview")
-            # === Определение колонок в каталоге ===
-            st.subheader("🔍 Определение колонок в каталоге")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                article_options_catalog = [col for col in catalog_df.columns if any(w in col.lower() for w in ['артикул', 'article', 'sku', 'код'])]
-                if not article_options_catalog:
-                    article_options_catalog = catalog_df.columns.tolist()
-                article_col_catalog = st.selectbox(
-                    "📋 Колонка с артикулом в каталоге",
-                    options=article_options_catalog,
-                    key="price_import_catalog_article"
-                )
-            with col2:
-                brand_options_catalog = ['Не использовать'] + [col for col in catalog_df.columns if any(w in col.lower() for w in ['бренд', 'brand', 'производитель'])]
-                brand_col_catalog_sel = st.selectbox(
-                    "🏷️ Колонка с брендом в каталоге",
-                    options=brand_options_catalog,
-                    key="price_import_catalog_brand"
-                )
-                brand_col_catalog = None if brand_col_catalog_sel == 'Не использовать' else brand_col_catalog_sel
-            with col3:
-                price_options_catalog = [col for col in catalog_df.columns if any(w in col.lower() for w in ['цена', 'price', 'стоимость'])]
-                if not price_options_catalog:
-                    price_options_catalog = catalog_df.columns.tolist()
-                price_col_catalog = st.selectbox(
-                    "💰 Колонка с ценой в каталоге (будет обновлена)",
-                    options=price_options_catalog,
-                    key="price_import_catalog_price"
-                )
-            # === Настройки импорта ===
-            st.subheader("⚙️ Настройки импорта")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                update_mode = st.radio(
-                    "Режим обновления",
-                    ["Перезаписать все цены", "Обновить только пустые цены"],
-                    key="price_import_mode"
-                )
-                update_mode_value = "overwrite" if "Перезаписать" in update_mode else "only_empty"
-            with col2:
-                apply_markup = st.checkbox("💹 Применить наценку", value=False, key="price_import_apply_markup")
-                if apply_markup:
-                    markup_percent = st.number_input(
-                        "Наценка (%)",
-                        min_value=0.0,
-                        max_value=500.0,
-                        value=20.0,
-                        step=5.0,
-                        key="price_import_markup"
-                    )
-                else:
-                    markup_percent = 0.0
-            with col3:
-                notes = st.text_input("📝 Комментарий (опционально)", key="price_import_notes")
-            # === Кнопка импорта ===
-            if st.button("🚀 Импортировать цены", type="primary", key="price_import_btn"):
-                with st.spinner("Импорт цен..."):
-                    result = importer.import_prices(
-                        catalog_df=catalog_df,
-                        price_df=price_df,
-                        article_col_catalog=article_col_catalog,
-                        brand_col_catalog=brand_col_catalog,
-                        price_col_catalog=price_col_catalog,
-                        article_col_price=article_col_price,
-                        brand_col_price=brand_col_price,
-                        price_col_price=price_col_price,
-                        update_mode=update_mode_value,
-                        apply_markup=apply_markup,
-                        markup_percent=markup_percent
-                    )
-                    if result.get("success"):
-                        st.success(f"""
-✅ **Импорт завершён успешно!**
-- 📊 Записей в прайс-листе: **{result['total_in_pricelist']}**
-- 🔗 Найдено совпадений: **{result['matched']}**
-- ✅ Обновлено цен: **{result['updated']}**
-- ⏭️ Пропущено: **{result['skipped']}**
-- ❌ Не найдено в каталоге: **{result['not_found']}**
-""")
-                        # Обновляем каталог в session_state
-                        st.session_state.uploaded_data = result['catalog_df']
-                        # Сохраняем в историю импортов
-                        importer.save_import_to_history(
-                            file_name=price_file.name,
-                            records_count=result['total_in_pricelist'],
-                            updated_count=result['updated'],
-                            notes=notes
-                        )
-                        st.balloons()
-                        # Показываем обновлённый каталог
-                        st.subheader("📋 Обновлённый каталог (первые 20 строк)")
-                        st.dataframe(result['catalog_df'].head(20), use_container_width=True)
-                    else:
-                        st.error(f"❌ Ошибка импорта: {', '.join(result.get('errors', []))}")
-        except Exception as e:
-            st.error(f"❌ Ошибка: {str(e)}")
-            st.code(traceback.format_exc())
-    # === История импортов ===
-    st.divider()
-    st.subheader("📜 История импортов цен")
-    imports_history = importer.get_imports_history(limit=20)
-    if imports_history is not None and not imports_history.empty:
-        st.dataframe(imports_history, use_container_width=True, key="price_imports_history")
-    else:
-        st.info("📜 История импортов пуста")
-    # === Шаблон прайс-листа ===
-    st.divider()
-    st.subheader("📥 Шаблон прайс-листа")
-    if st.button("📥 Скачать шаблон прайс-листа"):
-        template_df = pd.DataFrame({
-            "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
-            "Бренд": ["Bosch", "Bosch", "Siemens"],
-            "Цена": [1200, 1800, 2500]
-        })
-        # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
-        csv = template_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-        st.download_button(
-            label="📥 Скачать шаблон CSV",
-            data=csv.encode('utf-8-sig'),
-            file_name="шаблон_прайс_листа.csv",
-            mime="text/csv;charset=utf-8",
-            key="download_pricelist_template"
-        )
 
 # ============================================================================
 # БЛОК 15: ОБОГАЩЕНИЕ КАТАЛОГА
 # ============================================================================
 def show_catalog_enhance_interface():
-    """Интерфейс обогащения каталога (поиск аналогов)"""
-    st.header("📊 Обогащение каталога (поиск аналогов)")
+    """
+    🔍 РАЗДЕЛ 5: ОБОГАЩЕНИЕ КАТАЛОГА
+    =================================
+    Поиск аналогов по OE номерам.
+    
+    ИНСТРУКЦИЯ:
+    1. Загрузите OE данные
+    2. Загрузите кросс-ссылки
+    3. Введите артикул и бренд
+    4. Нажмите "Найти аналоги"
+    """
+    st.header("🔍 Шаг 5: Обогащение каталога")
+    
     st.info("""
-🔍 **Поиск аналогов:**
-Система ищет аналоги через общие OE номера (2 уровня):
-- **Уровень 1**: Прямые аналоги (общие OE номера)
-- **Уровень 2**: Косвенные аналоги (через аналоги уровнем выше)
-**Как это работает:**
-1. Загрузите данные в каталог (OE, артикулы, кросс-ссылки)
-2. Система построит связи между товарами
-3. При обогащении для каждого товара найдутся аналоги
-💡 **Совет:** Для обновления цен используйте раздел '💰 Импорт цен'
-""")
+    🔍 **ПОИСК АНАЛОГОВ:**
+    
+    Система ищет аналоги через общие OE номера (2 уровня):
+    - Уровень 1: Прямые аналоги (общие OE номера)
+    - Уровень 2: Косвенные аналоги (через аналоги уровнем выше)
+    
+    **Инструкция:**
+    1. Загрузите данные в каталог
+    2. Введите артикул и бренд
+    3. Нажмите "Найти аналоги"
+    """)
+    
     if 'catalog_enhancer' not in st.session_state:
         st.session_state.catalog_enhancer = CatalogEnhancer()
+    
     enhancer = st.session_state.catalog_enhancer
+    
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("📤 Загрузка данных каталога")
+        
         st.markdown("""
-**Необходимые колонки в файлах:**
-**OE данные:**
-- `oe_number` - номер OE
-- `name` - название
-- `applicability` - применимость
-**Детали (артикулы):**
-- `artikul` - артикул
-- `brand` - бренд
-- `length`, `width`, `height`, `weight` - габариты
-**Кросс-ссылки:**
-- `oe_number` - номер OE
-- `artikul` - артикул
-- `brand` - бренд
-""")
+        **Необходимые колонки в файлах:**
+        
+        **OE данные:**
+        - `oe_number` - номер OE
+        - `name` - название
+        - `applicability` - применимость
+        
+        **Детали (артикулы):**
+        - `artikul` - артикул
+        - `brand` - бренд
+        - `length`, `width`, `height`, `weight` - габариты
+        
+        **Кросс-ссылки:**
+        - `oe_number` - номер OE
+        - `artikul` - артикул
+        - `brand` - бренд
+        """)
+        
         oe_file = st.file_uploader("OE данные", type=['xlsx', 'csv'], key="enh_oe")
         parts_file = st.file_uploader("Детали (артикулы)", type=['xlsx', 'csv'], key="enh_parts")
         cross_file = st.file_uploader("Кросс-ссылки", type=['xlsx', 'csv'], key="enh_cross")
+        
         if st.button("📥 Загрузить данные в каталог", type="primary", key="enh_load_data"):
             with st.spinner("Загрузка данных..."):
                 if oe_file:
@@ -5692,6 +6977,7 @@ def show_catalog_enhance_interface():
                         st.success(f"✅ Загружено {len(df)} OE записей")
                     except Exception as e:
                         st.error(f"❌ Ошибка загрузки OE: {str(e)}")
+                
                 if parts_file:
                     try:
                         df = pd.read_excel(parts_file) if parts_file.name.endswith('.xlsx') else pd.read_csv(parts_file)
@@ -5699,6 +6985,7 @@ def show_catalog_enhance_interface():
                         st.success(f"✅ Загружено {len(df)} записей деталей")
                     except Exception as e:
                         st.error(f"❌ Ошибка загрузки деталей: {str(e)}")
+                
                 if cross_file:
                     try:
                         df = pd.read_excel(cross_file) if cross_file.name.endswith('.xlsx') else pd.read_csv(cross_file)
@@ -5706,171 +6993,79 @@ def show_catalog_enhance_interface():
                         st.success(f"✅ Загружено {len(df)} кросс-ссылок")
                     except Exception as e:
                         st.error(f"❌ Ошибка загрузки кросс-ссылок: {str(e)}")
+    
     with col2:
         st.subheader("🔍 Поиск аналогов")
+        
         artikul = st.text_input("Артикул", placeholder="Введите артикул", key="enh_artikul_input")
         brand = st.text_input("Бренд", placeholder="Введите бренд", key="enh_brand_input")
+        
         if st.button("🔍 Найти аналоги", type="primary", key="enh_find_analogs"):
             if artikul and brand:
                 with st.spinner("Поиск аналогов..."):
                     data = enhancer.get_analog_data(artikul, brand)
+                    
                     if data.get('error'):
                         st.error(f"❌ {data['error']}")
                     else:
                         st.success(f"✅ Найдено {data.get('analog_count', 0)} аналогов")
+                        
                         if data.get('oe_list'):
                             st.info(f"🔗 OE номера: {data.get('oe_list')}")
+                        
                         if data.get('has_analogs'):
                             st.subheader("📋 Аналоги")
                             analogs_df = pd.DataFrame(data.get('analogs', []))
                             st.dataframe(analogs_df, use_container_width=True, key="enh_analogs_table")
             else:
                 st.warning("⚠️ Введите артикул и бренд")
+    
     st.subheader("📊 Статистика каталога")
+    
     stats = enhancer.get_stats()
+    
     col1, col2 = st.columns(2)
+    
     with col1:
         st.metric("📦 OE записей", stats.get('oe_loaded', 0))
         st.metric("🔄 Кросс-ссылок", stats.get('cross_loaded', 0))
+    
     with col2:
         st.metric("🔧 Деталей", stats.get('parts_loaded', 0))
         st.metric("🔍 Поисков", stats.get('analog_searches', 0))
 
-# ============================================================================
-# БЛОК 16: HIGH-VOLUME ИНТЕРФЕЙС (сокращённый)
-# ============================================================================
-def show_high_volume_interface():
-    """Интерфейс для High-Volume каталога"""
-    st.header("🚗 High-Volume Каталог автозапчастей (10M+)")
-    if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
-        st.warning("⚠️ Для работы High-Volume режима установите: `pip install polars duckdb`")
-        return
-    if 'high_volume_catalog' not in st.session_state:
-        st.session_state.high_volume_catalog = HighVolumeAutoPartsCatalog()
-    catalog = st.session_state.high_volume_catalog
-    if not catalog.conn:
-        st.error("❌ Ошибка подключения к базе данных")
-        return
-    st.sidebar.title("🧭 Меню High-Volume")
-    option = st.sidebar.radio("Выберите раздел", ["Загрузка данных", "Экспорт", "Статистика", "Управление"])
-    if option == "Загрузка данных":
-        st.header("📥 Загрузка данных")
-        col1, col2 = st.columns(2)
-        with col1:
-            oe_file = st.file_uploader("Основные данные (OE)", type=['xlsx'], key="hv_oe")
-            cross_file = st.file_uploader("Кроссы (OE→Артикул)", type=['xlsx'], key="hv_cross")
-            barcode_file = st.file_uploader("Штрих-коды", type=['xlsx'], key="hv_barcode")
-        with col2:
-            weight_dims_file = st.file_uploader("Вес и габариты", type=['xlsx'], key="hv_dims")
-            images_file = st.file_uploader("Изображения", type=['xlsx'], key="hv_images")
-            prices_file = st.file_uploader("Цены", type=['xlsx'], key="hv_prices")
-        uploaded_files = {
-            'oe': oe_file, 'cross': cross_file, 'barcode': barcode_file,
-            'dimensions': weight_dims_file, 'images': images_file, 'prices': prices_file
-        }
-        if st.button("Обработать и загрузить", key="hv_load"):
-            saved_paths = {}
-            for key, file in uploaded_files.items():
-                if file:
-                    path = catalog.data_dir / f"{key}_{int(time.time())}.xlsx"
-                    with open(path, "wb") as f:
-                        f.write(file.getbuffer())
-                    saved_paths[key] = str(path)
-            if saved_paths:
-                with st.spinner("Обработка файлов..."):
-                    dataframes = catalog.merge_all_data_parallel(saved_paths)
-                with st.spinner("Загрузка данных в базу..."):
-                    catalog.process_and_load_data(dataframes)
-            else:
-                st.warning("Загрузите хотя бы один файл")
-    elif option == "Экспорт":
-        st.header("📤 Экспорт данных")
-        total = catalog.conn.execute(
-            "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
-        st.info(f"Всего: {total}")
-        if total == 0:
-            st.warning("Нет данных для экспорта")
-            return
-        format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"], key="hv_format")
-        include_prices = st.checkbox("Включить цены", value=True, key="hv_prices_include")
-        apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices, key="hv_markup")
-        if st.button("🚀 Экспортировать", key="hv_export_btn"):
-            output_path = catalog.data_dir / f"export.{format_choice.lower()}"
-            with st.spinner("Генерация файла..."):
-                if format_choice == "CSV":
-                    catalog.export_to_csv_optimized(str(output_path), None, include_prices, apply_markup)
-                elif format_choice == "Excel":
-                    catalog.export_to_excel_optimized(str(output_path), None, include_prices, apply_markup)
-                elif format_choice == "Parquet":
-                    catalog.export_to_parquet(str(output_path), None, include_prices, apply_markup)
-            if output_path.exists():
-                with open(output_path, "rb") as f:
-                    st.download_button("⬇️ Скачать файл", f, file_name=output_path.name, key="hv_download")
-    elif option == "Статистика":
-        st.header("📈 Статистика")
-        stats = catalog.get_statistics()
-        if stats:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Уникальных товаров", f"{stats.get('unique_parts', 0):,}")
-            col2.metric("Брендов", f"{stats.get('brands', 0):,}")
-            col3.metric("Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
-            st.subheader("Топ 10 брендов")
-            if 'top_brands' in stats and not stats['top_brands'].empty:
-                st.dataframe(stats['top_brands'])
-    elif option == "Управление":
-        st.header("🔧 Управление данными")
-        st.warning("⚠️ Операции необратимы!")
-        management_option = st.radio(
-            "Выберите действие:",
-            ["Удалить по бренду", "Удалить по артикулу"],
-            key="hv_management"
-        )
-        if management_option == "Удалить по бренду":
-            try:
-                brands_result = catalog.conn.execute(
-                    "SELECT DISTINCT brand FROM parts WHERE brand IS NOT NULL ORDER BY brand").fetchall()
-                available_brands = [row[0] for row in brands_result] if brands_result else []
-            except Exception as e:
-                st.error(f"Ошибка: {e}")
-                return
-            if not available_brands:
-                st.info("Нет данных")
-                return
-            selected_brand = st.selectbox("Бренд", available_brands, key="hv_delete_brand")
-            if st.checkbox("Подтверждаю удаление", key="hv_confirm_brand"):
-                if st.button("Удалить", key="hv_delete_brand_btn"):
-                    brand_norm = catalog.normalize_key(pl.Series([selected_brand]))[0]
-                    deleted = catalog.delete_by_brand(brand_norm)
-                    st.success(f"Удалено {deleted} записей")
-                    st.rerun()
-        elif management_option == "Удалить по артикулу":
-            artikul_input = st.text_input("Артикул", key="hv_delete_artikul")
-            if artikul_input:
-                artikul_norm = catalog.normalize_key(pl.Series([artikul_input]))[0]
-                count = catalog.conn.execute(
-                    "SELECT COUNT(*) FROM parts WHERE artikul_norm = ?", [artikul_norm]).fetchone()[0]
-                st.info(f"Найдено {count} записей для артикула '{artikul_input}'")
-                if st.checkbox("Подтверждаю", key="hv_confirm_artikul"):
-                    if st.button("Удалить", key="hv_delete_artikul_btn"):
-                        deleted = catalog.delete_by_artikul(artikul_norm)
-                        st.success(f"Удалено {deleted} записей")
-                        st.rerun()
 
 # ============================================================================
-# БЛОК 17: АНАЛИТИКА
+# БЛОК 16: АНАЛИТИКА
 # ============================================================================
 def show_analytics_interface():
-    """Интерфейс аналитики"""
-    st.header("📊 Аналитика и статистика")
+    """
+    📊 РАЗДЕЛ 6: АНАЛИТИКА
+    ======================
+    Анализ загруженных данных.
+    
+    ИНСТРУКЦИЯ:
+    1. Загрузите данные в разделе "Загрузка данных"
+    2. Перейдите в этот раздел
+    3. Изучите статистику и графики
+    """
+    st.header("📊 Шаг 6: Аналитика")
+    
     if st.session_state.get('uploaded_data') is None:
         st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
         return
+    
     df = st.session_state.uploaded_data.copy()
+    
     st.success(f"✅ Анализ {len(df)} товаров")
+    
     st.subheader("📈 Общая статистика")
+    
     col1, col2, col3, col4 = st.columns(4)
+    
     with col1:
         st.metric("📦 Товаров", len(df))
+    
     with col2:
         price_col = None
         for col in df.columns:
@@ -5880,6 +7075,7 @@ def show_analytics_interface():
         if price_col:
             avg_price = safe_float(df[price_col].mean())
             st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽")
+    
     with col3:
         cost_col = None
         for col in df.columns:
@@ -5889,27 +7085,32 @@ def show_analytics_interface():
         if cost_col:
             avg_cost = safe_float(df[cost_col].mean())
             st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽")
+    
     with col4:
         if price_col and cost_col:
             df['_margin'] = safe_float(df[price_col]) - safe_float(df[cost_col])
             avg_margin = df['_margin'].mean()
             st.metric("📈 Средняя маржа", f"{avg_margin:,.0f} ₽")
+    
     if PLOTLY_AVAILABLE and px is not None and price_col:
         st.subheader("📊 Визуализация данных")
+        
         chart_type = st.selectbox(
             "Тип графика",
             ["Распределение цен", "Распределение категорий", "Топ товаров по цене"],
             key="analytics_chart_type"
         )
+        
         if chart_type == "Распределение цен":
-            fig = px.histogram(df, x=price_col, nbins=30,
-                               title=f"Распределение цен ({price_col})")
+            fig = px.histogram(df, x=price_col, nbins=30, title=f"Распределение цен ({price_col})")
             st.plotly_chart(fig, use_container_width=True)
+        
         elif chart_type == "Распределение категорий" and 'Категория' in df.columns:
             category_counts = df['Категория'].value_counts()
             fig = px.pie(values=category_counts.values, names=category_counts.index,
                          title="Распределение товаров по категориям")
             st.plotly_chart(fig, use_container_width=True)
+        
         elif chart_type == "Топ товаров по цене":
             name_col = None
             for col in df.columns:
@@ -5921,46 +7122,71 @@ def show_analytics_interface():
                 fig = px.bar(top_df, x=name_col, y=price_col, title="Топ 10 товаров по цене")
                 st.plotly_chart(fig, use_container_width=True)
 
+
 # ============================================================================
-# 🆕 v98: БЛОК 18: ИСТОРИЯ РАСЧЕТОВ (С ПОДДЕРЖКОЙ ПОСТОЯННОГО ХРАНИЛИЩА)
+# БЛОК 17: ИСТОРИЯ РАСЧЕТОВ
 # ============================================================================
 def show_history_interface():
-    """Интерфейс истории расчетов (v98 - с постоянным хранилищем)"""
-    st.header("📋 История расчетов")
+    """
+    📋 РАЗДЕЛ 7: ИСТОРИЯ РАСЧЕТОВ
+    =============================
+    Просмотр истории расчетов юнит-экономики.
+    
+    ИНСТРУКЦИЯ:
+    1. Выберите источник истории (БД или сессия)
+    2. Используйте фильтры
+    3. Экспортируйте результаты
+    """
+    st.header("📋 Шаг 7: История расчетов")
+    
     unit_economics = MarketplaceUnitEconomics()
-    # 🆕 v98: Переключатель между текущей и сохранённой историей
+    
     history_source = st.radio(
         "📚 Источник истории",
         ["💾 Сохранённая в БД (постоянная)", "⚡ Текущая сессия (в памяти)"],
         horizontal=True,
         key="history_source"
     )
+    
     st.info("""
-💡 **Источники истории:**
-- 💾 **Сохранённая в БД** — все расчёты за всё время (сохраняется между перезапусками Streamlit)
-- ⚡ **Текущая сессия** — расчёты только в текущей сессии (сбрасывается при перезапуске)
-""")
+    💡 **ИСТОЧНИКИ ИСТОРИИ:**
+    
+    - 💾 **Сохранённая в БД** — все расчёты за всё время (сохраняется между перезапусками)
+    - ⚡ **Текущая сессия** — расчёты только в текущей сессии (сбрасывается при перезапуске)
+    """)
+    
     if "Сохранённая" in history_source:
-        # === ПОСТОЯННАЯ ИСТОРИЯ (из БД) ===
+        # Постоянная история из БД
         st.subheader("🔍 Фильтры (постоянная история)")
+        
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
             filter_marketplace = st.text_input("Маркетплейс", key="history_db_marketplace")
+        
         with col2:
             filter_article = st.text_input("Артикул (частично)", key="history_db_article")
+        
         with col3:
             filter_brand = st.text_input("Бренд (частично)", key="history_db_brand")
+        
         with col4:
             limit = st.number_input("Лимит записей", min_value=10, max_value=10000, value=500, step=50, key="history_db_limit")
+        
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
             filter_min_profit = st.number_input("Мин. прибыль (₽)", value=0.0, step=100.0, key="history_db_min_profit")
+        
         with col2:
             filter_max_profit = st.number_input("Макс. прибыль (₽)", value=1000000.0, step=1000.0, key="history_db_max_profit")
+        
         with col3:
             filter_tax = st.selectbox("Система налога", ["Все", "УСН_6", "УСН_15", "ОСНО"], key="history_db_tax")
+        
         with col4:
             filter_mode = st.selectbox("Режим работы", ["Все", "FBY", "FBS", "FBO", "DBS", "FBP"], key="history_db_mode")
+        
         filters = {}
         if filter_marketplace:
             filters['marketplace'] = filter_marketplace
@@ -5976,48 +7202,60 @@ def show_history_interface():
             filters['tax_system'] = filter_tax
         if filter_mode != "Все":
             filters['operation_mode'] = filter_mode
+        
         with st.spinner("Загрузка истории из БД..."):
             df_history = unit_economics.get_persistent_history(limit=int(limit), filters=filters if filters else None)
+        
         if df_history is None or df_history.empty:
             st.info("📋 История расчетов пуста. Выполните расчеты в разделе '📊 Юнит-экономика'")
             return
+        
         st.success(f"📊 Найдено расчетов: **{len(df_history)}**")
-        # === СТАТИСТИКА ПО ПОСТОЯННОЙ ИСТОРИИ ===
+        
+        # Статистика
         st.subheader("📊 Статистика по сохранённой истории")
+        
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
             total_profit = df_history['profit'].sum()
             st.metric("💰 Суммарная прибыль", f"{total_profit:,.0f} ₽")
+        
         with col2:
             avg_profit = df_history['profit'].mean()
             st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
+        
         with col3:
             if 'tax_amount' in df_history.columns:
                 total_tax = df_history['tax_amount'].sum()
                 st.metric("💵 Суммарный налог", f"{total_tax:,.0f} ₽")
+        
         with col4:
             if 'recommended_min_price' in df_history.columns:
                 avg_rec_price = df_history['recommended_min_price'].mean()
                 st.metric("🎯 Средняя рек. цена", f"{avg_rec_price:.2f} ₽")
-        # === ТАБЛИЦА ===
+        
+        # Таблица
         display_cols = ['timestamp', 'marketplace', 'operation_mode', 'article', 'brand',
                         'price', 'cost', 'profit', 'margin_percent', 'roi',
                         'recommended_min_price', 'tax_amount', 'tax_system']
         available_cols = [col for col in display_cols if col in df_history.columns]
         st.dataframe(df_history[available_cols].head(100), use_container_width=True, key="history_db_table")
-        # === КНОПКИ ДЕЙСТВИЙ ===
+        
+        # Кнопки действий
         col1, col2, col3 = st.columns(3)
+        
         with col1:
             if st.button("📥 Экспортировать в CSV", key="history_db_export"):
-                # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
-                csv = df_history.to_csv(index=False, encoding='utf-8-sig', sep=';')
+                csv = df_history.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
                     label="📥 Скачать CSV",
-                    data=csv.encode('utf-8-sig'),
+                    data=csv,
                     file_name=f"история_расчетов_БД_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv;charset=utf-8",
+                    mime="text/csv",
                     key="history_db_download"
                 )
+        
         with col2:
             if st.button("📥 Экспортировать в Excel", key="history_db_export_excel"):
                 output = io.BytesIO()
@@ -6031,82 +7269,107 @@ def show_history_interface():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="history_db_download_excel"
                 )
+        
         with col3:
             if st.button("🗑️ Очистить всю историю БД", type="secondary", key="history_db_clear"):
                 if st.checkbox("Подтверждаю полную очистку БД", key="history_db_confirm"):
                     count = unit_economics.clear_persistent_history()
                     st.success(f"✅ Удалено {count} записей из БД")
                     st.rerun()
-        # === ДОПОЛНИТЕЛЬНАЯ СТАТИСТИКА ===
+        
+        # Дополнительная статистика
         st.divider()
         st.subheader("📊 Распределение по маркетплейсам")
+        
         db_stats = unit_economics.get_persistent_stats()
+        
         if db_stats and 'by_marketplace' in db_stats and not db_stats['by_marketplace'].empty:
             st.dataframe(db_stats['by_marketplace'], use_container_width=True)
+        
         if db_stats and 'by_category' in db_stats and not db_stats['by_category'].empty:
             st.subheader("📊 Распределение по категориям")
             st.dataframe(db_stats['by_category'], use_container_width=True)
+    
     else:
-        # === ТЕКУЩАЯ ИСТОРИЯ (в памяти) ===
+        # Текущая история (в памяти)
         history = unit_economics.get_history()
+        
         if not history:
             st.info("📋 История расчетов пуста. Выполните расчеты в разделе '📊 Юнит-экономика'")
             return
+        
         df_history = pd.DataFrame([r.to_dict() if hasattr(r, 'to_dict') else r for r in history])
+        
         st.subheader("🔍 Фильтры")
+        
         col1, col2, col3 = st.columns(3)
+        
         with col1:
             marketplaces = ['Все'] + sorted(df_history['marketplace'].unique().tolist())
             filter_marketplace = st.selectbox("Маркетплейс", marketplaces, key="history_marketplace")
+        
         with col2:
             modes = ['Все'] + sorted(df_history['operation_mode'].unique().tolist())
             filter_mode = st.selectbox("Режим работы", modes, key="history_mode")
+        
         with col3:
             tax_systems = ['Все'] + sorted(df_history['tax_system'].unique().tolist()) if 'tax_system' in df_history.columns else ['Все']
             filter_tax = st.selectbox("Система налога", tax_systems, key="history_tax")
+        
         filtered_df = df_history.copy()
+        
         if filter_marketplace != 'Все':
             filtered_df = filtered_df[filtered_df['marketplace'] == filter_marketplace]
         if filter_mode != 'Все':
             filtered_df = filtered_df[filtered_df['operation_mode'] == filter_mode]
         if filter_tax != 'Все' and 'tax_system' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['tax_system'] == filter_tax]
+        
         st.subheader(f"📊 Найдено расчетов: {len(filtered_df)}")
+        
         if not filtered_df.empty:
             display_cols = ['marketplace', 'operation_mode', 'price', 'cost', 'profit',
                             'margin_percent', 'roi', 'recommended_min_price', 'tax_amount', 'timestamp']
             available_cols = [col for col in display_cols if col in filtered_df.columns]
             st.dataframe(filtered_df[available_cols].sort_values('timestamp', ascending=False),
                          use_container_width=True, key="history_table")
+        
         st.subheader("📊 Статистика по истории")
+        
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
             total_profit = filtered_df['profit'].sum()
             st.metric("💰 Суммарная прибыль", f"{total_profit:,.0f} ₽")
+        
         with col2:
             avg_profit = filtered_df['profit'].mean()
             st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
+        
         with col3:
             if 'tax_amount' in filtered_df.columns:
                 total_tax = filtered_df['tax_amount'].sum()
                 st.metric("💵 Суммарный налог", f"{total_tax:,.0f} ₽")
+        
         with col4:
             if 'recommended_min_price' in filtered_df.columns:
                 avg_rec_price = filtered_df['recommended_min_price'].mean()
                 st.metric("🎯 Средняя рек. цена", f"{avg_rec_price:.2f} ₽")
+        
         col1, col2 = st.columns(2)
+        
         with col1:
             if st.button("📥 Экспортировать историю в CSV", key="history_export"):
                 if not filtered_df.empty:
-                    # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
-                    csv = filtered_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+                    csv = filtered_df.to_csv(index=False, encoding='utf-8-sig')
                     st.download_button(
                         label="📥 Скачать CSV",
-                        data=csv.encode('utf-8-sig'),
+                        data=csv,
                         file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv;charset=utf-8",
+                        mime="text/csv",
                         key="history_download"
                     )
+        
         with col2:
             if st.button("🗑️ Очистить историю сессии", type="secondary", key="history_clear"):
                 if st.checkbox("Подтвердите очистку", key="history_confirm"):
@@ -6114,58 +7377,35 @@ def show_history_interface():
                     st.success("✅ История сессии очищена")
                     st.rerun()
 
-# ============================================================================
-# БЛОК 19: ЭКСПОРТ
-# ============================================================================
-def show_export_interface():
-    """Интерфейс экспорта данных"""
-    st.header("📤 Экспорт данных")
-    if st.session_state.get('uploaded_data') is None:
-        st.warning("⚠️ Сначала загрузите данные")
-        return
-    df = st.session_state.uploaded_data
-    st.success(f"✅ Готово к экспорту: {len(df)} товаров, {len(df.columns)} колонок")
-    export_format = st.radio("Формат экспорта", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True, key="export_format")
-    if st.button("📥 Скачать файл", type="primary", key="export_btn"):
-        try:
-            if export_format.startswith("Excel"):
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name='Данные', index=False)
-                output.seek(0)
-                st.download_button(
-                    label="📥 Скачать Excel файл",
-                    data=output,
-                    file_name=f"каталог_экспорт_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_excel"
-                )
-            else:
-                # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
-                csv = df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-                st.download_button(
-                    label="📥 Скачать CSV файл",
-                    data=csv.encode('utf-8-sig'),
-                    file_name=f"каталог_экспорт_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv;charset=utf-8",
-                    key="download_csv"
-                )
-            st.success("✅ Данные успешно подготовлены к экспорту!")
-        except Exception as e:
-            st.error(f"❌ Ошибка экспорта: {str(e)}")
 
 # ============================================================================
-# БЛОК 20: НАСТРОЙКИ (v98 С НАЛОГАМИ И ПОСТОЯННОЙ ИСТОРИЕЙ)
+# БЛОК 18: НАСТРОЙКИ
 # ============================================================================
 def show_settings_interface():
-    """Интерфейс настроек (v98)"""
-    st.header("⚙️ Настройки приложения")
+    """
+    ⚙️ РАЗДЕЛ 8: НАСТРОЙКИ
+    ======================
+    Настройка параметров приложения.
+    
+    ИНСТРУКЦИЯ:
+    1. Настройте систему налогообложения
+    2. Укажите параметры хранения истории
+    3. Сохраните настройки
+    """
+    st.header("⚙️ Шаг 8: Настройки")
+    
     unit_economics = MarketplaceUnitEconomics()
+    
     st.subheader("💰 Настройки налогов")
+    
     st.info("""
-Настройки применяются ко всем расчетам юнит-экономики.
-""")
+    💡 **НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ:**
+    
+    Эти настройки применяются ко всем расчетам юнит-экономики.
+    """)
+    
     col1, col2 = st.columns(2)
+    
     with col1:
         tax_system = st.selectbox(
             "Система налогообложения по умолчанию",
@@ -6173,6 +7413,7 @@ def show_settings_interface():
             index=["УСН_6", "УСН_15", "ОСНО"].index(unit_economics._settings.get('tax_system', 'УСН_6')),
             key="settings_tax_system"
         )
+    
     with col2:
         usn_rate = st.number_input(
             "Ставка УСН (%)",
@@ -6182,7 +7423,9 @@ def show_settings_interface():
             step=0.5,
             key="settings_usn_rate"
         )
+    
     col1, col2, col3 = st.columns(3)
+    
     with col1:
         min_profit_percent = st.number_input(
             "Минимальная прибыль (%)",
@@ -6192,6 +7435,7 @@ def show_settings_interface():
             step=1.0,
             key="settings_min_profit_percent"
         )
+    
     with col2:
         insurance_contributions = st.number_input(
             "Страховые взносы в год (₽)",
@@ -6200,22 +7444,28 @@ def show_settings_interface():
             step=1000.0,
             key="settings_insurance"
         )
+    
     with col3:
         use_tax_deduction = st.checkbox(
             "Уменьшать налог на взносы",
             value=unit_economics._settings.get('use_tax_deduction', True),
             key="settings_tax_deduction"
         )
-    # 🆕 v98: Настройки постоянной истории
+    
+    # Настройки хранения истории
     st.subheader("💾 Настройки хранения истории")
+    
     enable_persistent = st.checkbox(
         "📚 Сохранять историю расчётов в БД (между перезапусками)",
         value=unit_economics._settings.get('enable_persistent_history', True),
         key="settings_persistent_history",
         help="Если включено — все расчёты будут сохраняться в файл history.duckdb"
     )
+    
     st.subheader("🎨 Общие настройки")
+    
     col1, col2 = st.columns(2)
+    
     with col1:
         default_margin = st.number_input(
             "Целевая маржинальность (%)",
@@ -6225,12 +7475,14 @@ def show_settings_interface():
             step=1.0,
             key="settings_default_margin"
         )
+    
     with col2:
         currency = st.selectbox(
             "Основная валюта",
             ["₽ (Рубль)", "$ (Доллар)", "€ (Евро)"],
             key="settings_currency"
         )
+    
     if st.button("💾 Сохранить настройки", type="primary", key="settings_save"):
         new_settings = {
             "tax_system": tax_system,
@@ -6242,672 +7494,143 @@ def show_settings_interface():
             "currency": currency,
             "enable_persistent_history": enable_persistent
         }
+        
         if unit_economics.save_settings(new_settings):
             st.success("✅ Настройки сохранены!")
             st.balloons()
         else:
             st.error("❌ Ошибка сохранения настроек")
+    
     st.divider()
+    
     st.subheader("ℹ️ Информация о приложении")
+    
     col1, col2 = st.columns(2)
+    
     with col1:
         st.metric("📌 Версия", APP_VERSION)
         st.metric("🐍 Python", sys.version.split()[0])
+    
     with col2:
         st.metric("📅 Дата", datetime.now().strftime("%d.%m.%Y"))
         data_loaded = st.session_state.get('uploaded_data') is not None
         rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
         st.metric("📊 Данных загружено", rows)
-    # 🆕 v98: Статистика постоянной истории
+    
+    # Статистика постоянного хранилища
     st.divider()
     st.subheader("📚 Статистика постоянного хранилища")
+    
     db_stats = unit_economics.get_persistent_stats()
+    
     if db_stats:
         col1, col2, col3, col4 = st.columns(4)
+        
         with col1:
             st.metric("💾 Записей в БД", f"{db_stats.get('total_records', 0):,}")
+        
         with col2:
             st.metric("💰 Суммарная прибыль", f"{db_stats.get('total_profit', 0):,.0f} ₽")
+        
         with col3:
             st.metric("📈 Средняя прибыль", f"{db_stats.get('avg_profit', 0):.2f} ₽")
+        
         with col4:
             st.metric("💵 Суммарный налог", f"{db_stats.get('total_tax', 0):,.0f} ₽")
     else:
         st.info("💾 Постоянное хранилище не инициализировано")
-    # Путь к файлу БД
+    
     st.caption(f"📂 Путь к БД истории: `{HISTORY_DB_DIR / 'history.duckdb'}`")
 
-# ============================================================================
-# БЛОК 21: ЭКСПОРТ С ЖИВЫМИ ФОРМУЛАМИ v97 (5 ЛИСТОВ EXCEL) (800+ СТРОК)
-# ============================================================================
-def export_unit_economics_with_formulas_v2(
-    df_results: pd.DataFrame,
-    output_path: str,
-    marketplace_configs: Dict[str, Any] = None,
-    tax_settings: Optional[Dict[str, Any]] = None
-) -> bool:
-    """
-    Экспорт юнит-экономики в Excel С ЖИВЫМИ ФОРМУЛАМИ.
-    5 листов: Тарифы, Налоги, Расчёт, Сводка, Dashboard.
-    """
-    if not OPENPYXL_AVAILABLE:
-        logger.error("openpyxl не установлен")
-        return False
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import (
-            Font, PatternFill, Alignment, Border, Side,
-            numbers, NamedStyle
-        )
-        from openpyxl.utils import get_column_letter
-        from openpyxl.formatting.rule import CellIsRule, FormulaRule
-        from openpyxl.chart import BarChart, PieChart, Reference
-        from openpyxl.chart.label import DataLabelList
-        from openpyxl.chart.series import DataPoint
-        from openpyxl.worksheet.datavalidation import DataValidation
-        wb = Workbook()
-        header_font = Font(bold=True, color="FFFFFF", size=11, name='Calibri')
-        header_fill = PatternFill(start_color="0F3460", end_color="0F3460", fill_type="solid")
-        subheader_fill = PatternFill(start_color="1A5490", end_color="1A5490", fill_type="solid")
-        input_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-        formula_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-        result_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-        warning_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-        success_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        highlight_fill = PatternFill(start_color="FFE699", end_color="FFE699", fill_type="solid")
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        thick_border = Border(
-            left=Side(style='medium'),
-            right=Side(style='medium'),
-            top=Side(style='medium'),
-            bottom=Side(style='medium')
-        )
-        center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        right_align = Alignment(horizontal="right", vertical="center")
-        if marketplace_configs is None:
-            try:
-                ue = MarketplaceUnitEconomics()
-                marketplace_configs = ue._configs
-            except Exception:
-                marketplace_configs = get_marketplace_configs_2026()
-        if tax_settings is None:
-            tax_settings = {
-                "tax_system": DEFAULT_TAX_SYSTEM,
-                "usn_rate": DEFAULT_USN_RATE,
-                "min_profit_percent": DEFAULT_MIN_PROFIT_PERCENT,
-                "insurance_contributions": DEFAULT_INSURANCE_CONTRIBUTIONS,
-                "use_tax_deduction": DEFAULT_TAX_DEDUCTION
-            }
-        # ЛИСТ 1: ТАРИФЫ
-        ws_tariffs = wb.active
-        ws_tariffs.title = "Тарифы"
-        tariff_headers = [
-            "Маркетплейс",
-            "Комиссия (%)",
-            "Мин. комиссия (₽)",
-            "Логистика база (₽)",
-            "Логистика за кг (₽/кг)",
-            "Логистика за литр (₽/л)",
-            "Хранение в день (₽/л)",
-            "Эквайринг (%)",
-            "Последняя миля (₽)",
-            "Возвраты (%)",
-            "РКО (%)",
-            "Подписка в месяц (₽)",
-            "Надбавка опасные (%)",
-            "Надбавка хрупкие (%)",
-            "Надбавка крупногабарит (%)"
-        ]
-        ws_tariffs.cell(row=1, column=1, value="📊 ТАРИФЫ МАРКЕТПЛЕЙСОВ 2026")
-        ws_tariffs.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F3460")
-        ws_tariffs.merge_cells('A1:O1')
-        ws_tariffs.cell(row=1, column=1).alignment = center_align
-        ws_tariffs.cell(row=2, column=1, value="⚠️ Редактируйте тарифы — все расчёты обновятся автоматически")
-        ws_tariffs.cell(row=2, column=1).font = Font(italic=True, color="FF0000", size=10)
-        ws_tariffs.merge_cells('A2:O2')
-        for col_idx, header in enumerate(tariff_headers, start=1):
-            cell = ws_tariffs.cell(row=4, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = thin_border
-        row_idx = 5
-        for mp_name, config in marketplace_configs.items():
-            ws_tariffs.cell(row=row_idx, column=1, value=mp_name).border = thin_border
-            ws_tariffs.cell(row=row_idx, column=1).fill = input_fill
-            ws_tariffs.cell(row=row_idx, column=1).font = Font(bold=True)
-            tariff_values = [
-                (2, config.commission_rate, '0.00%'),
-                (3, config.min_commission, '#,##0.00'),
-                (4, config.logistics_base, '#,##0.00'),
-                (5, config.logistics_per_kg, '#,##0.00'),
-                (6, config.logistics_per_liter, '#,##0.00'),
-                (7, config.storage_per_day, '#,##0.00'),
-                (8, config.acquiring_fee, '0.00%'),
-                (9, config.last_mile_fee, '#,##0.00'),
-                (10, config.return_fee, '0.00%'),
-                (11, config.rko_fee, '0.00%'),
-                (12, config.subscription_fee, '#,##0.00'),
-                (13, config.hazardous_surcharge, '0.00%'),
-                (14, config.fragile_surcharge, '0.00%'),
-                (15, config.oversized_surcharge, '0.00%'),
-            ]
-            for col, val, fmt in tariff_values:
-                cell = ws_tariffs.cell(row=row_idx, column=col, value=val)
-                cell.fill = input_fill
-                cell.border = thin_border
-                cell.number_format = fmt
-                cell.alignment = center_align
-            row_idx += 1
-        for col_idx in range(1, len(tariff_headers) + 1):
-            ws_tariffs.column_dimensions[get_column_letter(col_idx)].width = 18
-        ws_tariffs.freeze_panes = "B5"
-        ws_tariffs.auto_filter.ref = f"A4:O{row_idx - 1}"
-        tariff_last_row = row_idx - 1
-        # ЛИСТ 2: НАЛОГИ
-        ws_taxes = wb.create_sheet("Налоги")
-        ws_taxes.cell(row=1, column=1, value="💰 НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ")
-        ws_taxes.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F3460")
-        ws_taxes.merge_cells('A1:C1')
-        ws_taxes.cell(row=1, column=1).alignment = center_align
-        ws_taxes.cell(row=2, column=1, value="⚠️ Редактируйте значения — все расчёты налогов обновятся")
-        ws_taxes.cell(row=2, column=1).font = Font(italic=True, color="FF0000", size=10)
-        ws_taxes.merge_cells('A2:C2')
-        tax_params = [
-            ("Параметр", "Значение", "Описание"),
-            ("Система налогообложения", tax_settings.get('tax_system', 'УСН_6'), "УСН_6, УСН_15 или ОСНО"),
-            ("Ставка УСН (%)", tax_settings.get('usn_rate', 0.06) * 100, "Процент налога от выручки"),
-            ("Минимальная прибыль (%)", tax_settings.get('min_profit_percent', 0.10) * 100, "Желаемая прибыль после всех расходов"),
-            ("Страховые взносы (₽/год)", tax_settings.get('insurance_contributions', 49500), "Фиксированные взносы ИП"),
-            ("Уменьшать налог на взносы", "ДА" if tax_settings.get('use_tax_deduction', True) else "НЕТ", "Для ИП без сотрудников"),
-            ("Лимит УСН (₽)", 300_000_000, "Свыше — дополнительный 1%"),
-            ("Доп. ставка сверх лимита (%)", 1.0, "1% с превышения"),
-        ]
-        for row_idx, (param, value, desc) in enumerate(tax_params, start=4):
-            cell_param = ws_taxes.cell(row=row_idx, column=1, value=param)
-            cell_value = ws_taxes.cell(row=row_idx, column=2, value=value)
-            cell_desc = ws_taxes.cell(row=row_idx, column=3, value=desc)
-            if row_idx == 4:
-                cell_param.font = header_font
-                cell_param.fill = header_fill
-                cell_value.font = header_font
-                cell_value.fill = header_fill
-                cell_desc.font = header_font
-                cell_desc.fill = header_fill
-            else:
-                cell_param.border = thin_border
-                cell_value.border = thin_border
-                cell_value.fill = input_fill
-                cell_desc.border = thin_border
-                cell_desc.font = Font(italic=True, color="666666")
-                cell_param.alignment = left_align
-                cell_value.alignment = center_align
-                cell_desc.alignment = left_align
-        ws_taxes.column_dimensions['A'].width = 30
-        ws_taxes.column_dimensions['B'].width = 20
-        ws_taxes.column_dimensions['C'].width = 50
-        # ЛИСТ 3: РАСЧЁТ
-        ws_calc = wb.create_sheet("Расчёт")
-        calc_headers = [
-            "Артикул", "Бренд", "Маркетплейс", "Режим работы",
-            "Цена продажи (₽)", "Себестоимость (₽)", "Длина (см)",
-            "Ширина (см)", "Высота (см)", "Вес (кг)", "Объём (л)",
-            "Комиссия МП (%)", "Комиссия (₽)", "Логистика (₽)",
-            "Хранение (₽)", "Эквайринг (₽)", "Последняя миля (₽)",
-            "Возвраты (₽)", "Надбавка опасные", "Надбавка хрупкие",
-            "Надбавка крупногаб", "Налог (₽)", "Итого расходов (₽)",
-            "Прибыль (₽)", "Маржа (%)", "ROI (%)",
-            "Точка безубыточности", "Рекомендованная мин. цена (₽)"
-        ]
-        ws_calc.cell(row=1, column=1, value="📊 РАСЧЁТ ЮНИТ-ЭКОНОМИКИ")
-        ws_calc.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F3460")
-        ws_calc.merge_cells('A1:AB1')
-        ws_calc.cell(row=1, column=1).alignment = center_align
-        ws_calc.cell(row=2, column=1, value="🟡 Жёлтые ячейки — ввод | 🟢 Зелёные — формулы | 🔵 Синие — результаты")
-        ws_calc.cell(row=2, column=1).font = Font(italic=True, size=10)
-        ws_calc.merge_cells('A2:AB2')
-        for col_idx, header in enumerate(calc_headers, start=1):
-            cell = ws_calc.cell(row=4, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = thin_border
-        tariff_range = f"Тарифы!$A$5:$O${tariff_last_row}"
-        for r_idx, row_data in enumerate(df_results.itertuples(index=False), start=5):
-            row_dict = row_data._asdict() if hasattr(row_data, '_asdict') else dict(zip(df_results.columns, row_data))
-            ws_calc.cell(row=r_idx, column=1, value=row_dict.get('Артикул', '')).border = thin_border
-            ws_calc.cell(row=r_idx, column=2, value=row_dict.get('Бренд', '')).border = thin_border
-            ws_calc.cell(row=r_idx, column=3, value=row_dict.get('Маркетплейс', 'Ozon')).border = thin_border
-            ws_calc.cell(row=r_idx, column=4, value=row_dict.get('Режим_работы', 'FBS')).border = thin_border
-            input_cols = {
-                5: ('Цена_с_наценкой', row_dict.get('Цена_с_наценкой', row_dict.get('Цена_исходная', 0))),
-                6: ('Себестоимость', row_dict.get('Себестоимость', 0)),
-                7: ('Длина', row_dict.get('Длина_см', 0)),
-                8: ('Ширина', row_dict.get('Ширина_см', 0)),
-                9: ('Высота', row_dict.get('Высота_см', 0)),
-                10: ('Вес', row_dict.get('Вес_кг', 0)),
-            }
-            for col, (key, default_val) in input_cols.items():
-                val = row_dict.get(key, default_val)
-                cell = ws_calc.cell(row=r_idx, column=col, value=val)
-                cell.fill = input_fill
-                cell.border = thin_border
-                cell.number_format = '#,##0.00'
-                cell.alignment = center_align
-            r = r_idx
-            ws_calc.cell(row=r, column=11).value = f"=IF(AND(G{r}>0,H{r}>0,I{r}>0),(G{r}*H{r}*I{r})/1000,5)"
-            ws_calc.cell(row=r, column=11).fill = formula_fill
-            ws_calc.cell(row=r, column=11).border = thin_border
-            ws_calc.cell(row=r, column=11).number_format = '#,##0.000'
-            ws_calc.cell(row=r, column=12).value = f"=IFERROR(VLOOKUP(C{r},{tariff_range},2,FALSE),0.15)"
-            ws_calc.cell(row=r, column=12).fill = formula_fill
-            ws_calc.cell(row=r, column=12).border = thin_border
-            ws_calc.cell(row=r, column=12).number_format = '0.00%'
-            ws_calc.cell(row=r, column=13).value = (
-                f"=MAX(E{r}*L{r}, IFERROR(VLOOKUP(C{r},{tariff_range},3,FALSE),0))"
-            )
-            ws_calc.cell(row=r, column=13).fill = formula_fill
-            ws_calc.cell(row=r, column=13).border = thin_border
-            ws_calc.cell(row=r, column=13).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=14).value = (
-                f"=(IFERROR(VLOOKUP(C{r},{tariff_range},4,FALSE),50) "
-                f"+ J{r}*IFERROR(VLOOKUP(C{r},{tariff_range},5,FALSE),15) "
-                f"+ K{r}*IFERROR(VLOOKUP(C{r},{tariff_range},6,FALSE),5)) "
-                f"* IF(D{r}=\"FBY\",0.75,IF(D{r}=\"FBS\",1,IF(D{r}=\"FBO\",0.8,IF(D{r}=\"DBS\",1.3,IF(D{r}=\"FBP\",0.9,1)))))"
-            )
-            ws_calc.cell(row=r, column=14).fill = formula_fill
-            ws_calc.cell(row=r, column=14).border = thin_border
-            ws_calc.cell(row=r, column=14).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=15).value = (
-                f"=K{r} * IFERROR(VLOOKUP(C{r},{tariff_range},7,FALSE),0.3) * 30"
-            )
-            ws_calc.cell(row=r, column=15).fill = formula_fill
-            ws_calc.cell(row=r, column=15).border = thin_border
-            ws_calc.cell(row=r, column=15).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=16).value = (
-                f"=E{r} * IFERROR(VLOOKUP(C{r},{tariff_range},8,FALSE),0.015)"
-            )
-            ws_calc.cell(row=r, column=16).fill = formula_fill
-            ws_calc.cell(row=r, column=16).border = thin_border
-            ws_calc.cell(row=r, column=16).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=17).value = (
-                f"=IFERROR(VLOOKUP(C{r},{tariff_range},9,FALSE),50)"
-            )
-            ws_calc.cell(row=r, column=17).fill = formula_fill
-            ws_calc.cell(row=r, column=17).border = thin_border
-            ws_calc.cell(row=r, column=17).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=18).value = (
-                f"=E{r} * IFERROR(VLOOKUP(C{r},{tariff_range},10,FALSE),0.02)"
-            )
-            ws_calc.cell(row=r, column=18).fill = formula_fill
-            ws_calc.cell(row=r, column=18).border = thin_border
-            ws_calc.cell(row=r, column=18).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=19).value = (
-                f"=E{r} * IFERROR(VLOOKUP(C{r},{tariff_range},13,FALSE),0)"
-            )
-            ws_calc.cell(row=r, column=19).fill = formula_fill
-            ws_calc.cell(row=r, column=19).border = thin_border
-            ws_calc.cell(row=r, column=19).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=20).value = (
-                f"=E{r} * IFERROR(VLOOKUP(C{r},{tariff_range},14,FALSE),0)"
-            )
-            ws_calc.cell(row=r, column=20).fill = formula_fill
-            ws_calc.cell(row=r, column=20).border = thin_border
-            ws_calc.cell(row=r, column=20).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=21).value = (
-                f"=E{r} * IFERROR(VLOOKUP(C{r},{tariff_range},15,FALSE),0)"
-            )
-            ws_calc.cell(row=r, column=21).fill = formula_fill
-            ws_calc.cell(row=r, column=21).border = thin_border
-            ws_calc.cell(row=r, column=21).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=22).value = (
-                f"=E{r} * IF(Налоги!B5=\"УСН_6\",Налоги!B6/100,"
-                f"IF(Налоги!B5=\"УСН_15\",0.15,0.40))"
-            )
-            ws_calc.cell(row=r, column=22).fill = formula_fill
-            ws_calc.cell(row=r, column=22).border = thin_border
-            ws_calc.cell(row=r, column=22).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=23).value = (
-                f"=F{r}+M{r}+N{r}+O{r}+P{r}+Q{r}+R{r}+S{r}+T{r}+U{r}+V{r}"
-            )
-            ws_calc.cell(row=r, column=23).fill = result_fill
-            ws_calc.cell(row=r, column=23).border = thick_border
-            ws_calc.cell(row=r, column=23).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=23).font = Font(bold=True)
-            ws_calc.cell(row=r, column=24).value = f"=E{r}-W{r}"
-            ws_calc.cell(row=r, column=24).fill = result_fill
-            ws_calc.cell(row=r, column=24).border = thick_border
-            ws_calc.cell(row=r, column=24).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=24).font = Font(bold=True, size=12)
-            ws_calc.cell(row=r, column=25).value = f"=IF(E{r}=0,0,X{r}/E{r}*100)"
-            ws_calc.cell(row=r, column=25).fill = result_fill
-            ws_calc.cell(row=r, column=25).border = thin_border
-            ws_calc.cell(row=r, column=25).number_format = '0.00'
-            ws_calc.cell(row=r, column=26).value = f"=IF(F{r}=0,0,X{r}/F{r}*100)"
-            ws_calc.cell(row=r, column=26).fill = result_fill
-            ws_calc.cell(row=r, column=26).border = thin_border
-            ws_calc.cell(row=r, column=26).number_format = '0.00'
-            ws_calc.cell(row=r, column=27).value = (
-                f"=IF((1-L{r}-IFERROR(VLOOKUP(C{r},{tariff_range},8,FALSE),0)"
-                f"-IFERROR(VLOOKUP(C{r},{tariff_range},10,FALSE),0)"
-                f"-IF(Налоги!B5=\"УСН_6\",Налоги!B6/100,IF(Налоги!B5=\"УСН_15\",0.15,0.40)))<=0,0,"
-                f"(F{r}+N{r}+O{r}+Q{r})/(1-L{r}-IFERROR(VLOOKUP(C{r},{tariff_range},8,FALSE),0)"
-                f"-IFERROR(VLOOKUP(C{r},{tariff_range},10,FALSE),0)"
-                f"-IF(Налоги!B5=\"УСН_6\",Налоги!B6/100,IF(Налоги!B5=\"УСН_15\",0.15,0.40))))"
-            )
-            ws_calc.cell(row=r, column=27).fill = result_fill
-            ws_calc.cell(row=r, column=27).border = thin_border
-            ws_calc.cell(row=r, column=27).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=28).value = (
-                f"=IF((1-L{r}-IFERROR(VLOOKUP(C{r},{tariff_range},8,FALSE),0)"
-                f"-IFERROR(VLOOKUP(C{r},{tariff_range},10,FALSE),0)"
-                f"-IF(Налоги!B5=\"УСН_6\",Налоги!B6/100,IF(Налоги!B5=\"УСН_15\",0.15,0.40))"
-                f"-Налоги!B7/100)<=0,0,"
-                f"(F{r}+N{r}+O{r}+Q{r})/(1-L{r}-IFERROR(VLOOKUP(C{r},{tariff_range},8,FALSE),0)"
-                f"-IFERROR(VLOOKUP(C{r},{tariff_range},10,FALSE),0)"
-                f"-IF(Налоги!B5=\"УСН_6\",Налоги!B6/100,IF(Налоги!B5=\"УСН_15\",0.15,0.40))"
-                f"-Налоги!B7/100))"
-            )
-            ws_calc.cell(row=r, column=28).fill = highlight_fill
-            ws_calc.cell(row=r, column=28).border = thick_border
-            ws_calc.cell(row=r, column=28).number_format = '#,##0.00'
-            ws_calc.cell(row=r, column=28).font = Font(bold=True, size=12, color="0F3460")
-        profit_range = f"X5:X{len(df_results) + 4}"
-        ws_calc.conditional_formatting.add(
-            profit_range,
-            CellIsRule(operator='greaterThan', formula=['0'],
-                       fill=success_fill,
-                       font=Font(color="006100", bold=True))
-        )
-        ws_calc.conditional_formatting.add(
-            profit_range,
-            CellIsRule(operator='lessThan', formula=['0'],
-                       fill=warning_fill,
-                       font=Font(color="9C0006", bold=True))
-        )
-        margin_range = f"Y5:Y{len(df_results) + 4}"
-        ws_calc.conditional_formatting.add(
-            margin_range,
-            CellIsRule(operator='greaterThanOrEqual', formula=['10'],
-                       fill=success_fill)
-        )
-        ws_calc.conditional_formatting.add(
-            margin_range,
-            FormulaRule(formula=[f'AND(Y5>=5,Y5<10)'], fill=highlight_fill)
-        )
-        ws_calc.conditional_formatting.add(
-            margin_range,
-            CellIsRule(operator='lessThan', formula=['5'],
-                       fill=warning_fill)
-        )
-        rec_price_range = f"AB5:AB{len(df_results) + 4}"
-        ws_calc.conditional_formatting.add(
-            rec_price_range,
-            FormulaRule(formula=[f'E5<AB5'], fill=warning_fill, font=Font(color="9C0006", bold=True))
-        )
-        for col_idx in range(1, len(calc_headers) + 1):
-            ws_calc.column_dimensions[get_column_letter(col_idx)].width = 18
-        ws_calc.freeze_panes = "E5"
-        ws_calc.auto_filter.ref = f"A4:AB{len(df_results) + 4}"
-        # ЛИСТ 4: СВОДКА
-        ws_summary = wb.create_sheet("Сводка")
-        ws_summary.cell(row=1, column=1, value="📊 СВОДНАЯ СТАТИСТИКА ПО МАРКЕТПЛЕЙСАМ")
-        ws_summary.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F3460")
-        ws_summary.merge_cells('A1:H1')
-        ws_summary.cell(row=1, column=1).alignment = center_align
-        summary_headers = [
-            "Маркетплейс",
-            "Количество товаров",
-            "Общая прибыль (₽)",
-            "Средняя прибыль (₽)",
-            "Средняя маржа (%)",
-            "Средний ROI (%)",
-            "Средняя рек. цена (₽)",
-            "Мин. прибыль (₽)"
-        ]
-        for col_idx, header in enumerate(summary_headers, start=1):
-            cell = ws_summary.cell(row=3, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = thin_border
-        marketplaces = df_results['Маркетплейс'].unique().tolist() if 'Маркетплейс' in df_results.columns else []
-        data_range = f"Расчёт!$C$5:$C${len(df_results) + 4}"
-        last_data_row = len(df_results) + 4
-        for s_idx, mp in enumerate(marketplaces, start=4):
-            ws_summary.cell(row=s_idx, column=1, value=mp).border = thin_border
-            ws_summary.cell(row=s_idx, column=1).font = Font(bold=True)
-            ws_summary.cell(row=s_idx, column=2).value = f'=COUNTIF({data_range},A{s_idx})'
-            ws_summary.cell(row=s_idx, column=2).border = thin_border
-            ws_summary.cell(row=s_idx, column=3).value = f'=SUMIF({data_range},A{s_idx},Расчёт!$X$5:$X${last_data_row})'
-            ws_summary.cell(row=s_idx, column=3).border = thin_border
-            ws_summary.cell(row=s_idx, column=3).number_format = '#,##0.00'
-            ws_summary.cell(row=s_idx, column=4).value = f'=IF(B{s_idx}=0,0,C{s_idx}/B{s_idx})'
-            ws_summary.cell(row=s_idx, column=4).border = thin_border
-            ws_summary.cell(row=s_idx, column=4).number_format = '#,##0.00'
-            ws_summary.cell(row=s_idx, column=5).value = f'=AVERAGEIF({data_range},A{s_idx},Расчёт!$Y$5:$Y${last_data_row})'
-            ws_summary.cell(row=s_idx, column=5).border = thin_border
-            ws_summary.cell(row=s_idx, column=5).number_format = '0.00'
-            ws_summary.cell(row=s_idx, column=6).value = f'=AVERAGEIF({data_range},A{s_idx},Расчёт!$Z$5:$Z${last_data_row})'
-            ws_summary.cell(row=s_idx, column=6).border = thin_border
-            ws_summary.cell(row=s_idx, column=6).number_format = '0.00'
-            ws_summary.cell(row=s_idx, column=7).value = f'=AVERAGEIF({data_range},A{s_idx},Расчёт!$AB$5:$AB${last_data_row})'
-            ws_summary.cell(row=s_idx, column=7).border = thin_border
-            ws_summary.cell(row=s_idx, column=7).number_format = '#,##0.00'
-            ws_summary.cell(row=s_idx, column=8).value = f'=MINIFS(Расчёт!$X$5:$X${last_data_row},{data_range},A{s_idx})'
-            ws_summary.cell(row=s_idx, column=8).border = thin_border
-            ws_summary.cell(row=s_idx, column=8).number_format = '#,##0.00'
-        total_row = 4 + len(marketplaces)
-        ws_summary.cell(row=total_row, column=1, value="ИТОГО").font = Font(bold=True, size=12)
-        ws_summary.cell(row=total_row, column=1).border = thick_border
-        ws_summary.cell(row=total_row, column=1).fill = result_fill
-        for col in range(2, 9):
-            ws_summary.cell(row=total_row, column=col).border = thick_border
-            ws_summary.cell(row=total_row, column=col).fill = result_fill
-            ws_summary.cell(row=total_row, column=col).font = Font(bold=True)
-        ws_summary.cell(row=total_row, column=2).value = f'=SUM(B4:B{total_row-1})'
-        ws_summary.cell(row=total_row, column=3).value = f'=SUM(C4:C{total_row-1})'
-        ws_summary.cell(row=total_row, column=3).number_format = '#,##0.00'
-        ws_summary.cell(row=total_row, column=4).value = f'=IF(B{total_row}=0,0,C{total_row}/B{total_row})'
-        ws_summary.cell(row=total_row, column=4).number_format = '#,##0.00'
-        ws_summary.cell(row=total_row, column=5).value = f'=AVERAGE(E4:E{total_row-1})'
-        ws_summary.cell(row=total_row, column=5).number_format = '0.00'
-        ws_summary.cell(row=total_row, column=6).value = f'=AVERAGE(F4:F{total_row-1})'
-        ws_summary.cell(row=total_row, column=6).number_format = '0.00'
-        ws_summary.cell(row=total_row, column=7).value = f'=AVERAGE(G4:G{total_row-1})'
-        ws_summary.cell(row=total_row, column=7).number_format = '#,##0.00'
-        ws_summary.cell(row=total_row, column=8).value = f'=MIN(H4:H{total_row-1})'
-        ws_summary.cell(row=total_row, column=8).number_format = '#,##0.00'
-        for col_idx in range(1, len(summary_headers) + 1):
-            ws_summary.column_dimensions[get_column_letter(col_idx)].width = 22
-        ws_summary.freeze_panes = "A4"
-        chart = BarChart()
-        chart.type = "col"
-        chart.style = 10
-        chart.title = "Прибыль по маркетплейсам"
-        chart.y_axis.title = 'Прибыль (₽)'
-        chart.x_axis.title = 'Маркетплейс'
-        data = Reference(ws_summary, min_col=3, min_row=3, max_row=total_row-1)
-        cats = Reference(ws_summary, min_col=1, min_row=4, max_row=total_row-1)
-        chart.add_data(data, titles_from_data=True)
-        chart.set_categories(cats)
-        chart.height = 10
-        chart.width = 20
-        ws_summary.add_chart(chart, "A" + str(total_row + 3))
-        # ЛИСТ 5: DASHBOARD
-        ws_dashboard = wb.create_sheet("Dashboard")
-        ws_dashboard.cell(row=1, column=1, value="📊 DASHBOARD: КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ")
-        ws_dashboard.cell(row=1, column=1).font = Font(bold=True, size=16, color="0F3460")
-        ws_dashboard.merge_cells('A1:F1')
-        ws_dashboard.cell(row=1, column=1).alignment = center_align
-        kpi_data = [
-            ("Всего товаров", f"=Сводка!B{total_row}", '#,##0'),
-            ("Общая прибыль (₽)", f"=Сводка!C{total_row}", '#,##0.00 ₽'),
-            ("Средняя прибыль (₽)", f"=Сводка!D{total_row}", '#,##0.00 ₽'),
-            ("Средняя маржа (%)", f"=Сводка!E{total_row}", '0.00"%"'),
-            ("Средний ROI (%)", f"=Сводка!F{total_row}", '0.00"%"'),
-            ("Средняя рек. цена (₽)", f"=Сводка!G{total_row}", '#,##0.00 ₽'),
-        ]
-        for idx, (label, formula, fmt) in enumerate(kpi_data, start=3):
-            row = 3 + (idx // 2) * 3
-            col = 1 + (idx % 2) * 3
-            cell_label = ws_dashboard.cell(row=row, column=col, value=label)
-            cell_label.font = Font(bold=True, size=11, color="0F3460")
-            cell_label.fill = subheader_fill
-            cell_label.font = Font(bold=True, color="FFFFFF")
-            cell_label.alignment = center_align
-            cell_label.border = thin_border
-            ws_dashboard.merge_cells(start_row=row, start_column=col,
-                                     end_row=row, end_column=col+1)
-            cell_value = ws_dashboard.cell(row=row+1, column=col)
-            cell_value.value = formula
-            cell_value.font = Font(bold=True, size=18, color="0F3460")
-            cell_value.alignment = center_align
-            cell_value.border = thick_border
-            cell_value.fill = result_fill
-            cell_value.number_format = fmt
-            ws_dashboard.merge_cells(start_row=row+1, start_column=col,
-                                     end_row=row+1, end_column=col+1)
-        ws_dashboard.cell(row=10, column=1, value="🏆 ТОП-10 ТОВАРОВ ПО ПРИБЫЛИ")
-        ws_dashboard.cell(row=10, column=1).font = Font(bold=True, size=14, color="0F3460")
-        ws_dashboard.merge_cells('A10:F10')
-        top_headers = ["Артикул", "Бренд", "Маркетплейс", "Цена (₽)", "Прибыль (₽)", "Маржа (%)"]
-        for col_idx, header in enumerate(top_headers, start=1):
-            cell = ws_dashboard.cell(row=11, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = thin_border
-        df_sorted = df_results.sort_values('Прибыль', ascending=False).head(10)
-        for idx, (_, row_data) in enumerate(df_sorted.iterrows(), start=12):
-            ws_dashboard.cell(row=idx, column=1, value=row_data.get('Артикул', '')).border = thin_border
-            ws_dashboard.cell(row=idx, column=2, value=row_data.get('Бренд', '')).border = thin_border
-            ws_dashboard.cell(row=idx, column=3, value=row_data.get('Маркетплейс', '')).border = thin_border
-            cell_price = ws_dashboard.cell(row=idx, column=4, value=row_data.get('Цена_с_наценкой', 0))
-            cell_price.border = thin_border
-            cell_price.number_format = '#,##0.00'
-            cell_profit = ws_dashboard.cell(row=idx, column=5, value=row_data.get('Прибыль', 0))
-            cell_profit.border = thin_border
-            cell_profit.number_format = '#,##0.00'
-            cell_profit.font = Font(bold=True, color="006100" if row_data.get('Прибыль', 0) > 0 else "9C0006")
-            cell_margin = ws_dashboard.cell(row=idx, column=6, value=row_data.get('Маржа_%', 0))
-            cell_margin.border = thin_border
-            cell_margin.number_format = '0.00'
-        ws_dashboard.cell(row=24, column=1, value="⚠️ ТОП-10 УБЫТОЧНЫХ ТОВАРОВ")
-        ws_dashboard.cell(row=24, column=1).font = Font(bold=True, size=14, color="9C0006")
-        ws_dashboard.merge_cells('A24:F24')
-        for col_idx, header in enumerate(top_headers, start=1):
-            cell = ws_dashboard.cell(row=25, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = PatternFill(start_color="9C0006", end_color="9C0006", fill_type="solid")
-            cell.alignment = center_align
-            cell.border = thin_border
-        df_loss = df_results.sort_values('Прибыль', ascending=True).head(10)
-        for idx, (_, row_data) in enumerate(df_loss.iterrows(), start=26):
-            ws_dashboard.cell(row=idx, column=1, value=row_data.get('Артикул', '')).border = thin_border
-            ws_dashboard.cell(row=idx, column=2, value=row_data.get('Бренд', '')).border = thin_border
-            ws_dashboard.cell(row=idx, column=3, value=row_data.get('Маркетплейс', '')).border = thin_border
-            cell_price = ws_dashboard.cell(row=idx, column=4, value=row_data.get('Цена_с_наценкой', 0))
-            cell_price.border = thin_border
-            cell_price.number_format = '#,##0.00'
-            cell_profit = ws_dashboard.cell(row=idx, column=5, value=row_data.get('Прибыль', 0))
-            cell_profit.border = thin_border
-            cell_profit.number_format = '#,##0.00'
-            cell_profit.font = Font(bold=True, color="9C0006")
-            cell_margin = ws_dashboard.cell(row=idx, column=6, value=row_data.get('Маржа_%', 0))
-            cell_margin.border = thin_border
-            cell_margin.number_format = '0.00'
-        for col_idx in range(1, 7):
-            ws_dashboard.column_dimensions[get_column_letter(col_idx)].width = 22
-        wb.save(output_path)
-        logger.info(f"✅ Экспорт с формулами сохранён: {output_path}")
-        logger.info(f"📊 Листов: 5 (Тарифы, Налоги, Расчёт, Сводка, Dashboard)")
-        logger.info(f"📝 Строк данных: {len(df_results)}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка экспорта с формулами: {e}")
-        logger.error(traceback.format_exc())
-        return False
 
 # ============================================================================
-# БЛОК 22: ГЛАВНАЯ ФУНКЦИЯ v98
+# БЛОК 22: ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================================
 def main():
-    """Главная функция приложения v98"""
+    """
+    🚗 ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+    =============================
+    Точка входа в приложение.
+    
+    СТРУКТУРА МЕНЮ:
+    1. 📁 Загрузка данных
+    2. 📊 Юнит-экономика (объединённый)
+    3. 🗂️ Каталог для группировки
+    4. 🤖 AI Тарифы
+    5. 🔍 Обогащение каталога
+    6. 📊 Аналитика
+    7. 📋 История расчетов
+    8. ⚙️ Настройки
+    """
     st.set_page_config(
         page_title=f"{APP_NAME} v{APP_VERSION}",
         page_icon="🚗",
         layout="wide",
         initial_sidebar_state="expanded"
     )
+    
+    # Заголовок приложения
     st.markdown(f"""
-<div style="text-align: center; padding: 25px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    <h1 style="color: white; margin: 0;">🚗 {APP_NAME}</h1>
-    <p style="color: #e94560; font-size: 20px; margin: 10px 0;">v{APP_VERSION} | ФИНАЛЬНАЯ ВЕРСИЯ 8200+ СТРОК</p>
-    <p style="color: #aaa; font-size: 14px;">Юнит-экономика маркетплейсов 2026 | Каталог с поиском аналогов 2 уровня</p>
-    <p style="color: #888; font-size: 13px;">High-Volume каталог (10M+) | ИИ-обновление тарифов | Экспорт с формулами</p>
-    <div style="margin-top: 15px;">
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Галочка "Запросить ИИ" для обновления тарифов</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Учёт налогов (УСН 6%, 15%, ОСНО)</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Рекомендованная минимальная цена (с учётом 10% прибыли)</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Экспорт в Excel с 5 листами и живыми формулами</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 150+ категорий автозапчастей с габаритами</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Юнит-экономика по каждому артикулу</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Импорт цен через отдельный прайс-лист</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Постоянное хранилище истории (DuckDB/SQLite)</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Исправление экспорта CSV — разделитель ; (точка с запятой)</p>
+    <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h1 style="color: white; margin: 0;">🚗 {APP_NAME}</h1>
+        <p style="color: #e94560; font-size: 20px; margin: 10px 0;">v{APP_VERSION} | ФИНАЛЬНАЯ ВЕРСИЯ</p>
+        <p style="color: #aaa; font-size: 14px;">Юнит-экономика маркетплейсов 2026</p>
+        <div style="margin-top: 15px;">
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Расчет юнит-экономики для одного товара и каталога</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Каталог для группировки (10M+ записей)</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI обновление тарифов</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Поиск аналогов по OE номерам</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Экспорт в Excel с живыми формулами</p>
+        </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+    
+    # Боковое меню
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=80)
         st.markdown("---")
+        
         menu_options = [
             "📁 Загрузка данных",
-            "💰 Импорт цен",
-            "📊 Обогащение каталога",
             "📊 Юнит-экономика",
-            "📊 Юнит-экономика по артикулам",
+            "🗂️ Каталог для группировки",
             "🤖 AI Тарифы",
+            "🔍 Обогащение каталога",
             "📊 Аналитика",
             "📋 История расчетов",
-            "📤 Экспорт",
-            "🚗 High-Volume каталог",
             "⚙️ Настройки"
         ]
+        
         menu_icons = {
             "📁 Загрузка данных": "📤",
-            "💰 Импорт цен": "💰",
-            "📊 Обогащение каталога": "🔍",
             "📊 Юнит-экономика": "💰",
-            "📊 Юнит-экономика по артикулам": "📊",
+            "🗂️ Каталог для группировки": "🗂️",
             "🤖 AI Тарифы": "🤖",
+            "🔍 Обогащение каталога": "🔍",
             "📊 Аналитика": "📈",
             "📋 История расчетов": "📜",
-            "📤 Экспорт": "💾",
-            "🚗 High-Volume каталог": "🚗",
             "⚙️ Настройки": "⚙️"
         }
+        
         menu = st.radio(
             "Меню",
             menu_options,
             key="main_menu",
             format_func=lambda x: f"{menu_icons.get(x, '')} {x}"
         )
+        
         st.markdown("---")
         st.markdown("### 📊 Состояние системы")
+        
         data_loaded = st.session_state.get('uploaded_data') is not None
         rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
+        
         st.metric("📁 Данные", "Загружены ✅" if data_loaded else "Не загружены ❌")
+        
         if data_loaded:
             st.metric("📦 Товаров", rows)
-        # 🆕 v98: Статус постоянной истории
+        
+        # Статус постоянной истории
         try:
             phdb = PersistentHistoryDB()
             if phdb.conn:
@@ -6915,9 +7638,11 @@ def main():
                 st.metric("💾 История в БД", f"{db_count:,}")
         except Exception:
             pass
+        
         st.markdown("---")
         st.caption(f"Приложение v{APP_VERSION}")
         st.caption(f"Python {sys.version.split()[0]}")
+        
         with st.expander("📚 Библиотеки"):
             libs_status = {
                 "Plotly": PLOTLY_AVAILABLE,
@@ -6934,33 +7659,30 @@ def main():
             }
             for lib, available in libs_status.items():
                 st.write(f"{'✅' if available else '❌'} {lib}")
+    
+    # Обработка выбранного раздела
     try:
         if menu == "📁 Загрузка данных":
             show_data_upload_interface()
-        elif menu == "💰 Импорт цен":
-            show_price_import_interface()
-        elif menu == "📊 Обогащение каталога":
-            show_catalog_enhance_interface()
         elif menu == "📊 Юнит-экономика":
             show_unit_economics_interface()
-        elif menu == "📊 Юнит-экономика по артикулам":
-            show_unit_economics_by_article_interface()
+        elif menu == "🗂️ Каталог для группировки":
+            show_catalog_grouping_interface()
         elif menu == "🤖 AI Тарифы":
             show_ai_tariffs_interface()
+        elif menu == "🔍 Обогащение каталога":
+            show_catalog_enhance_interface()
         elif menu == "📊 Аналитика":
             show_analytics_interface()
         elif menu == "📋 История расчетов":
             show_history_interface()
-        elif menu == "📤 Экспорт":
-            show_export_interface()
-        elif menu == "🚗 High-Volume каталог":
-            show_high_volume_interface()
         elif menu == "⚙️ Настройки":
             show_settings_interface()
     except Exception as e:
         st.error(f"❌ Ошибка при отображении страницы: {str(e)}")
         st.code(traceback.format_exc())
         logger.error(f"Main page error: {traceback.format_exc()}")
+
 
 # ============================================================================
 # ТОЧКА ВХОДА
