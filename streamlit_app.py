@@ -21,7 +21,7 @@
 ✅ HIGH-VOLUME CATALOG (10M+ ЗАПИСЕЙ) С POLARS И DUCKDB
 ✅ 🆕 ИМПОРТ ЦЕН ЧЕРЕЗ ОТДЕЛЬНЫЙ ПРАЙС-ЛИСТ (без перезагрузки каталога)
 ✅ 🆕 ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ (DuckDB/SQLite) — сохраняется между перезапусками
-✅ 🆕 ИСПРАВЛЕНИЕ КОДИРОВКИ CSV — добавлен BOM и charset=utf-8
+✅ 🆕 ИСПРАВЛЕНИЕ ЭКСПОРТА CSV — разделитель ; (точка с запятой) для корректного открытия в Excel
 ================================================================================
 """
 # ============================================================================
@@ -409,7 +409,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 APP_VERSION = "98.0.0"
-APP_NAME = " Юнит-экономика автозапчастей 2026"
+APP_NAME = "🚗 Юнит-экономика автозапчастей 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Полный расчет юнит-экономики для автозапчастей с AI-оптимизацией"
 APP_WEBSITE = "https://github.com/autoparts-unit-economics"
@@ -459,7 +459,7 @@ CONFIG_DIR = BASE_DIR / "config"
 PLUGINS_DIR = BASE_DIR / "plugins"
 EXPORTS_DIR = BASE_DIR / "exports"
 TARIFFS_DIR = BASE_DIR / "tariffs"  # НОВОЕ v97: папка для тарифов
-HISTORY_DB_DIR = BASE_DIR / "history_db"  #  v98: папка для истории
+HISTORY_DB_DIR = BASE_DIR / "history_db"  # 🆕 v98: папка для истории
 for dir_path in [DATA_DIR, CACHE_DIR, LOG_DIR, REPORTS_DIR, TEMP_DIR, MODELS_DIR, CONFIG_DIR, PLUGINS_DIR, EXPORTS_DIR, TARIFFS_DIR, HISTORY_DB_DIR]:
     try:
         dir_path.mkdir(exist_ok=True, parents=True)
@@ -516,12 +516,12 @@ MODE_ICONS = {
     "FBY": "📦",
     "FBS": "🏪",
     "FBO": "🏭",
-    "DBS": "",
+    "DBS": "🚚",
     "FBP": ""
 }
 CATEGORY_ICONS = {
     "двигатель": "🔥",
-    "трансмиссия": "⚙️",
+    "трансмиссия": "️",
     "подвеска": "🔄",
     "тормозная_система": "🛑",
     "рулевое_управление": "🎯",
@@ -532,13 +532,13 @@ CATEGORY_ICONS = {
     "масла": "🛢️",
     "кузов": "🚘",
     "оптика": "💡",
-    "шины": "",
-    "инструменты": "",
-    "ремни": "",
-    "подшипники": "",
-    "крепёж": "",
-    "климат": "️",
-    "безопасность": "️"
+    "шины": "🔘",
+    "инструменты": "🔧",
+    "ремни": "🔗",
+    "подшипники": "⭕",
+    "крепёж": "🔩",
+    "климат": "🌡️",
+    "безопасность": "🛡️"
 }
 # ============================================================================
 # КЛАССЫ ИСКЛЮЧЕНИЙ
@@ -642,7 +642,7 @@ class InvalidStateError(AutoPartsException):
         self.state = state
         super().__init__(f"Некорректное состояние{f' {state}' if state else ''}: {message}")
 class PriceImportError(AutoPartsException):
-    """🆕 v98: Ошибка импорта цен"""
+    """ v98: Ошибка импорта цен"""
     def __init__(self, message: str, file_path: Optional[str] = None):
         self.file_path = file_path
         super().__init__(f"Ошибка импорта цен{f' ({file_path})' if file_path else ''}: {message}")
@@ -1031,7 +1031,7 @@ class PersistentHistoryDB:
             logger.error(f"Ошибка удаления: {e}")
             return 0
     def save_price_import(self, file_name: str, records_count: int, updated_count: int, source_type: str = "pricelist", notes: str = "") -> bool:
-        """🆕 v98: Сохранение информации об импорте цен"""
+        """ v98: Сохранение информации об импорте цен"""
         if self.conn is None:
             return False
         try:
@@ -1085,7 +1085,7 @@ def timer_decorator(func: Callable) -> Callable:
             result = func(*args, **kwargs)
             elapsed = time.perf_counter() - start
             if elapsed > 1.0:
-                logger.debug(f" {func.__name__} выполнена за {elapsed:.3f}с")
+                logger.debug(f"⏱ {func.__name__} выполнена за {elapsed:.3f}с")
             return result
         except Exception as e:
             elapsed = time.perf_counter() - start
@@ -1260,7 +1260,7 @@ def deprecated_decorator(version: str = "next", message: str = "") -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
             warnings.warn(
-                f"⚠️ {func.__name__} устарела. Будет удалена в версии {version}. {message}",
+                f"️ {func.__name__} устарела. Будет удалена в версии {version}. {message}",
                 DeprecationWarning,
                 stacklevel=2
             )
@@ -1741,7 +1741,8 @@ def save_dataframe(df: pd.DataFrame, file_path: Union[str, Path], **kwargs) -> N
     ext = path.suffix.lower()
     try:
         if ext == '.csv':
-            df.to_csv(path, encoding='utf-8-sig', index=False, **kwargs)
+            # ✅ ИСПРАВЛЕНИЕ: sep=';' для корректного открытия в Excel
+            df.to_csv(path, encoding='utf-8-sig', index=False, sep=';', **kwargs)
         elif ext == '.xlsx':
             df.to_excel(path, index=False, **kwargs)
         elif ext == '.json':
@@ -3324,7 +3325,7 @@ class DeepSeekRateUpdater:
             cached = self.cache.get(marketplace, category, use_expired=False)
             if cached:
                 self._logger.info(
-                    f" Использованы кэшированные тарифы для {marketplace} "
+                    f"📥 Использованы кэшированные тарифы для {marketplace} "
                     f"(источник: {cached.source.value}, "
                     f"возраст: {(time.time() - cached.timestamp) / 3600:.1f}ч)"
                 )
@@ -3353,7 +3354,7 @@ class DeepSeekRateUpdater:
                 cached = self.cache.get(marketplace, category, use_expired=True)
                 if cached:
                     self._logger.warning(
-                        f"️ Использованы устаревшие кэшированные тарифы для {marketplace}"
+                        f"⚠️ Использованы устаревшие кэшированные тарифы для {marketplace}"
                     )
                     return cached.data, cached.source
             return {}, TariffSource.HARDCODED
@@ -3429,7 +3430,7 @@ class MarketplaceUnitEconomics:
             self._persistent_db = None
         self._logger = logging.getLogger('MarketplaceUnitEconomics')
         self._logger.info("🚗 Инициализация MarketplaceUnitEconomics v98")
-        self._logger.info(f"📊 Загружено {len(self._configs)} маркетплейсов")
+        self._logger.info(f" Загружено {len(self._configs)} маркетплейсов")
         self._logger.info(f"📚 Загружено {len(self._categories)} категорий")
         self._logger.info(f"💰 Система налогообложения: {self._settings.get('tax_system', 'УСН_6')}")
         self._logger.info(f"🎯 Мин. прибыль: {self._settings.get('min_profit_percent', 0.10) * 100:.1f}%")
@@ -4074,12 +4075,12 @@ class MarketplaceUnitEconomics:
             return filtered
         return history
     def get_persistent_history(self, limit: int = 1000, filters: Optional[Dict] = None) -> pd.DataFrame:
-        """🆕 v98: Получение истории из постоянного хранилища"""
+        """ v98: Получение истории из постоянного хранилища"""
         if not self._persistent_db:
             return pd.DataFrame()
         return self._persistent_db.load_history(limit=limit, filters=filters)
     def get_persistent_stats(self) -> Dict[str, Any]:
-        """ v98: Получение статистики из постоянного хранилища"""
+        """🆕 v98: Получение статистики из постоянного хранилища"""
         if not self._persistent_db:
             return {}
         return self._persistent_db.get_stats()
@@ -4169,7 +4170,8 @@ class MarketplaceUnitEconomics:
             return b""
         df = pd.DataFrame([r.to_dict() for r in self._history])
         if format == ExportFormat.CSV:
-            return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            # ✅ ИСПРАВЛЕНИЕ: sep=';' для корректного открытия в Excel
+            return df.to_csv(index=False, encoding='utf-8-sig', sep=';').encode('utf-8-sig')
         elif format == ExportFormat.EXCEL:
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -4295,7 +4297,7 @@ class PriceImporter:
         markup_percent: float = 0.0
     ) -> Dict[str, Any]:
         """
-        🆕 v98: Импорт цен из прайс-листа в каталог.
+         v98: Импорт цен из прайс-листа в каталог.
         """
         result = {
             "success": False,
@@ -4428,7 +4430,7 @@ class HighVolumeAutoPartsCatalog:
         else:
             config_path.write_text(json.dumps(
                 default_config, indent=2, ensure_ascii=False), encoding='utf-8')
-        return default_config
+            return default_config
     def save_cloud_config(self):
         config_path = self.data_dir / "cloud_config.json"
         self.cloud_config["last_sync"] = int(time.time())
@@ -4448,7 +4450,7 @@ class HighVolumeAutoPartsCatalog:
         else:
             price_rules_path.write_text(json.dumps(
                 default_rules, indent=2, ensure_ascii=False), encoding='utf-8')
-        return default_rules
+            return default_rules
     def save_price_rules(self):
         price_rules_path = self.data_dir / "price_rules.json"
         price_rules_path.write_text(json.dumps(
@@ -4486,7 +4488,7 @@ class HighVolumeAutoPartsCatalog:
         else:
             content = "\n".join([f"{k}|{v}" for k, v in default_mapping.items()])
             category_path.write_text(content, encoding='utf-8')
-        return default_mapping
+            return default_mapping
     def save_category_mapping(self):
         category_path = self.data_dir / "category_mapping.txt"
         content = "\n".join([f"{k}|{v}" for k, v in self.category_mapping.items()])
@@ -4758,7 +4760,7 @@ class HighVolumeAutoPartsCatalog:
         if 'prices' in dataframes:
             price_df = dataframes['prices']
             if not price_df.is_empty():
-                logger.info("💰 Обработка цен...")
+                logger.info(" Обработка цен...")
                 self.upsert_prices(price_df)
                 logger.info(f"✅ Успешно обновлено {len(price_df)} ценовых записей")
         step_counter += 1
@@ -5320,7 +5322,7 @@ class CategoryClassifier:
 # ============================================================================
 def show_data_upload_interface():
     """Интерфейс загрузки данных с автоопределением кодировки"""
-    st.header("📁 Загрузка данных каталога")
+    st.header(" Загрузка данных каталога")
     st.info("""
 📋 **Инструкция по загрузке данных:**
 **ОБЯЗАТЕЛЬНЫЕ колонки:**
@@ -5420,8 +5422,6 @@ def show_data_upload_interface():
                             continue
                     else:
                         raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
-            else:
-                raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
             if df is None or df.empty:
                 st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
                 return
@@ -5484,7 +5484,7 @@ def show_data_upload_interface():
             st.subheader("🔧 Действия с данными")
             action_col1, action_col2, action_col3 = st.columns(3)
             with action_col1:
-                if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
+                if st.button("️ Классифицировать категории", type="secondary", key="classify_btn"):
                     with st.spinner("Классификация товаров..."):
                         classifier = CategoryClassifier()
                         name_col = None
@@ -5512,7 +5512,7 @@ def show_data_upload_interface():
                     st.success("✅ Данные очищены")
                     st.rerun()
         except Exception as e:
-            st.error(f" Ошибка загрузки файла: {str(e)}")
+            st.error(f"❌ Ошибка загрузки файла: {str(e)}")
             with st.expander("📋 Подробности ошибки", expanded=True):
                 st.code(traceback.format_exc())
     if st.button("📥 Скачать шаблон данных"):
@@ -5529,12 +5529,13 @@ def show_data_upload_interface():
             "OE номер": ["123456", "654321", "789012"],
             "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
         })
-        csv = template_df.to_csv(index=False, encoding='utf-8-sig')
+        # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
+        csv = template_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
         st.download_button(
             label="📥 Скачать шаблон CSV",
-            data=csv.encode('utf-8-sig'),  # ✅ ИСПРАВЛЕНИЕ: добавлен .encode('utf-8-sig')
+            data=csv.encode('utf-8-sig'),
             file_name="шаблон_каталога.csv",
-            mime="text/csv;charset=utf-8",  # ✅ ИСПРАВЛЕНИЕ: добавлен charset=utf-8
+            mime="text/csv;charset=utf-8",
             key="download_template"
         )
 # ============================================================================
@@ -5545,7 +5546,7 @@ def show_unit_economics_interface():
     st.header("📊 Юнит-экономика маркетплейсов 2026")
     unit_economics = MarketplaceUnitEconomics()
     st.info("""
- **Режимы работы:**
+💡 **Режимы работы:**
 - **FBY** - доставка силами маркетплейса (самый дешевый)
 - **FBS** - доставка силами продавца (базовый)
 - **FBO** - доставка силами оператора (средний)
@@ -5559,8 +5560,8 @@ def show_unit_economics_interface():
         weight = st.number_input("⚖️ Вес (кг)", min_value=0.0, value=1.0, step=0.1, key="ue_weight")
     with col2:
         volume = st.number_input("📦 Объем (литры)", min_value=0.0, value=5.0, step=0.5, key="ue_volume")
-        marketplace = st.selectbox("🏪 Маркетплейс", list(unit_economics._configs.keys()), key="ue_marketplace")
-        operation_mode = st.selectbox(" Режим работы", ["FBY", "FBS", "FBO", "DBS", "FBP"], key="ue_mode")
+        marketplace = st.selectbox(" Маркетплейс", list(unit_economics._configs.keys()), key="ue_marketplace")
+        operation_mode = st.selectbox("📦 Режим работы", ["FBY", "FBS", "FBO", "DBS", "FBP"], key="ue_mode")
         category = st.text_input("📂 Категория (опционально)", placeholder="например: двигатель", key="ue_category")
     with st.expander("💰 Настройки налогов и прибыли"):
         col_t1, col_t2, col_t3 = st.columns(3)
@@ -5611,10 +5612,10 @@ def show_unit_economics_interface():
         with col2:
             st.metric("📈 Маржа", f"{economics.margin_percent:.2f}%")
         with col3:
-            st.metric("📊 ROI", f"{economics.roi:.2f}%")
+            st.metric(" ROI", f"{economics.roi:.2f}%")
         with col4:
             st.metric("⚖️ Точка безубыточности", f"{economics.breakeven_price:.2f} ₽")
-        st.subheader("💎 Рекомендованная минимальная цена")
+        st.subheader(" Рекомендованная минимальная цена")
         col_rec1, col_rec2, col_rec3 = st.columns(3)
         with col_rec1:
             st.metric(
@@ -5730,7 +5731,7 @@ def show_unit_economics_by_article_interface():
 - 💎 **Рекомендованная минимальная цена** (с учётом налога + 10% прибыли)
 - 📋 Детализация всех расходов
 """)
-    st.subheader("⚙️ Параметры расчета")
+    st.subheader("️ Параметры расчета")
     col1, col2, col3 = st.columns(3)
     with col1:
         unit_economics = MarketplaceUnitEconomics()
@@ -5745,7 +5746,7 @@ def show_unit_economics_by_article_interface():
             st.warning("⚠️ Выберите хотя бы один маркетплейс")
             return
     with col2:
-        operation_mode = st.selectbox(" Режим работы", ["FBY", "FBS", "FBO", "DBS", "FBP"], key="ue_article_mode")
+        operation_mode = st.selectbox("📦 Режим работы", ["FBY", "FBS", "FBO", "DBS", "FBP"], key="ue_article_mode")
         days_in_storage = st.number_input("📦 Дней хранения", min_value=1, max_value=365, value=30, step=1, key="ue_article_days_storage")
     with col3:
         apply_markup = st.checkbox("💰 Применить наценку", value=False, key="ue_article_apply_markup")
@@ -5897,12 +5898,12 @@ def show_unit_economics_by_article_interface():
                 progress_bar.progress(1.0, text="Расчет завершен!")
                 progress_bar.empty()
                 if not results:
-                    st.error("❌ Не удалось рассчитать юнит-экономику ни для одного товара")
+                    st.error(" Не удалось рассчитать юнит-экономику ни для одного товара")
                     return
                 df_results = pd.DataFrame(results)
                 st.session_state.ue_article_results = df_results
                 st.success(f"✅ Рассчитано {len(df_results)} записей по {len(selected_marketplaces)} маркетплейсам")
-                st.subheader(" Сводная статистика")
+                st.subheader("📊 Сводная статистика")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     total_profit = df_results['Прибыль'].sum()
@@ -5926,7 +5927,7 @@ def show_unit_economics_by_article_interface():
                 sort_order = st.radio("Порядок:", ["По убыванию", "По возрастанию"], horizontal=True, key="ue_sort_order")
                 sorted_df = df_results.sort_values(sort_col, ascending=(sort_order == "По возрастанию"))
                 st.dataframe(sorted_df[available_display], use_container_width=True, key="ue_results_table")
-                st.subheader(" Экспорт результатов")
+                st.subheader("📤 Экспорт результатов")
                 export_col1, export_col2 = st.columns(2)
                 with export_col1:
                     if st.button("📥 Экспорт в Excel С ФОРМУЛАМИ", key="ue_export_excel_formulas"):
@@ -5948,12 +5949,13 @@ def show_unit_economics_by_article_interface():
                                     pass
                 with export_col2:
                     if st.button("📥 Экспорт в CSV", key="ue_export_csv"):
-                        csv = df_results.to_csv(index=False, encoding='utf-8-sig')
+                        # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
+                        csv = df_results.to_csv(index=False, encoding='utf-8-sig', sep=';')
                         st.download_button(
                             label="📥 Скачать CSV",
-                            data=csv.encode('utf-8-sig'),  # ✅ ИСПРАВЛЕНИЕ: добавлен .encode('utf-8-sig')
+                            data=csv.encode('utf-8-sig'),
                             file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv;charset=utf-8",  # ✅ ИСПРАВЛЕНИЕ: добавлен charset=utf-8
+                            mime="text/csv;charset=utf-8",
                             key="ue_download_csv"
                         )
             except Exception as e:
@@ -5967,7 +5969,7 @@ def show_ai_tariffs_interface():
     """Интерфейс управления тарифами через DeepSeek AI (v98)"""
     st.header("🤖 Управление тарифами через DeepSeek AI")
     st.info("""
- **DeepSeek AI обновляет тарифы для автозапчастей**
+🚀 **DeepSeek AI обновляет тарифы для автозапчастей**
 **Как работает:**
 - ✅ Если галочка **"Запросить ИИ"** установлена — тарифы запрашиваются у DeepSeek AI
 - ✅ Если галочка **НЕ установлена** — используются тарифы из кэша (или захардкоженные)
@@ -5993,7 +5995,7 @@ def show_ai_tariffs_interface():
         )
     with col2:
         category = st.text_input(
-            " Категория (опционально)",
+            "📂 Категория (опционально)",
             placeholder="например: двигатель",
             key="ai_category"
         )
@@ -6028,12 +6030,12 @@ def show_ai_tariffs_interface():
                 if result.get('success'):
                     st.success(f"✅ Обновлены тарифы для {marketplace}")
                     st.info(f"📥 Источник: **{result.get('source', 'Н/Д')}**")
-                    with st.expander("📋 Полученные тарифы"):
+                    with st.expander(" Полученные тарифы"):
                         st.json(result.get('rates', {}))
                 else:
                     st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
     st.divider()
-    st.subheader("📊 Текущие тарифы маркетплейсов")
+    st.subheader(" Текущие тарифы маркетплейсов")
     tariff_data = []
     for mp_name, config in unit_economics._configs.items():
         tariff_data.append({
@@ -6049,18 +6051,18 @@ def show_ai_tariffs_interface():
         })
     st.dataframe(pd.DataFrame(tariff_data), use_container_width=True, key="ai_tariffs_table")
     st.divider()
-    st.subheader("📊 Статистика кэша тарифов")
+    st.subheader(" Статистика кэша тарифов")
     cache_stats = unit_economics.get_tariff_cache_statistics()
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("📦 Всего записей", cache_stats.get('total_entries', 0))
+        st.metric(" Всего записей", cache_stats.get('total_entries', 0))
     with col2:
         st.metric("⏰ Устаревших", cache_stats.get('expired_count', 0))
     with col3:
-        st.metric("📝 Записей в истории", cache_stats.get('history_count', 0))
+        st.metric(" Записей в истории", cache_stats.get('history_count', 0))
     with col4:
         st.metric("🤖 AI запросов", unit_economics._stats.get('ai_requests', 0))
-    with st.expander(" История изменений тарифов"):
+    with st.expander("📜 История изменений тарифов"):
         history = unit_economics.get_tariff_cache_history(limit=20)
         if history:
             st.dataframe(pd.DataFrame(history), use_container_width=True, key="ai_history_table")
@@ -6100,7 +6102,7 @@ def show_price_import_interface():
     """🆕 v98: Интерфейс импорта цен из прайс-листа"""
     st.header("💰 Импорт цен из прайс-листа")
     st.info("""
-📋 **Импорт цен без перезагрузки каталога**
+ **Импорт цен без перезагрузки каталога**
 Этот раздел позволяет обновить цены в загруженном каталоге через отдельный прайс-лист:
 - ✅ Загружается только файл с ценами (не весь каталог)
 - ✅ Автоматическое сопоставление по артикулу и бренду
@@ -6110,7 +6112,7 @@ def show_price_import_interface():
 - ✅ История всех импортов сохраняется
 """)
     if st.session_state.get('uploaded_data') is None:
-        st.warning("⚠️ Сначала загрузите каталог в разделе '📁 Загрузка данных'")
+        st.warning("️ Сначала загрузите каталог в разделе '📁 Загрузка данных'")
         return
     catalog_df = st.session_state.uploaded_data
     st.success(f"✅ Каталог загружен: {len(catalog_df)} товаров")
@@ -6119,7 +6121,7 @@ def show_price_import_interface():
         st.session_state.price_importer = PriceImporter()
     importer = st.session_state.price_importer
     # === Загрузка прайс-листа ===
-    st.subheader(" Загрузка прайс-листа")
+    st.subheader("📤 Загрузка прайс-листа")
     price_file = st.file_uploader(
         "Загрузите файл с ценами (Excel или CSV)",
         type=['xlsx', 'xls', 'csv'],
@@ -6172,7 +6174,7 @@ def show_price_import_interface():
                 if not article_options_catalog:
                     article_options_catalog = catalog_df.columns.tolist()
                 article_col_catalog = st.selectbox(
-                    " Колонка с артикулом в каталоге",
+                    "📋 Колонка с артикулом в каталоге",
                     options=article_options_catalog,
                     key="price_import_catalog_article"
                 )
@@ -6278,12 +6280,13 @@ def show_price_import_interface():
             "Бренд": ["Bosch", "Bosch", "Siemens"],
             "Цена": [1200, 1800, 2500]
         })
-        csv = template_df.to_csv(index=False, encoding='utf-8-sig')
+        # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
+        csv = template_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
         st.download_button(
             label="📥 Скачать шаблон CSV",
-            data=csv.encode('utf-8-sig'),  # ✅ ИСПРАВЛЕНИЕ: добавлен .encode('utf-8-sig')
+            data=csv.encode('utf-8-sig'),
             file_name="шаблон_прайс_листа.csv",
-            mime="text/csv;charset=utf-8",  # ✅ ИСПРАВЛЕНИЕ: добавлен charset=utf-8
+            mime="text/csv;charset=utf-8",
             key="download_pricelist_template"
         )
 # ============================================================================
@@ -6291,9 +6294,9 @@ def show_price_import_interface():
 # ============================================================================
 def show_catalog_enhance_interface():
     """Интерфейс обогащения каталога (поиск аналогов)"""
-    st.header("📊 Обогащение каталога (поиск аналогов)")
+    st.header(" Обогащение каталога (поиск аналогов)")
     st.info("""
-🔍 **Поиск аналогов:**
+ **Поиск аналогов:**
 Система ищет аналоги через общие OE номера (2 уровня):
 - **Уровень 1**: Прямые аналоги (общие OE номера)
 - **Уровень 2**: Косвенные аналоги (через аналоги уровнем выше)
@@ -6301,7 +6304,7 @@ def show_catalog_enhance_interface():
 1. Загрузите данные в каталог (OE, артикулы, кросс-ссылки)
 2. Система построит связи между товарами
 3. При обогащении для каждого товара найдутся аналоги
-💡 **Совет:** Для обновления цен используйте раздел '💰 Импорт цен'
+ **Совет:** Для обновления цен используйте раздел ' Импорт цен'
 """)
     if 'catalog_enhancer' not in st.session_state:
         st.session_state.catalog_enhancer = CatalogEnhancer()
@@ -6354,7 +6357,7 @@ def show_catalog_enhance_interface():
         st.subheader("🔍 Поиск аналогов")
         artikul = st.text_input("Артикул", placeholder="Введите артикул", key="enh_artikul_input")
         brand = st.text_input("Бренд", placeholder="Введите бренд", key="enh_brand_input")
-        if st.button(" Найти аналоги", type="primary", key="enh_find_analogs"):
+        if st.button("🔍 Найти аналоги", type="primary", key="enh_find_analogs"):
             if artikul and brand:
                 with st.spinner("Поиск аналогов..."):
                     data = enhancer.get_analog_data(artikul, brand)
@@ -6369,13 +6372,13 @@ def show_catalog_enhance_interface():
                             analogs_df = pd.DataFrame(data.get('analogs', []))
                             st.dataframe(analogs_df, use_container_width=True, key="enh_analogs_table")
             else:
-                st.warning("⚠️ Введите артикул и бренд")
+                st.warning("️ Введите артикул и бренд")
     st.subheader("📊 Статистика каталога")
     stats = enhancer.get_stats()
     col1, col2 = st.columns(2)
     with col1:
         st.metric("📦 OE записей", stats.get('oe_loaded', 0))
-        st.metric("🔄 Кросс-ссылок", stats.get('cross_loaded', 0))
+        st.metric(" Кросс-ссылок", stats.get('cross_loaded', 0))
     with col2:
         st.metric("🔧 Деталей", stats.get('parts_loaded', 0))
         st.metric("🔍 Поисков", stats.get('analog_searches', 0))
@@ -6392,7 +6395,7 @@ def show_high_volume_interface():
         st.session_state.high_volume_catalog = HighVolumeAutoPartsCatalog()
     catalog = st.session_state.high_volume_catalog
     if not catalog.conn:
-        st.error("❌ Ошибка подключения к базе данных")
+        st.error(" Ошибка подключения к базе данных")
         return
     st.sidebar.title("🧭 Меню High-Volume")
     option = st.sidebar.radio("Выберите раздел", ["Загрузка данных", "Экспорт", "Статистика", "Управление"])
@@ -6427,7 +6430,7 @@ def show_high_volume_interface():
             else:
                 st.warning("Загрузите хотя бы один файл")
     elif option == "Экспорт":
-        st.header("📤 Экспорт данных")
+        st.header(" Экспорт данных")
         total = catalog.conn.execute(
             "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
         st.info(f"Всего: {total}")
@@ -6461,8 +6464,8 @@ def show_high_volume_interface():
             if 'top_brands' in stats and not stats['top_brands'].empty:
                 st.dataframe(stats['top_brands'])
     elif option == "Управление":
-        st.header("🔧 Управление данными")
-        st.warning("⚠️ Операции необратимы!")
+        st.header(" Управление данными")
+        st.warning("️ Операции необратимы!")
         management_option = st.radio(
             "Выберите действие:",
             ["Удалить по бренду", "Удалить по артикулу"],
@@ -6505,7 +6508,7 @@ def show_analytics_interface():
     """Интерфейс аналитики"""
     st.header("📊 Аналитика и статистика")
     if st.session_state.get('uploaded_data') is None:
-        st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
+        st.warning("️ Сначала загрузите данные в разделе ' Загрузка данных'")
         return
     df = st.session_state.uploaded_data.copy()
     st.success(f"✅ Анализ {len(df)} товаров")
@@ -6521,7 +6524,7 @@ def show_analytics_interface():
                 break
         if price_col:
             avg_price = safe_float(df[price_col].mean())
-            st.metric(" Средняя цена", f"{avg_price:,.0f} ₽")
+            st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽")
     with col3:
         cost_col = None
         for col in df.columns:
@@ -6535,7 +6538,7 @@ def show_analytics_interface():
         if price_col and cost_col:
             df['_margin'] = safe_float(df[price_col]) - safe_float(df[cost_col])
             avg_margin = df['_margin'].mean()
-            st.metric("📈 Средняя маржа", f"{avg_margin:,.0f} ₽")
+            st.metric(" Средняя маржа", f"{avg_margin:,.0f} ₽")
     if PLOTLY_AVAILABLE and px is not None and price_col:
         st.subheader("📊 Визуализация данных")
         chart_type = st.selectbox(
@@ -6563,11 +6566,11 @@ def show_analytics_interface():
                 fig = px.bar(top_df, x=name_col, y=price_col, title="Топ 10 товаров по цене")
                 st.plotly_chart(fig, use_container_width=True)
 # ============================================================================
-# 🆕 v98: БЛОК 18: ИСТОРИЯ РАСЧЕТОВ (С ПОДДЕРЖКОЙ ПОСТОЯННОГО ХРАНИЛИЩА)
+#  v98: БЛОК 18: ИСТОРИЯ РАСЧЕТОВ (С ПОДДЕРЖКОЙ ПОСТОЯННОГО ХРАНИЛИЩА)
 # ============================================================================
 def show_history_interface():
     """Интерфейс истории расчетов (v98 - с постоянным хранилищем)"""
-    st.header(" История расчетов")
+    st.header("📋 История расчетов")
     unit_economics = MarketplaceUnitEconomics()
     # 🆕 v98: Переключатель между текущей и сохранённой историей
     history_source = st.radio(
@@ -6583,7 +6586,7 @@ def show_history_interface():
 """)
     if "Сохранённая" in history_source:
         # === ПОСТОЯННАЯ ИСТОРИЯ (из БД) ===
-        st.subheader(" Фильтры (постоянная история)")
+        st.subheader("🔍 Фильтры (постоянная история)")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             filter_marketplace = st.text_input("Маркетплейс", key="history_db_marketplace")
@@ -6639,7 +6642,7 @@ def show_history_interface():
         with col4:
             if 'recommended_min_price' in df_history.columns:
                 avg_rec_price = df_history['recommended_min_price'].mean()
-                st.metric(" Средняя рек. цена", f"{avg_rec_price:.2f} ₽")
+                st.metric("🎯 Средняя рек. цена", f"{avg_rec_price:.2f} ₽")
         # === ТАБЛИЦА ===
         display_cols = ['timestamp', 'marketplace', 'operation_mode', 'article', 'brand',
                         'price', 'cost', 'profit', 'margin_percent', 'roi',
@@ -6650,12 +6653,13 @@ def show_history_interface():
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("📥 Экспортировать в CSV", key="history_db_export"):
-                csv = df_history.to_csv(index=False, encoding='utf-8-sig')
+                # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
+                csv = df_history.to_csv(index=False, encoding='utf-8-sig', sep=';')
                 st.download_button(
                     label="📥 Скачать CSV",
-                    data=csv.encode('utf-8-sig'),  # ✅ ИСПРАВЛЕНИЕ: добавлен .encode('utf-8-sig')
+                    data=csv.encode('utf-8-sig'),
                     file_name=f"история_расчетов_БД_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv;charset=utf-8",  # ✅ ИСПРАВЛЕНИЕ: добавлен charset=utf-8
+                    mime="text/csv;charset=utf-8",
                     key="history_db_download"
                 )
         with col2:
@@ -6690,10 +6694,10 @@ def show_history_interface():
         # === ТЕКУЩАЯ ИСТОРИЯ (в памяти) ===
         history = unit_economics.get_history()
         if not history:
-            st.info("📋 История расчетов пуста. Выполните расчеты в разделе '📊 Юнит-экономика'")
+            st.info(" История расчетов пуста. Выполните расчеты в разделе '📊 Юнит-экономика'")
             return
         df_history = pd.DataFrame([r.to_dict() if hasattr(r, 'to_dict') else r for r in history])
-        st.subheader("🔍 Фильтры")
+        st.subheader(" Фильтры")
         col1, col2, col3 = st.columns(3)
         with col1:
             marketplaces = ['Все'] + sorted(df_history['marketplace'].unique().tolist())
@@ -6736,14 +6740,15 @@ def show_history_interface():
                 st.metric("🎯 Средняя рек. цена", f"{avg_rec_price:.2f} ₽")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button(" Экспортировать историю в CSV", key="history_export"):
+            if st.button("📥 Экспортировать историю в CSV", key="history_export"):
                 if not filtered_df.empty:
-                    csv = filtered_df.to_csv(index=False, encoding='utf-8-sig')
+                    # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
+                    csv = filtered_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
                     st.download_button(
                         label="📥 Скачать CSV",
-                        data=csv.encode('utf-8-sig'),  # ✅ ИСПРАВЛЕНИЕ: добавлен .encode('utf-8-sig')
+                        data=csv.encode('utf-8-sig'),
                         file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv;charset=utf-8",  # ✅ ИСПРАВЛЕНИЕ: добавлен charset=utf-8
+                        mime="text/csv;charset=utf-8",
                         key="history_download"
                     )
         with col2:
@@ -6779,23 +6784,24 @@ def show_export_interface():
                     key="download_excel"
                 )
             else:
-                csv = df.to_csv(index=False, encoding='utf-8-sig')
+                # ✅ ИСПРАВЛЕНИЕ: sep=';' + BOM + charset для корректного открытия в Excel
+                csv = df.to_csv(index=False, encoding='utf-8-sig', sep=';')
                 st.download_button(
                     label="📥 Скачать CSV файл",
-                    data=csv.encode('utf-8-sig'),  # ✅ ИСПРАВЛЕНИЕ: добавлен .encode('utf-8-sig')
+                    data=csv.encode('utf-8-sig'),
                     file_name=f"каталог_экспорт_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv;charset=utf-8",  # ✅ ИСПРАВЛЕНИЕ: добавлен charset=utf-8
+                    mime="text/csv;charset=utf-8",
                     key="download_csv"
                 )
             st.success("✅ Данные успешно подготовлены к экспорту!")
         except Exception as e:
-            st.error(f" Ошибка экспорта: {str(e)}")
+            st.error(f"❌ Ошибка экспорта: {str(e)}")
 # ============================================================================
 # БЛОК 20: НАСТРОЙКИ (v98 С НАЛОГАМИ И ПОСТОЯННОЙ ИСТОРИЕЙ)
 # ============================================================================
 def show_settings_interface():
     """Интерфейс настроек (v98)"""
-    st.header("️ Настройки приложения")
+    st.header("⚙️ Настройки приложения")
     unit_economics = MarketplaceUnitEconomics()
     st.subheader("💰 Настройки налогов")
     st.info("""
@@ -6887,16 +6893,16 @@ def show_settings_interface():
     st.subheader("ℹ️ Информация о приложении")
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(" Версия", APP_VERSION)
+        st.metric("📌 Версия", APP_VERSION)
         st.metric("🐍 Python", sys.version.split()[0])
     with col2:
-        st.metric(" Дата", datetime.now().strftime("%d.%m.%Y"))
+        st.metric("📅 Дата", datetime.now().strftime("%d.%m.%Y"))
         data_loaded = st.session_state.get('uploaded_data') is not None
         rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
-        st.metric("📊 Данных загружено", rows)
-    #  v98: Статистика постоянной истории
+        st.metric(" Данных загружено", rows)
+    # 🆕 v98: Статистика постоянной истории
     st.divider()
-    st.subheader(" Статистика постоянного хранилища")
+    st.subheader("📚 Статистика постоянного хранилища")
     db_stats = unit_economics.get_persistent_stats()
     if db_stats:
         col1, col2, col3, col4 = st.columns(4)
@@ -7047,7 +7053,7 @@ def export_unit_economics_with_formulas_v2(
         tariff_last_row = row_idx - 1
         # ЛИСТ 2: НАЛОГИ
         ws_taxes = wb.create_sheet("Налоги")
-        ws_taxes.cell(row=1, column=1, value="💰 НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ")
+        ws_taxes.cell(row=1, column=1, value=" НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ")
         ws_taxes.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F3460")
         ws_taxes.merge_cells('A1:C1')
         ws_taxes.cell(row=1, column=1).alignment = center_align
@@ -7100,7 +7106,7 @@ def export_unit_economics_with_formulas_v2(
             "Прибыль (₽)", "Маржа (%)", "ROI (%)",
             "Точка безубыточности", "Рекомендованная мин. цена (₽)"
         ]
-        ws_calc.cell(row=1, column=1, value=" РАСЧЁТ ЮНИТ-ЭКОНОМИКИ")
+        ws_calc.cell(row=1, column=1, value="📊 РАСЧЁТ ЮНИТ-ЭКОНОМИКИ")
         ws_calc.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F3460")
         ws_calc.merge_cells('A1:AB1')
         ws_calc.cell(row=1, column=1).alignment = center_align
@@ -7377,7 +7383,7 @@ def export_unit_economics_with_formulas_v2(
         ws_summary.add_chart(chart, "A" + str(total_row + 3))
         # ЛИСТ 5: DASHBOARD
         ws_dashboard = wb.create_sheet("Dashboard")
-        ws_dashboard.cell(row=1, column=1, value="📊 DASHBOARD: КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ")
+        ws_dashboard.cell(row=1, column=1, value=" DASHBOARD: КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ")
         ws_dashboard.cell(row=1, column=1).font = Font(bold=True, size=16, color="0F3460")
         ws_dashboard.merge_cells('A1:F1')
         ws_dashboard.cell(row=1, column=1).alignment = center_align
@@ -7493,9 +7499,9 @@ def main():
         <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Экспорт в Excel с 5 листами и живыми формулами</p>
         <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 150+ категорий автозапчастей с габаритами</p>
         <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Юнит-экономика по каждому артикулу</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Импорт цен через отдельный прайс-лист</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Постоянное хранилище истории (DuckDB/SQLite)</p>
-        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Исправлена кодировка CSV (BOM + charset=utf-8)</p>
+        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅  Импорт цен через отдельный прайс-лист</p>
+        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅  Постоянное хранилище истории (DuckDB/SQLite)</p>
+        <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ 🆕 Исправление экспорта CSV — разделитель ; (точка с запятой)</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -7508,25 +7514,25 @@ def main():
             "📊 Обогащение каталога",
             "📊 Юнит-экономика",
             "📊 Юнит-экономика по артикулам",
-            " AI Тарифы",
-            " Аналитика",
+            "🤖 AI Тарифы",
+            "📊 Аналитика",
             "📋 История расчетов",
             "📤 Экспорт",
-            "🚗 High-Volume каталог",
+            " High-Volume каталог",
             "⚙️ Настройки"
         ]
         menu_icons = {
-            " Загрузка данных": "📤",
-            "💰 Импорт цен": "💰",
+            "📁 Загрузка данных": "📤",
+            " Импорт цен": "💰",
             "📊 Обогащение каталога": "🔍",
-            " Юнит-экономика": "💰",
-            "📊 Юнит-экономика по артикулам": "📊",
-            " AI Тарифы": "🤖",
+            "📊 Юнит-экономика": "💰",
+            " Юнит-экономика по артикулам": "📊",
+            "🤖 AI Тарифы": "🤖",
             "📊 Аналитика": "📈",
-            "📋 История расчетов": "📜",
+            "📋 История расчетов": "",
             "📤 Экспорт": "💾",
-            " High-Volume каталог": "",
-            "⚙️ Настройки": "⚙️"
+            "🚗 High-Volume каталог": "🚗",
+            "⚙️ Настройки": "️"
         }
         menu = st.radio(
             "Меню",
@@ -7538,10 +7544,10 @@ def main():
         st.markdown("### 📊 Состояние системы")
         data_loaded = st.session_state.get('uploaded_data') is not None
         rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
-        st.metric("📁 Данные", "Загружены ✅" if data_loaded else "Не загружены ❌")
+        st.metric(" Данные", "Загружены ✅" if data_loaded else "Не загружены ❌")
         if data_loaded:
-            st.metric("📦 Товаров", rows)
-        # 🆕 v98: Статус постоянной истории
+            st.metric(" Товаров", rows)
+        #  v98: Статус постоянной истории
         try:
             phdb = PersistentHistoryDB()
             if phdb.conn:
@@ -7573,23 +7579,23 @@ def main():
             show_data_upload_interface()
         elif menu == "💰 Импорт цен":
             show_price_import_interface()
-        elif menu == "📊 Обогащение каталога":
+        elif menu == " Обогащение каталога":
             show_catalog_enhance_interface()
         elif menu == "📊 Юнит-экономика":
             show_unit_economics_interface()
-        elif menu == "📊 Юнит-экономика по артикулам":
+        elif menu == " Юнит-экономика по артикулам":
             show_unit_economics_by_article_interface()
         elif menu == "🤖 AI Тарифы":
             show_ai_tariffs_interface()
         elif menu == "📊 Аналитика":
             show_analytics_interface()
-        elif menu == "📋 История расчетов":
+        elif menu == " История расчетов":
             show_history_interface()
         elif menu == "📤 Экспорт":
             show_export_interface()
-        elif menu == "🚗 High-Volume каталог":
+        elif menu == " High-Volume каталог":
             show_high_volume_interface()
-        elif menu == "⚙️ Настройки":
+        elif menu == "️ Настройки":
             show_settings_interface()
     except Exception as e:
         st.error(f"❌ Ошибка при отображении страницы: {str(e)}")
