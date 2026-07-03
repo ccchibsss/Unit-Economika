@@ -2,7 +2,7 @@
 ================================================================================
 🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.3 - STANDALONE EXCEL EXPORT (FIXED)
 ================================================================================
-📌 ВЕРСИЯ: 99.3.0 (ИСПРАВЛЕНА ГЕНЕРАЦИЯ EXCEL И НАЛОГИ)
+📌 ВЕРСИЯ: 99.3.0 (ИСПРАВЛЕНА ГЕНЕРАЦИЯ EXCEL И НАЛОГИ + CSV ЭКСПОРТ)
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
 ================================================================================
 """
@@ -460,7 +460,7 @@ DEFAULT_LOCALE = "ru_RU"
 TIMEZONE = "Europe/Moscow"
 
 # === НОВОЕ v97: Настройки налогов и прибыли ===
-DEFAULT_TAX_SYSTEM = "УСН_6"  # УСН 6%, УСН_15, ОСНО
+DEFAULT_TAX_SYSTEM = "УСН_6"  # УСН 6%, УСН 15, ОСНО
 DEFAULT_USN_RATE = 0.06
 DEFAULT_USN_ADDITIONAL_RATE = 0.01  # +1% сверх лимита
 DEFAULT_USN_LIMIT = 300_000_000  # лимит 300 млн в год
@@ -5970,7 +5970,7 @@ def show_catalog_calculation():
     3. Укажите режим работы
     4. **Система автоматически определит колонки с габаритами**
     5. Нажмите "Рассчитать"
-    6. Экспортируйте результаты в Excel с живыми формулами
+    6. Экспортируйте результаты в Excel с живыми формулами или CSV
     """)
     
     st.subheader("⚙️ Параметры расчета")
@@ -6229,7 +6229,8 @@ def show_catalog_calculation():
                 
                 # Экспорт результатов
                 st.subheader("📤 Экспорт результатов")
-                export_col1, export_col2 = st.columns(2)
+                export_col1, export_col2, export_col3 = st.columns(3)
+                
                 with export_col1:
                     if st.button("📥 Экспорт в Excel С ФОРМУЛАМИ", key="ue_export_excel_formulas"):
                         with st.spinner("Генерация Excel с формулами..."):
@@ -6250,15 +6251,31 @@ def show_catalog_calculation():
                                     pass
                                 
                 with export_col2:
-                    if st.button("📥 Экспорт в CSV", key="ue_export_csv"):
-                        csv = df_results.to_csv(index=False, encoding='utf-8-sig')
+                    if st.button("📥 Экспорт в CSV (Быстро)", key="ue_export_csv"):
+                        csv_buffer = io.StringIO()
+                        df_results.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
                         st.download_button(
                             label="📥 Скачать CSV",
-                            data=csv,
+                            data=csv_buffer.getvalue().encode('utf-8-sig'),
                             file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                             mime="text/csv",
                             key="ue_download_csv"
                         )
+                        
+                with export_col3:
+                     if st.button("📥 Экспорт в Parquet (Big Data)", key="ue_export_parquet"):
+                         if PYARROW_AVAILABLE:
+                             parquet_buffer = io.BytesIO()
+                             df_results.to_parquet(parquet_buffer, engine='pyarrow')
+                             st.download_button(
+                                 label="📥 Скачать Parquet",
+                                 data=parquet_buffer.getvalue(),
+                                 file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet",
+                                 mime="application/octet-stream",
+                                 key="ue_download_parquet"
+                             )
+                         else:
+                             st.error("❌ Установите pyarrow для экспорта в Parquet")
                         
             except Exception as e:
                 st.error(f"❌ Ошибка при расчете: {str(e)}")
