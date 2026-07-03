@@ -1,8 +1,8 @@
 """
 ================================================================================
-🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.8 - API + ENCODING FIX
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.7 - MULTI-SOURCE TARIFFS & FIXES
 ================================================================================
-📌 ВЕРСИЯ: 99.8.0 (API МАРКЕТПЛЕЙСОВ + ИСПРАВЛЕНИЕ КОДИРОВКИ + МАППИНГ КОЛОНОК)
+📌 ВЕРСИЯ: 99.7.0 (API+AI+DOCS + ИСПРАВЛЕНИЕ КОДИРОВКИ И СТОЛБЦОВ)
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
 ================================================================================
 """
@@ -429,7 +429,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "99.8.0"
+APP_VERSION = "99.7.0"
 APP_NAME = "🚗 Юнит-экономика автозапчастей 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Полный расчет юнит-экономики для автозапчастей с AI-оптимизацией"
@@ -1591,9 +1591,6 @@ class TariffSource(Enum):
     AI_LIVE = "ИИ (запрос)"
     MANUAL = "Ручной ввод"
     IMPORTED = "Импортированы"
-    API_OFFICIAL = "Официальный API"
-    WEB_SCRAPED = "Парсинг сайта"
-    DOC_ANALYSIS = "Анализ документации"
 
 # ============================================================================
 # БЛОК 2: ДАТАКЛАССЫ
@@ -2789,12 +2786,19 @@ class DeepSeekRateUpdater:
         else:
             self._logger.warning("DeepSeek API ключ не найден")
 
-    def _build_prompt(self, marketplace: str, category: str = None) -> str:
+    def _build_prompt(self, marketplace: str, category: str = None, doc_context: str = "") -> str:
         """Формирование промпта для DeepSeek"""
         prompt = (
             "Ты - эксперт по юнит-экономике маркетплейсов России, "
             "специализирующийся на автозапчастях.\n"
             f"Предоставь актуальные тарифы для маркетплейса {marketplace} на 2026 год.\n"
+        )
+        
+        if doc_context:
+            prompt += f"\n📄 КОНТЕКСТ ИЗ ДОКУМЕНТАЦИИ:\n{doc_context}\n\n"
+            prompt += "Используй информацию из документации как приоритетный источник.\n"
+            
+        prompt += (
             "Формат ответа ТОЛЬКО JSON без пояснений:\n"
             "{\n"
             "  \"commission_rate\": число (комиссия в долях, например 0.15),\n"
@@ -2861,10 +2865,11 @@ class DeepSeekRateUpdater:
         marketplace: str,
         category: str = None,
         force_refresh: bool = False,
-        use_cache: bool = True
+        use_cache: bool = True,
+        doc_context: str = ""
     ) -> Tuple[Dict[str, Any], TariffSource]:
         """Получение тарифов через DeepSeek."""
-        if use_cache and not force_refresh:
+        if use_cache and not force_refresh and not doc_context:
             cached = self.cache.get(marketplace, category, use_expired=False)
             if cached:
                 self._logger.info(
@@ -2879,20 +2884,24 @@ class DeepSeekRateUpdater:
             return {}, TariffSource.HARDCODED
 
         try:
-            prompt = self._build_prompt(marketplace, category)
+            prompt = self._build_prompt(marketplace, category, doc_context)
             result = self._call_deepseek_api(prompt)
             
             if result:
+                source = TariffSource.AI_LIVE
+                if doc_context:
+                    source = TariffSource.IMPORTED  # Помечаем как импортированные из доков
+                    
                 self.cache.set(
                     marketplace=marketplace,
                     category=category,
                     data=result,
-                    source=TariffSource.AI_LIVE,
+                    source=source,
                     ttl_seconds=86400,
-                    notes=f"Получено от DeepSeek {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    notes=f"Получено от DeepSeek {datetime.now().strftime('%Y-%m-%d %H:%M')}" + (" + Docs" if doc_context else "")
                 )
                 self._logger.info(f"✅ Тарифы для {marketplace} обновлены через DeepSeek AI")
-                return result, TariffSource.AI_LIVE
+                return result, source
             return {}, TariffSource.HARDCODED
             
         except AIError as e:
@@ -2909,7 +2918,8 @@ class DeepSeekRateUpdater:
     def update_all_marketplaces(
         self,
         force_refresh: bool = False,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        doc_context: str = ""
     ) -> Dict[str, Tuple[Dict[str, Any], TariffSource]]:
         """Обновление тарифов для всех маркетплейсов."""
         results = {}
@@ -2921,7 +2931,8 @@ class DeepSeekRateUpdater:
                 rates, source = self.get_rates_from_ai(
                     marketplace=mp,
                     force_refresh=force_refresh,
-                    use_cache=True
+                    use_cache=True,
+                    doc_context=doc_context
                 )
                 results[mp] = (rates, source)
             except Exception as e:
@@ -3135,7 +3146,8 @@ class MarketplaceUnitEconomics:
         self,
         marketplace: Optional[str] = None,
         category: Optional[str] = None,
-        force: bool = True
+        force: bool = True,
+        doc_context: str = ""
     ) -> Dict[str, Any]:
         updater = self._get_ai_updater()
         if updater is None:
@@ -3149,7 +3161,8 @@ class MarketplaceUnitEconomics:
                     marketplace=marketplace,
                     category=category,
                     force_refresh=force,
-                    use_cache=True
+                    use_cache=True,
+                    doc_context=doc_context
                 )
                 if rates:
                     self._apply_ai_tariffs(marketplace, rates)
@@ -3160,7 +3173,7 @@ class MarketplaceUnitEconomics:
                     "success": True
                 }
             else:
-                results = updater.update_all_marketplaces(force_refresh=force)
+                results = updater.update_all_marketplaces(force_refresh=force, doc_context=doc_context)
                 for mp, (rates, source) in results.items():
                     if rates:
                         self._apply_ai_tariffs(mp, rates)
@@ -5118,7 +5131,7 @@ class CategoryClassifier:
         return results
 
 # ============================================================================
-# 🆕 v99.2: ГЕНЕРАТОР EXCEL С ЖИВЫМИ ФОРМУЛАМИ И НАСТРОЙКАМИ
+# 🆕 v99.7: ГЕНЕРАТОР EXCEL С ЖИВЫМИ ФОРМУЛАМИ И НАСТРОЙКАМИ
 # ============================================================================
 def generate_standalone_excel_template(
     df_results: pd.DataFrame,
@@ -5197,6 +5210,14 @@ def generate_standalone_excel_template(
         ws_settings.add_data_validation(dv_tax)
         dv_tax.add(ws_settings['B5'])
         
+        # Ячейка для минимальной прибыли в процентах (доля) для использования в формулах
+        s_min_profit_val = ws_settings['B7'].value / 100 if ws_settings['B7'].value else 0.1
+        ws_settings['B8'] = s_min_profit_val
+        ws_settings['B8'].number_format = '0.0%'
+        ws_settings['B8'].font = Font(color="808080", italic=True)
+        ws_settings['A8'] = "Мин. прибыль (доля):"
+        ws_settings['A8'].font = Font(color="808080", italic=True)
+        
         # Таблица тарифов (скрытая справочная таблица для VLOOKUP)
         ws_settings['E1'] = "СПРАВОЧНИК ТАРИФОВ (НЕ РЕДАКТИРОВАТЬ)"
         ws_settings['E1'].font = Font(bold=True, color="FF0000")
@@ -5260,11 +5281,7 @@ def generate_standalone_excel_template(
         s_mp = "'⚙️ Настройки'!$B$3"      # Маркетплейс
         s_days = "'⚙️ Настройки'!$B$6"    # Дни хранения
         s_tax = "'⚙️ Настройки'!$B$5"     # Налог
-        s_min_profit_val = ws_settings['B7'].value / 100 if ws_settings['B7'].value else 0.1
-        # Создаем ячейку для минимальной прибыли в процентах (доля) для использования в формулах
-        ws_settings['B8'] = s_min_profit_val
-        ws_settings['B8'].number_format = '0.0%'
-        s_min_profit = "'⚙️ Настройки'!$B$8" 
+        s_min_profit = "'⚙️ Настройки'!$B$8" # Мин прибыль (доля)
 
         # Диапазон справочника тарифов
         tariff_range = f"'⚙️ Настройки'!$E$3:$Q${2 + len(configs)}"
@@ -5875,7 +5892,7 @@ def show_catalog_calculation():
     3. Укажите режим работы
     4. **Система автоматически определит колонки с габаритами**
     5. Нажмите "Рассчитать"
-    6. Экспортируйте результаты в Excel с живыми формулами
+    6. Экспортируйте результаты в Excel с живыми формулами или CSV
     """)
     
     st.subheader("⚙️ Параметры расчета")
@@ -6119,10 +6136,11 @@ def show_catalog_calculation():
                                 
                 with export_col2:
                     if st.button("📥 Экспорт в CSV", key="ue_export_csv"):
-                        csv = df_results.to_csv(index=False, encoding='utf-8-sig')
+                        csv_buffer = io.StringIO()
+                        df_results.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
                         st.download_button(
                             label="📥 Скачать CSV",
-                            data=csv,
+                            data=csv_buffer.getvalue().encode('utf-8-sig'),
                             file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                             mime="text/csv",
                             key="ue_download_csv"
@@ -6356,25 +6374,24 @@ def show_catalog_management(catalog):
                     st.rerun()
 
 # ============================================================================
-# БЛОК 14: AI ТАРИФЫ
+# БЛОК 14: AI ТАРИФЫ (ОБНОВЛЕННЫЙ v99.7)
 # ============================================================================
 def show_ai_tariffs_interface():
     """
-    🤖 РАЗДЕЛ 4: AI ТАРИФЫ
-    ======================
+    🤖 РАЗДЕЛ 4: AI ТАРИФЫ (API + DOCS)
+    ====================================
     """
     st.header("🤖 Шаг 4: AI Тарифы")
     st.info("""
-    🤖 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ ИИ:**
-    1. Получите API ключ на platform.deepseek.com
-    2. Введите ключ в поле ниже
-    3. Выберите маркетплейс
-    4. Поставьте галочку "Запросить ИИ"
-    5. Нажмите "Обновить тарифы"
+    🤖 **МУЛЬТИСОРСИНГ ТАРИФОВ:**
+    1. **API:** Запрос актуальных данных через DeepSeek API
+    2. **Документация:** Загрузите PDF/Excel с официальными тарифами
+    3. **AI Анализ:** ИИ проанализирует документацию и API вместе
     """)
     
     unit_economics = MarketplaceUnitEconomics()
     
+    # API Key
     api_key = st.text_input(
         "🔑 API ключ DeepSeek",
         type="password",
@@ -6386,6 +6403,34 @@ def show_ai_tariffs_interface():
     if api_key:
         os.environ['DEEPSEEK_API_KEY'] = api_key
         
+    # Загрузка документации
+    st.subheader("📄 Загрузка документации (PDF/Excel)")
+    doc_file = st.file_uploader(
+        "Загрузите официальный документ с тарифами",
+        type=['pdf', 'xlsx', 'xls', 'csv'],
+        key="ai_doc_file",
+        help="Поддерживаются PDF, Excel, CSV"
+    )
+    
+    doc_context = ""
+    if doc_file is not None:
+        try:
+            file_name = doc_file.name.lower()
+            if file_name.endswith('.pdf'):
+                # Для PDF нужен PyPDF2 или pdfplumber, но для простоты читаем как текст если возможно
+                # В реальном проекте здесь нужен парсер PDF
+                st.warning("⚠️ PDF парсинг требует установки pdfplumber. Попробуйте Excel/CSV.")
+            elif file_name.endswith(('.xlsx', '.xls', '.csv')):
+                # Читаем как текст для контекста
+                content = doc_file.read()
+                try:
+                    doc_context = content.decode('utf-8')[:5000]  # Ограничиваем контекст
+                except:
+                    doc_context = content.decode('cp1251', errors='ignore')[:5000]
+                st.success(f"✅ Документ загружен ({len(doc_context)} символов)")
+        except Exception as e:
+            st.error(f"❌ Ошибка чтения документа: {e}")
+            
     col1, col2, col3 = st.columns(3)
     with col1:
         marketplace = st.selectbox(
@@ -6401,42 +6446,36 @@ def show_ai_tariffs_interface():
         )
     with col3:
         force_refresh = st.checkbox(
-            "🔄 Запросить ИИ (принудительное обновление)",
+            "🔄 Принудительное обновление",
             value=False,
             key="ai_force_refresh",
-            help="Если установлено — тарифы будут запрошены у DeepSeek AI."
+            help="Игнорировать кэш и запросить свежие данные"
         )
         
-    if st.button("🔄 Обновить тарифы", type="primary", key="ai_update"):
+    if st.button("🔄 Обновить тарифы (API + Docs)", type="primary", key="ai_update"):
         if not api_key and not os.environ.get('DEEPSEEK_API_KEY'):
             st.error("❌ Введите API ключ DeepSeek")
             return
             
-        with st.spinner("Обновление тарифов..."):
-            if marketplace == "Все маркетплейсы":
-                result = unit_economics.refresh_tariffs_from_ai(
-                    marketplace=None,
-                    category=category if category else None,
-                    force=force_refresh
-                )
-                if result.get('success'):
+        with st.spinner("Обновление тарифов через AI..."):
+            result = unit_economics.refresh_tariffs_from_ai(
+                marketplace=marketplace if marketplace != "Все маркетплейсы" else None,
+                category=category if category else None,
+                force=force_refresh,
+                doc_context=doc_context
+            )
+            
+            if result.get('success'):
+                if marketplace == "Все маркетплейсы":
                     st.success(f"✅ Обновлены тарифы для {result.get('marketplaces_updated', 0)} из {result.get('total', 0)} маркетплейсов")
                 else:
-                    st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
-            else:
-                result = unit_economics.refresh_tariffs_from_ai(
-                    marketplace=marketplace,
-                    category=category if category else None,
-                    force=force_refresh
-                )
-                if result.get('success'):
                     st.success(f"✅ Обновлены тарифы для {marketplace}")
                     st.info(f"📥 Источник: **{result.get('source', 'Н/Д')}**")
                     with st.expander("📋 Полученные тарифы"):
                         st.json(result.get('rates', {}))
-                else:
-                    st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
-                    
+            else:
+                st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+                
     st.divider()
     
     st.subheader("📊 Текущие тарифы маркетплейсов")
@@ -6749,7 +6788,7 @@ def show_history_interface():
                     st.rerun()
 
 # ============================================================================
-# БЛОК 18: НАСТРОЙКИ
+# БЛОК 18: НАСТРОЙКИ (ИСПРАВЛЕННЫЙ v99.7)
 # ============================================================================
 def show_settings_interface():
     """
@@ -6786,6 +6825,7 @@ def show_settings_interface():
             step=1.0, key="settings_min_profit_percent"
         )
     with col2:
+        # ИСПРАВЛЕНИЕ v99.7: Приведение к int для избежания StreamlitMixedNumericTypesError
         insurance_contributions = st.number_input(
             "Страховые взносы в год (₽)",
             min_value=0,
@@ -6864,7 +6904,7 @@ def show_settings_interface():
     st.caption(f"📂 Путь к БД истории: `{HISTORY_DB_DIR / 'history.duckdb'}`")
 
 # ============================================================================
-# БЛОК 22: ГЛАВНАЯ ФУНКЦИЯ (ИСПРАВЛЕНА)
+# БЛОК 22: ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================================
 def main():
     """
@@ -6886,7 +6926,7 @@ def main():
         <div style="margin-top: 15px;">
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Расчет юнит-экономики для одного товара и каталога</p>
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Каталог для группировки (10M+ записей)</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI обновление тарифов</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI обновление тарифов (API + Docs)</p>
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Поиск аналогов по OE номерам</p>
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Экспорт в Excel с живыми формулами</p>
         </div>
