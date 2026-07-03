@@ -1,8 +1,8 @@
 """
 ================================================================================
-🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.4 - FIXED & OPTIMIZED
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.5 - LIVE TEMPLATE UPDATE
 ================================================================================
-📌 ВЕРСИЯ: 99.4.0 (ИСПРАВЛЕНА ОШИБКА ТИПОВ В НАСТРОЙКАХ + ГЕНЕРАЦИЯ EXCEL)
+📌 ВЕРСИЯ: 99.5.0 (ОБНОВЛЕНИЕ ДАННЫХ В ШАБЛОНЕ + ИСПРАВЛЕНИЕ ТИПОВ)
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
 ================================================================================
 """
@@ -429,7 +429,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "99.4.0"
+APP_VERSION = "99.5.0"
 APP_NAME = "🚗 Юнит-экономика автозапчастей 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Полный расчет юнит-экономики для автозапчастей с AI-оптимизацией"
@@ -460,7 +460,7 @@ DEFAULT_LOCALE = "ru_RU"
 TIMEZONE = "Europe/Moscow"
 
 # === НОВОЕ v97: Настройки налогов и прибыли ===
-DEFAULT_TAX_SYSTEM = "УСН_6"  # УСН 6%, УСН 15, ОСНО
+DEFAULT_TAX_SYSTEM = "УСН_6"  # УСН 6%, УСН_15, ОСНО
 DEFAULT_USN_RATE = 0.06
 DEFAULT_USN_ADDITIONAL_RATE = 0.01  # +1% сверх лимита
 DEFAULT_USN_LIMIT = 300_000_000  # лимит 300 млн в год
@@ -477,7 +477,6 @@ SUPPORTED_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP"]
 try:
     BASE_DIR = Path(__file__).parent.resolve()
 except NameError:
-    # Для сред, где __file__ не определен (например, некоторые интерактивные оболочки)
     BASE_DIR = Path.cwd()
 
 DATA_DIR = BASE_DIR / "data"
@@ -1352,7 +1351,6 @@ def calculate_volume(length: float, width: float, height: float) -> float:
     if not all([length > 0, width > 0, height > 0]):
         return 0.0
     
-    # Проверка на аномально большие значения (возможно, в мм вместо см)
     if any([length > 1000, width > 1000, height > 1000]):
         length /= 10
         width /= 10
@@ -1416,32 +1414,26 @@ def calculate_tax(
     if tax_system == "УСН_6":
         base_tax = revenue * DEFAULT_USN_RATE
         
-        # Проверка превышения лимита для доп. налога 1%
         if annual_revenue > DEFAULT_USN_LIMIT:
             excess = annual_revenue - DEFAULT_USN_LIMIT
             additional_tax = excess * DEFAULT_USN_ADDITIONAL_RATE
-            # Распределяем дополнительный налог пропорционально выручке этого товара
             additional_per_unit = additional_tax * (revenue / annual_revenue) if annual_revenue > 0 else 0
             base_tax += additional_per_unit
             
         if use_deduction and insurance_contributions > 0:
-            # Упрощенная логика: если annual_revenue не задана, считаем что вычет уже учтен в общих расходах или игнорируем его здесь
             if annual_revenue > 0:
                  deduction_ratio = min(1.0, insurance_contributions / (annual_revenue * DEFAULT_USN_RATE)) if (annual_revenue * DEFAULT_USN_RATE) > 0 else 0
                  deduction = base_tax * deduction_ratio
                  return max(0, base_tax - deduction)
             else:
-                # Если годовой оборот неизвестен, не применяем вычет к цене единицы, 
-                # так как это исказит маржинальность конкретного товара.
                 return base_tax
         return base_tax
         
     elif tax_system == "УСН_15":
-        # Упрощенно считаем как % от выручки, т.к. расходы (себестоимость) уже вычитаются при расчете прибыли
         return revenue * 0.15 
         
     elif tax_system == "ОСНО":
-        nds = revenue * 0.20 / 1.20 # НДС внутри цены обычно, но тут упрощенно сверху
+        nds = revenue * 0.20 / 1.20 
         profit_tax = revenue * 0.20
         return nds + profit_tax
         
@@ -1462,15 +1454,12 @@ def calculate_recommended_min_price(
     if cost <= 0:
         return 0.0
     
-    # Фиксированные затраты на единицу
     fixed_costs = cost + logistics + storage_cost + last_mile
-    
-    # Переменные ставки (доля от цены)
     variable_rate = commission_rate + acquiring_rate + return_rate + tax_rate + min_profit_percent
     
     denominator = 1 - variable_rate
     if denominator <= 0:
-        return 0.0 # Невозможно достичь целевой прибыли при таких комиссиях
+        return 0.0 
         
     recommended_price = fixed_costs / denominator
     return max(0, round(recommended_price, 2))
@@ -1945,12 +1934,10 @@ class SmartTariffCache:
         try:
             data = {k: v.to_dict() for k, v in self._cache.items()}
             
-            # Backup
             if self.cache_file.exists():
                 backup_name = f"tariffs_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
                 shutil.copy2(self.cache_file, self.backup_dir / backup_name)
                 
-                # Clean old backups
                 backups = sorted(self.backup_dir.glob("tariffs_backup_*.json"))
                 for old_backup in backups[:-10]:
                     try:
@@ -2852,7 +2839,6 @@ class DeepSeekRateUpdater:
                 result = response.json()
                 content = result['choices'][0]['message']['content']
                 
-                # Извлечение JSON из ответа
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group())
@@ -2995,7 +2981,6 @@ class MarketplaceUnitEconomics:
         self._tariff_cache = SmartTariffCache()
         self._ai_updater = None
         
-        # 🆕 v98: Подключаем постоянное хранилище истории
         try:
             self._persistent_db = PersistentHistoryDB()
         except Exception as e:
@@ -3048,7 +3033,7 @@ class MarketplaceUnitEconomics:
             "cache_hits": 0,
             "cache_misses": 0,
             "ai_requests": 0,
-            "db_saved": 0  # 🆕 v98
+            "db_saved": 0
         }
 
     def _load_settings(self) -> Dict[str, Any]:
@@ -3075,7 +3060,7 @@ class MarketplaceUnitEconomics:
             "min_profit_percent": DEFAULT_MIN_PROFIT_PERCENT,
             "use_tax_deduction": DEFAULT_TAX_DEDUCTION,
             "annual_revenue": 0.0,
-            "enable_persistent_history": True  # 🆕 v98
+            "enable_persistent_history": True
         }
         if settings_path.exists():
             try:
@@ -3254,15 +3239,14 @@ class MarketplaceUnitEconomics:
 
         config = self._configs[marketplace]
         
-        # Если габариты не указаны, берем из категории
         if all([length == 0, width == 0, height == 0, weight == 0]) and category:
             length, width, height, weight = self.calculate_dimensions_from_category(category)
         
         volume = calculate_volume(length, width, height)
         if volume == 0:
-            volume = 5.0  # Дефолтный объем
+            volume = 5.0
         if weight <= 0:
-            weight = 1.0  # Дефолтный вес
+            weight = 1.0
 
         hazardous = self.is_category_hazardous(category) if category else False
         fragile = self.is_category_fragile(category) if category else False
@@ -3310,7 +3294,6 @@ class MarketplaceUnitEconomics:
         insurance_contributions = self._settings.get("insurance_contributions", DEFAULT_INSURANCE_CONTRIBUTIONS)
         use_deduction = self._settings.get("use_tax_deduction", DEFAULT_TAX_DEDUCTION)
 
-        # Расчет налога
         tax_amount = calculate_tax(
             revenue=price,
             annual_revenue=current_annual_revenue,
@@ -3324,7 +3307,6 @@ class MarketplaceUnitEconomics:
         margin_percent = (profit / price * 100) if price > 0 else 0
         roi = (profit / cost * 100) if cost > 0 else 0
 
-        # Расчет точки безубыточности
         fixed_costs = logistics + storage_cost + last_mile + subscription_cost
         variable_rate = (
             commission_rate + config.acquiring_fee +
@@ -3335,7 +3317,6 @@ class MarketplaceUnitEconomics:
             config.oversized_surcharge
         )
         
-        # Добавляем ставку налога в переменные расходы для расчета безубыточности
         if current_tax_system == "УСН_6":
             variable_rate += self._settings.get("usn_rate", DEFAULT_USN_RATE)
         elif current_tax_system == "УСН_15":
@@ -3345,7 +3326,6 @@ class MarketplaceUnitEconomics:
             
         breakeven_price = ((cost + fixed_costs) / (1 - variable_rate)) if (1 - variable_rate) > 0 else 0
 
-        # Рекомендованная минимальная цена
         current_min_profit = min_profit_percent if min_profit_percent is not None else self._settings.get("min_profit_percent", DEFAULT_MIN_PROFIT_PERCENT)
         
         tax_rate_for_formula = 0.0
@@ -3421,7 +3401,6 @@ class MarketplaceUnitEconomics:
         if len(self._history) > HISTORY_LIMIT:
             self._history = self._history[-HISTORY_LIMIT:]
 
-        # 🆕 v98: Сохраняем в постоянное хранилище
         if self._settings.get("enable_persistent_history", True) and self._persistent_db:
             try:
                 if self._persistent_db.save_calculation(result, article=article, brand=brand):
@@ -4008,7 +3987,6 @@ class PriceImporter:
             catalog_df = catalog_df.copy()
             price_df = price_df.copy()
             
-            # Нормализация ключей
             catalog_df['_norm_article'] = catalog_df[article_col_catalog].apply(normalize_key_for_match)
             catalog_df['_norm_brand'] = catalog_df[brand_col_catalog].apply(normalize_key_for_match) if brand_col_catalog else ""
             
@@ -4018,11 +3996,9 @@ class PriceImporter:
             else:
                 price_df['_norm_brand'] = ""
             
-            # Фильтрация пустых значений
             price_df = price_df[price_df['_norm_article'] != ""]
             price_df = price_df[price_df[price_col_price].notna()]
             
-            # Создание словаря цен
             price_dict = {}
             for _, row in price_df.iterrows():
                 art = row['_norm_article']
@@ -4033,7 +4009,7 @@ class PriceImporter:
                     key = (art, br) if br else (art, None)
                     price_dict[key] = price_val
                     if br:
-                        price_dict[(art, None)] = price_val # Fallback на бренд
+                        price_dict[(art, None)] = price_val
                     
             updated_count = 0
             matched_count = 0
@@ -5095,7 +5071,6 @@ class CategoryClassifier:
             except Exception as e:
                 self.logger.warning(f"ML prediction error: {e}")
                 
-        # Fallback logic
         best_category = "Прочее"
         best_score = 0.0
         category_keywords = {
@@ -5141,7 +5116,7 @@ class CategoryClassifier:
         return results
 
 # ============================================================================
-# 🆕 v99.2: ГЕНЕРАТОР EXCEL С ЖИВЫМИ ФОРМУЛАМИ И НАСТРОЙКАМИ
+# 🆕 v99.5: ГЕНЕРАТОР EXCEL С ЖИВЫМИ ФОРМУЛАМИ И ОБНОВЛЕНИЕМ ДАННЫХ
 # ============================================================================
 def generate_standalone_excel_template(
     df_results: pd.DataFrame,
@@ -5150,9 +5125,7 @@ def generate_standalone_excel_template(
 ) -> bool:
     """
     Генерирует самодостаточный Excel-файл.
-    Лист 'Настройки' содержит выпадающие списки.
-    Лист 'Расчет' содержит формулы, ссылающиеся на настройки.
-    Оптимизировано для 300,000+ товаров.
+    v99.5: Обновляет справочник тарифов на листе настроек при каждой генерации.
     """
     if not OPENPYXL_AVAILABLE:
         logger.error("OpenPyXL не установлен")
@@ -5220,8 +5193,16 @@ def generate_standalone_excel_template(
         ws_settings.add_data_validation(dv_tax)
         dv_tax.add(ws_settings['B5'])
         
-        # Таблица тарифов (скрытая справочная таблица для VLOOKUP)
-        ws_settings['E1'] = "СПРАВОЧНИК ТАРИФОВ (НЕ РЕДАКТИРОВАТЬ)"
+        # Ячейка для минимальной прибыли в долях (для формул)
+        s_min_profit_val = ws_settings['B7'].value / 100 if ws_settings['B7'].value else 0.1
+        ws_settings['B8'] = s_min_profit_val
+        ws_settings['B8'].number_format = '0.0%'
+        ws_settings['B8'].font = Font(color="808080", italic=True)
+        ws_settings['A8'] = "Мин. прибыль (доля):"
+        ws_settings['A8'].font = Font(color="808080", italic=True)
+        
+        # === СПРАВОЧНИК ТАРИФОВ (ОБНОВЛЯЕТСЯ ПРИ КАЖДОЙ ГЕНЕРАЦИИ) ===
+        ws_settings['E1'] = "СПРАВОЧНИК ТАРИФОВ (АКТУАЛЬНО НА МОМЕНТ ГЕНЕРАЦИИ)"
         ws_settings['E1'].font = Font(bold=True, color="FF0000")
         
         tariff_headers = ["Маркетплейс", "Комиссия %", "Мин. комиссия", "Логистика база",
@@ -5280,14 +5261,10 @@ def generate_standalone_excel_template(
             cell.border = border
             
         # Ссылки на настройки (абсолютные)
-        s_mp = "'⚙️ Настройки'!$B$3"      # Маркетплейс
-        s_days = "'⚙️ Настройки'!$B$6"    # Дни хранения
-        s_tax = "'⚙️ Настройки'!$B$5"     # Налог
-        s_min_profit_val = ws_settings['B7'].value / 100 if ws_settings['B7'].value else 0.1
-        # Создаем ячейку для минимальной прибыли в процентах (доля) для использования в формулах
-        ws_settings['B8'] = s_min_profit_val
-        ws_settings['B8'].number_format = '0.0%'
-        s_min_profit = "'⚙️ Настройки'!$B$8" 
+        s_mp = "'⚙️ Настройки'!$B$3"
+        s_days = "'⚙️ Настройки'!$B$6"
+        s_tax = "'⚙️ Настройки'!$B$5"
+        s_min_profit = "'⚙️ Настройки'!$B$8"
 
         # Диапазон справочника тарифов
         tariff_range = f"'⚙️ Настройки'!$E$3:$Q${2 + len(configs)}"
@@ -5310,8 +5287,6 @@ def generate_standalone_excel_template(
         total_rows = len(df_results)
         batch_size = 5000
         
-        green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
         formula_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
         
         for batch_start in range(0, total_rows, batch_size):
@@ -5333,46 +5308,31 @@ def generate_standalone_excel_template(
                 ws_calc.cell(row=idx, column=7, value=safe_float(row.get('Вес_кг', 0)))
                 ws_calc.cell(row=idx, column=8, value=safe_float(row.get('Объем_л', 0)))
                 
-                r = idx  # Текущая строка
-                p = f"E{r}"   # Цена
-                c = f"F{r}"   # Себестоимость
-                w = f"G{r}"   # Вес
-                v = f"H{r}"   # Объем
+                r = idx
+                p = f"E{r}"
+                c = f"F{r}"
+                w = f"G{r}"
+                v = f"H{r}"
                 
-                # I: Комиссия ₽ = MAX(Цена * CommRate, MinComm)
                 ws_calc.cell(row=r, column=9, value=f'=MAX({p}*{v_comm_rate},{v_min_comm})')
-                # J: Комиссия %
                 ws_calc.cell(row=r, column=10, value=f'=IF({p}=0,0,I{r}/{p})')
-                # K: Логистика = Base + Kg*W + L*V
                 ws_calc.cell(row=r, column=11, value=f'={v_log_base}+{v_log_kg}*{w}+{v_log_l}*{v}')
-                # L: Хранение = StorePerDay * Volume * Days
                 ws_calc.cell(row=r, column=12, value=f'={v_store}*{v}*{s_days}')
-                # M: Эквайринг
                 ws_calc.cell(row=r, column=13, value=f'={p}*{v_acq}')
-                # N: Последняя миля
                 ws_calc.cell(row=r, column=14, value=f'={v_last}')
-                # O: Возвраты
                 ws_calc.cell(row=r, column=15, value=f'={p}*{v_ret}')
-                # P: Надбавки (опасные + хрупкие + крупногабарит) - упрощенно по цене
                 ws_calc.cell(row=r, column=16, value=f'={p}*({v_haz}+{v_frag}+{v_over})')
-                # Q: Налог (УСН 6% по умолчанию, можно усложнить через IF)
                 ws_calc.cell(row=r, column=17, value=f'=IF({s_tax}="УСН_6",{p}*0.06,IF({s_tax}="УСН_15",{p}*0.15,{p}*0.40))')
-                # R: Итого расходов = Себестоимость + SUM(I:Q)
                 ws_calc.cell(row=r, column=18, value=f'={c}+SUM(I{r}:Q{r})')
-                # S: ПРИБЫЛЬ = Цена - Итого
                 ws_calc.cell(row=r, column=19, value=f'={p}-R{r}')
-                # T: Маржа %
                 ws_calc.cell(row=r, column=20, value=f'=IF({p}=0,0,S{r}/{p})')
-                # U: ROI %
                 ws_calc.cell(row=r, column=21, value=f'=IF({c}=0,0,S{r}/{c})')
-                # V: Точка безубыточности
+                
                 fixed = f'(K{r}+L{r}+N{r}+{c})'
                 var_rate = f'({v_comm_rate}+{v_acq}+{v_ret}+{v_haz}+{v_frag}+{v_over}+IF({s_tax}="УСН_6",0.06,IF({s_tax}="УСН_15",0.15,0.40)))'
                 ws_calc.cell(row=r, column=22, value=f'=IF((1-{var_rate})<=0,0,{fixed}/(1-{var_rate}))')
-                # W: Реком. мин. цена (с учетом мин прибыли)
                 ws_calc.cell(row=r, column=23, value=f'=IF((1-{var_rate}-{s_min_profit})<=0,0,{fixed}/(1-{var_rate}-{s_min_profit}))')
                 
-                # Стилизация формул
                 for fc in range(9, 24):
                     cell = ws_calc.cell(row=r, column=fc)
                     cell.fill = formula_fill
@@ -5385,16 +5345,13 @@ def generate_standalone_excel_template(
                 if batch_start % 10000 == 0:
                     logger.info(f"📊 Генерация Excel: {batch_start}/{total_rows} строк...")
                     
-        # Автофильтр и закрепление
         ws_calc.auto_filter.ref = f"A1:{get_column_letter(len(calc_headers))}1"
         ws_calc.freeze_panes = "A2"
         
-        # Ширина колонок
         widths = [15,15,30,15,14,14,10,10,14,10,14,14,14,14,14,14,14,16,16,10,10,18,18]
         for i, w in enumerate(widths, 1):
             ws_calc.column_dimensions[get_column_letter(i)].width = w
             
-        # Сохранение
         wb.save(output_path)
         logger.info(f"✅ Excel сохранен: {output_path}")
         return True
@@ -5408,11 +5365,6 @@ def generate_standalone_excel_template(
 # БЛОК 11: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ
 # ============================================================================
 def show_data_upload_interface():
-    """
-    📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ
-    ============================
-    Этот раздел позволяет загрузить основной каталог товаров.
-    """
     st.header("📁 Шаг 1: Загрузка данных каталога")
     st.info("""
     📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
@@ -5438,7 +5390,6 @@ def show_data_upload_interface():
             df = None
             file_name = uploaded_file.name.lower()
             
-            # Определяем формат файла и читаем его
             if file_name.endswith('.csv'):
                 encodings_to_try = [
                     'utf-8-sig', 'utf-8', 'cp1251', 'windows-1251',
@@ -5526,7 +5477,6 @@ def show_data_upload_interface():
                 st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
                 return
                 
-            # Очищаем данные
             df = df.dropna(how='all')
             df = df.dropna(axis=0, how='all')
             if df.empty:
@@ -5538,11 +5488,9 @@ def show_data_upload_interface():
             
             st.success(f"✅ Успешно загружено {len(df)} товаров")
             
-            # Предпросмотр данных
             st.subheader("👁️ Предпросмотр данных (первые 10 строк)")
             st.dataframe(df.head(10), use_container_width=True, key="upload_preview_table")
             
-            # Статистика данных
             st.subheader("📊 Статистика загруженных данных")
             stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
             
@@ -5591,7 +5539,6 @@ def show_data_upload_interface():
                 else:
                     st.metric("🏷️ Брендов", "—")
                     
-            # Действия с данными
             st.subheader("🔧 Доступные действия")
             action_col1, action_col2, action_col3 = st.columns(3)
             
@@ -5631,7 +5578,6 @@ def show_data_upload_interface():
             with st.expander("📋 Подробности ошибки", expanded=True):
                 st.code(traceback.format_exc())
                 
-    # Кнопка скачивания шаблона
     if st.button("📥 Скачать шаблон данных"):
         template_df = pd.DataFrame({
             "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
@@ -5659,10 +5605,6 @@ def show_data_upload_interface():
 # БЛОК 12: ЮНИТ-ЭКОНОМИКА (ОБЪЕДИНЁННЫЙ РАЗДЕЛ)
 # ============================================================================
 def show_unit_economics_interface():
-    """
-    📊 РАЗДЕЛ 2: ЮНИТ-ЭКОНОМИКА (ОБЪЕДИНЁННЫЙ)
-    ============================================
-    """
     st.header("📊 Шаг 2: Расчет юнит-экономики")
     st.info("""
     💡 **ДВА СПОСОБА РАСЧЕТА:**
@@ -5671,7 +5613,6 @@ def show_unit_economics_interface():
     Выберите способ ниже:
     """)
     
-    # Выбор способа расчета
     calculation_mode = st.radio(
         "🎯 Выберите способ расчета:",
         ["📝 Один товар (вручную)", "📦 Весь каталог (из файла)"],
@@ -5685,10 +5626,6 @@ def show_unit_economics_interface():
         show_catalog_calculation()
 
 def show_single_product_calculation():
-    """
-    📝 СПОСОБ 1: Расчет для одного товара
-    =====================================
-    """
     st.subheader("📝 Расчет для одного товара")
     st.info("""
     📋 **ИНСТРУКЦИЯ:**
@@ -5758,7 +5695,6 @@ def show_single_product_calculation():
             help="Категория товара для точного расчета комиссии"
         )
         
-    # Настройки налогов
     with st.expander("💰 Настройки налогов и прибыли"):
         st.info("""
         📋 **НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ:**
@@ -5798,7 +5734,6 @@ def show_single_product_calculation():
             
     is_premium = st.checkbox("⭐ Премиум-раздел (доп. комиссия)", key="ue_premium")
     
-    # Кнопка расчета
     if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_calc"):
         with st.spinner("Расчет юнит-экономики..."):
             economics = unit_economics.calculate_unit_economics(
@@ -5813,7 +5748,6 @@ def show_single_product_calculation():
                 annual_revenue=annual_revenue
             )
             
-            # Отображение результатов
             st.subheader("📊 Результаты расчета")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -5825,7 +5759,6 @@ def show_single_product_calculation():
             with col4:
                 st.metric("⚖️ Точка безубыточности", f"{economics.breakeven_price:.2f} ₽")
                 
-            # Рекомендованная минимальная цена
             st.subheader("💎 Рекомендованная минимальная цена")
             col_rec1, col_rec2, col_rec3 = st.columns(3)
             with col_rec1:
@@ -5842,7 +5775,6 @@ def show_single_product_calculation():
                 else:
                     st.success(f"✅ Цена выше минимальной на {price - economics.recommended_min_price:.2f} ₽")
                     
-            # Детализация расходов
             st.subheader("📋 Детализация расходов")
             expenses_data = {
                 "Статья расходов": [
@@ -5886,7 +5818,6 @@ def show_single_product_calculation():
             }
             st.dataframe(pd.DataFrame(expenses_data), use_container_width=True, key="ue_expenses_table")
             
-            # Сравнение маркетплейсов
             st.subheader("🏆 Сравнение всех маркетплейсов")
             comparison_df = unit_economics.calculate_for_all_marketplaces(
                 price=price, cost=cost, weight=weight, category=category if category else None,
@@ -5901,7 +5832,6 @@ def show_single_product_calculation():
                 st.success(f"🏆 Оптимальный маркетплейс: **{best['marketplace']}** "
                            f"(прибыль: {best['profit']:.2f} ₽, маржа: {best['margin_percent']:.2f}%)")
                 
-            # Визуализация
             if PLOTLY_AVAILABLE and go is not None:
                 try:
                     fig = go.Figure()
@@ -5931,13 +5861,6 @@ def show_single_product_calculation():
                     logger.warning(f"Ошибка визуализации: {e}")
 
 def show_catalog_calculation():
-    """
-    📦 СПОСОБ 2: Расчет по всему каталогу
-    =====================================
-    Автоматический расчет юнит-экономики для всех товаров из загруженного файла.
-    ✅ Габариты корректно берутся из файла
-    ✅ Экспорт в самодостаточный Excel с живыми формулами
-    """
     st.subheader("📦 Расчет по всему каталогу")
     
     if st.session_state.get('uploaded_data') is None:
@@ -6002,7 +5925,6 @@ def show_catalog_calculation():
             markup_percent = 0.0
         is_premium = st.checkbox("⭐ Премиум-раздел", value=False, key="ue_article_premium")
         
-    # Настройки налогов
     with st.expander("💰 Настройки налогов и прибыли"):
         col_t1, col_t2, col_t3 = st.columns(3)
         with col_t1:
@@ -6030,7 +5952,6 @@ def show_catalog_calculation():
                 key="ue_article_annual_revenue"
             )
             
-    # Определение колонок
     st.subheader("📋 Определение колонок в данных")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -6050,7 +5971,6 @@ def show_catalog_calculation():
         category_options = ['Не выбрано'] + category_options
         category_col = st.selectbox("Категория (опционально)", options=category_options, key="ue_category_col")
         
-    # Габариты - УЛУЧШЕННОЕ ОПРЕДЕЛЕНИЕ
     st.subheader("📏 Габариты (автоматическое определение)")
     st.info("💡 Система автоматически определяет колонки с габаритами. Вы можете изменить выбор.")
     col1, col2, col3, col4 = st.columns(4)
@@ -6067,7 +5987,6 @@ def show_catalog_calculation():
         weight_options = ['Не выбрано'] + [col for col in df.columns if any(w in col.lower() for w in ['вес', 'weight', 'масса', 'кг'])]
         weight_col = st.selectbox("Вес (кг)", options=weight_options, key="ue_weight_col")
         
-    # Кнопка расчета
     if st.button("🚀 Рассчитать юнит-экономику по артикулам", type="primary", key="ue_calc_articles"):
         with st.spinner("Расчет юнит-экономики для всех товаров..."):
             try:
@@ -6092,19 +6011,16 @@ def show_catalog_calculation():
                     if price <= 0 or cost <= 0:
                         continue
                         
-                    # ✅ ПРАВИЛЬНАЯ ОБРАБОТКА ГАБАРИТОВ ИЗ ФАЙЛА
                     length = safe_float(row.get(length_col, 0)) if length_col != 'Не выбрано' else 0
                     width = safe_float(row.get(width_col, 0)) if width_col != 'Не выбрано' else 0
                     height = safe_float(row.get(height_col, 0)) if height_col != 'Не выбрано' else 0
                     weight = safe_float(row.get(weight_col, 0)) if weight_col != 'Не выбрано' else 0
                     
-                    # Расчет объема из габаритов
                     if length > 0 and width > 0 and height > 0:
                         volume = (length * width * height) / 1000.0
                     else:
-                        volume = 5.0 # Дефолтный объем если нет габаритов
+                        volume = 5.0
                         
-                    # Если вес не указан, берем 1 кг
                     if weight <= 0:
                         weight = 1.0
                         
@@ -6172,7 +6088,6 @@ def show_catalog_calculation():
                 st.session_state.ue_article_results = df_results
                 st.success(f"✅ Рассчитано {len(df_results)} записей по {len(selected_marketplaces)} маркетплейсам")
                 
-                # Сводная статистика
                 st.subheader("📊 Сводная статистика")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -6188,7 +6103,6 @@ def show_catalog_calculation():
                     best_mp = df_results.groupby('Маркетплейс')['Прибыль'].sum().idxmax()
                     st.metric("🏆 Лучший МП", best_mp)
                     
-                # Результаты расчета
                 st.subheader("📋 Результаты расчета")
                 display_cols = ['Артикул', 'Маркетплейс', 'Цена_с_наценкой', 'Прибыль', 'Маржа_%',
                                 'Рекомендованная_мин_цена', 'Налог', 'Точка_безубыточности']
@@ -6210,7 +6124,6 @@ def show_catalog_calculation():
                 sorted_df = df_results.sort_values(sort_col, ascending=(sort_order == "По возрастанию"))
                 st.dataframe(sorted_df[available_display], use_container_width=True, key="ue_results_table")
                 
-                # Экспорт результатов
                 st.subheader("📤 Экспорт результатов")
                 export_col1, export_col2, export_col3 = st.columns(3)
                 
@@ -6269,10 +6182,6 @@ def show_catalog_calculation():
 # БЛОК 13: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME)
 # ============================================================================
 def show_catalog_grouping_interface():
-    """
-    🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
-    =====================================
-    """
     st.header("🗂️ Шаг 3: Каталог для группировки")
     st.info("""
     📋 **О РАЗДЕЛЕ:**
@@ -6285,12 +6194,10 @@ def show_catalog_grouping_interface():
     - ✅ Статистика и аналитика
     """)
     
-    # Проверка доступности библиотек
     if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
         st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
         return
         
-    # Инициализация каталога
     if 'high_volume_catalog' not in st.session_state:
         st.session_state.high_volume_catalog = HighVolumeAutoPartsCatalog()
         
@@ -6299,7 +6206,6 @@ def show_catalog_grouping_interface():
         st.error("❌ Ошибка подключения к базе данных")
         return
         
-    # Меню раздела
     st.sidebar.title("🧭 Меню каталога")
     option = st.sidebar.radio(
         "Выберите раздел",
@@ -6319,7 +6225,6 @@ def show_catalog_grouping_interface():
         show_catalog_management(catalog)
 
 def show_catalog_upload(catalog):
-    """Загрузка данных в каталог"""
     st.subheader("📥 Загрузка данных")
     st.info("""
     📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
@@ -6362,7 +6267,6 @@ def show_catalog_upload(catalog):
             st.warning("⚠️ Загрузите хотя бы один файл")
 
 def show_catalog_search(catalog):
-    """Поиск и фильтрация в каталоге"""
     st.subheader("🔍 Поиск и фильтрация")
     col1, col2 = st.columns(2)
     with col1:
@@ -6401,7 +6305,6 @@ def show_catalog_search(catalog):
                 st.error(f"❌ Ошибка поиска: {e}")
 
 def show_catalog_statistics(catalog):
-    """Статистика каталога"""
     st.subheader("📊 Статистика каталога")
     stats = catalog.get_statistics()
     if stats:
@@ -6418,7 +6321,6 @@ def show_catalog_statistics(catalog):
             st.dataframe(stats['top_brands'], use_container_width=True)
 
 def show_catalog_export(catalog):
-    """Экспорт каталога"""
     st.subheader("📤 Экспорт каталога")
     total = catalog.conn.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
@@ -6436,8 +6338,6 @@ def show_catalog_export(catalog):
     if st.button("🚀 Экспортировать", key="hv_export_btn"):
         output_path = catalog.data_dir / f"export.{format_choice.lower()}"
         with st.spinner("Генерация файла..."):
-            # Здесь должна быть логика экспорта из HighVolumeAutoPartsCatalog
-            # Для краткости опущена, так как не является частью основного запроса
             st.warning("⚠️ Функция экспорта HighVolume требует дополнительных методов в классе")
             
         if output_path.exists():
@@ -6445,7 +6345,6 @@ def show_catalog_export(catalog):
                 st.download_button("⬇️ Скачать файл", f, file_name=output_path.name, key="hv_download")
 
 def show_catalog_management(catalog):
-    """Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
     st.warning("⚠️ Операции необратимы!")
     
@@ -6496,10 +6395,6 @@ def show_catalog_management(catalog):
 # БЛОК 14: AI ТАРИФЫ
 # ============================================================================
 def show_ai_tariffs_interface():
-    """
-    🤖 РАЗДЕЛ 4: AI ТАРИФЫ
-    ======================
-    """
     st.header("🤖 Шаг 4: AI Тарифы")
     st.info("""
     🤖 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ ИИ:**
@@ -6576,7 +6471,6 @@ def show_ai_tariffs_interface():
                     
     st.divider()
     
-    # Текущие тарифы
     st.subheader("📊 Текущие тарифы маркетплейсов")
     tariff_data = []
     for mp_name, config in unit_economics._configs.items():
@@ -6597,10 +6491,6 @@ def show_ai_tariffs_interface():
 # БЛОК 15: ОБОГАЩЕНИЕ КАТАЛОГА
 # ============================================================================
 def show_catalog_enhance_interface():
-    """
-    🔍 РАЗДЕЛ 5: ОБОГАЩЕНИЕ КАТАЛОГА
-    =================================
-    """
     st.header("🔍 Шаг 5: Обогащение каталога")
     st.info("""
     🔍 **ПОИСК АНАЛОГОВ:**
@@ -6679,10 +6569,6 @@ def show_catalog_enhance_interface():
 # БЛОК 16: АНАЛИТИКА
 # ============================================================================
 def show_analytics_interface():
-    """
-    📊 РАЗДЕЛ 6: АНАЛИТИКА
-    ======================
-    """
     st.header("📊 Шаг 6: Аналитика")
     
     if st.session_state.get('uploaded_data') is None:
@@ -6751,10 +6637,6 @@ def show_analytics_interface():
 # БЛОК 17: ИСТОРИЯ РАСЧЕТОВ
 # ============================================================================
 def show_history_interface():
-    """
-    📋 РАЗДЕЛ 7: ИСТОРИЯ РАСЧЕТОВ
-    ==============================
-    """
     st.header("📋 Шаг 7: История расчетов")
     
     unit_economics = MarketplaceUnitEconomics()
@@ -6890,10 +6772,6 @@ def show_history_interface():
 # БЛОК 18: НАСТРОЙКИ
 # ============================================================================
 def show_settings_interface():
-    """
-    ⚙️ РАЗДЕЛ 8: НАСТРОЙКИ
-    ======================
-    """
     st.header("⚙️ Шаг 8: Настройки")
     
     unit_economics = MarketplaceUnitEconomics()
@@ -6924,7 +6802,7 @@ def show_settings_interface():
             step=1.0, key="settings_min_profit_percent"
         )
     with col2:
-        # ИСПРАВЛЕНИЕ: Приведение всех параметров к int для избежания StreamlitMixedNumericTypesError
+        # ИСПРАВЛЕНИЕ v99.5: Приведение всех параметров к int для избежания StreamlitMixedNumericTypesError
         insurance_contributions = st.number_input(
             "Страховые взносы в год (₽)",
             min_value=0,
@@ -7003,13 +6881,9 @@ def show_settings_interface():
     st.caption(f"📂 Путь к БД истории: `{HISTORY_DB_DIR / 'history.duckdb'}`")
 
 # ============================================================================
-# БЛОК 22: ГЛАВНАЯ ФУНКЦИЯ (ИСПРАВЛЕНА)
+# БЛОК 22: ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================================
 def main():
-    """
-    🚗 ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
-    =============================
-    """
     st.set_page_config(
         page_title=f"{APP_NAME} v{APP_VERSION}",
         page_icon="🚗",
@@ -7017,7 +6891,6 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # Заголовок приложения
     st.markdown(f"""
     <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
         <h1 style="color: white; margin: 0;">🚗 {APP_NAME}</h1>
@@ -7033,7 +6906,6 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Боковое меню
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=80)
         st.markdown("---")
@@ -7075,7 +6947,6 @@ def main():
         if data_loaded:
             st.metric("📦 Товаров", rows)
             
-        # Статус постоянной истории
         try:
             phdb = PersistentHistoryDB()
             if phdb.conn:
@@ -7100,7 +6971,6 @@ def main():
             for lib, available in libs_status.items():
                 st.write(f"{'✅' if available else '❌'} {lib}")
                 
-    # Обработка выбранного раздела
     try:
         if menu == "📁 Загрузка данных":
             show_data_upload_interface()
