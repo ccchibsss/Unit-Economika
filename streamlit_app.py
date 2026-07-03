@@ -6809,8 +6809,8 @@ def main():
             if phdb.conn:
                 db_count = phdb.conn.execute("SELECT COUNT(*) FROM calculation_history").fetchone()[0]
                 st.metric("💾 История в БД", f"{db_count:,}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Не удалось получить статус БД: {e}")
             
         st.markdown("---")
         st.caption(f"Приложение v{APP_VERSION}")
