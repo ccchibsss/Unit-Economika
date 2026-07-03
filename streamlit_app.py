@@ -1,8 +1,8 @@
 """
 ================================================================================
-🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.7 - MULTI-SOURCE TARIFFS
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.8 - API + ENCODING FIX
 ================================================================================
-📌 ВЕРСИЯ: 99.7.0 (API + WEB SCRAPING + AI DOCS ANALYSIS)
+📌 ВЕРСИЯ: 99.8.0 (API МАРКЕТПЛЕЙСОВ + ИСПРАВЛЕНИЕ КОДИРОВКИ + МАППИНГ КОЛОНОК)
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
 ================================================================================
 """
@@ -417,12 +417,6 @@ try:
 except ImportError:
     BABEL_AVAILABLE = False
 
-try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except ImportError:
-    BS4_AVAILABLE = False
-
 # ============================================================================
 # ПОДАВЛЕНИЕ ПРЕДУПРЕЖДЕНИЙ
 # ============================================================================
@@ -435,7 +429,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "99.7.0"
+APP_VERSION = "99.8.0"
 APP_NAME = "🚗 Юнит-экономика автозапчастей 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Полный расчет юнит-экономики для автозапчастей с AI-оптимизацией"
@@ -2182,142 +2176,6 @@ class SmartTariffCache:
             stats["newest_entry"] = datetime.fromtimestamp(newest_ts).isoformat()
             
         return stats
-
-# ============================================================================
-# 🆕 v99.7: МУЛЬТИ-ИСТОЧНИК ТАРИФОВ (API + WEB + AI)
-# ============================================================================
-class TariffAggregator:
-    """
-    Агрегатор тарифов: Official API -> Web Scraping -> AI Analysis
-    """
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.environ.get('DEEPSEEK_API_KEY')
-        self.session = requests.Session()
-        self.logger = logging.getLogger('TariffAggregator')
-        
-    def fetch_official_api(self, marketplace: str) -> Optional[Dict]:
-        """Попытка получить тарифы через официальный API (Заглушки)"""
-        # В реальном приложении здесь должны быть вызовы к API маркетплейсов
-        # Ozon: https://api-seller.ozon.ru/v1/description-category/tree
-        # WB: https://common-api.wildberries.ru/publish/v1/tariffs
-        # Yandex: https://api.partner.market.yandex.ru/v2/tariffs
-        
-        self.logger.info(f"Попытка получения тарифов через API для {marketplace}...")
-        # Возвращаем None, чтобы переключиться на следующий источник
-        return None
-
-    def scrape_website(self, marketplace: str) -> Optional[str]:
-        """Парсинг официальной страницы с тарифами"""
-        if not BS4_AVAILABLE:
-            self.logger.warning("BeautifulSoup не установлен, парсинг недоступен")
-            return None
-            
-        urls = {
-            "Ozon": "https://seller.ozon.ru/app/commissions/",
-            "Wildberries": "https://www.wildberries.ru/services/komissiya",
-            "Яндекс Маркет": "https://yandex.ru/support/marketplace/selling/commissions.html"
-        }
-        
-        url = urls.get(marketplace)
-        if not url:
-            return None
-            
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            response = self.session.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                # Удаляем скрипты и стили
-                for script in soup(["script", "style"]):
-                    script.extract()
-                text = soup.get_text(separator=" ", strip=True)
-                self.logger.info(f"Успешно спарсена страница {url}")
-                return text[:15000]  # Ограничиваем размер текста для AI
-            else:
-                self.logger.warning(f"Не удалось загрузить страницу {url}: {response.status_code}")
-                return None
-        except Exception as e:
-            self.logger.error(f"Ошибка парсинга {url}: {e}")
-            return None
-
-    def analyze_with_ai(self, text: str, marketplace: str) -> Optional[Dict]:
-        """Анализ текста (сайта или документа) через DeepSeek AI"""
-        if not self.api_key:
-            self.logger.warning("API ключ DeepSeek не указан")
-            return None
-            
-        prompt = f"""
-        Ты - эксперт по анализу тарифов маркетплейсов.
-        Ниже представлен текст, содержащий информацию о тарифах маркетплейса {marketplace}.
-        Извлеки из него актуальные тарифы и верни ТОЛЬКО JSON без пояснений:
-        {{
-          "commission_rate": число (комиссия в долях, например 0.15),
-          "min_commission": число (минимальная комиссия в рублях),
-          "logistics_base": число (базовая стоимость логистики в рублях),
-          "logistics_per_kg": число (стоимость за кг в рублях),
-          "logistics_per_liter": число (стоимость за литр объема в рублях),
-          "storage_per_day": число (стоимость хранения за день в рублях/л),
-          "return_fee": число (процент возвратов в долях, например 0.02),
-          "acquiring_fee": число (процент эквайринга в долях),
-          "last_mile_fee": число (последняя миля в рублях),
-          "delivery_fee_percent": число (процент доставки в долях),
-          "hazardous_surcharge": число (надбавка за опасные грузы),
-          "fragile_surcharge": число (надбавка за хрупкие товары),
-          "oversized_surcharge": число (надбавка за крупногабарит)
-        }}
-        
-        Текст:
-        {text}
-        """
-        
-        try:
-            payload = {
-                "model": DEEPSEEK_MODEL,
-                "messages": [
-                    {"role": "system", "content": "Ты - эксперт по маркетплейсам. Отвечай только JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 1500
-            }
-            
-            response = self.session.post(DEEPSEEK_API_URL, json=payload, timeout=60, 
-                                         headers={"Authorization": f"Bearer {self.api_key}"})
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    return json.loads(json_match.group())
-            return None
-        except Exception as e:
-            self.logger.error(f"Ошибка AI анализа: {e}")
-            return None
-
-    def get_tariffs(self, marketplace: str, doc_text: Optional[str] = None) -> Tuple[Optional[Dict], TariffSource]:
-        """Главный метод: последовательный опрос источников"""
-        
-        # 1. Если передан текст документа, сразу идем в AI
-        if doc_text:
-            self.logger.info(f"Анализ загруженного документа для {marketplace}...")
-            result = self.analyze_with_ai(doc_text, marketplace)
-            if result:
-                return result, TariffSource.DOC_ANALYSIS
-        
-        # 2. Попытка Official API
-        api_result = self.fetch_official_api(marketplace)
-        if api_result:
-            return api_result, TariffSource.API_OFFICIAL
-            
-        # 3. Попытка Web Scraping + AI
-        scraped_text = self.scrape_website(marketplace)
-        if scraped_text:
-            ai_result = self.analyze_with_ai(scraped_text, marketplace)
-            if ai_result:
-                return ai_result, TariffSource.WEB_SCRAPED
-                
-        return None, TariffSource.HARDCODED
 
 # ============================================================================
 # БЛОК 4: КОНФИГУРАЦИИ МАРКЕТПЛЕЙСОВ 2026 (400+ СТРОК)
@@ -5260,7 +5118,7 @@ class CategoryClassifier:
         return results
 
 # ============================================================================
-# 🆕 v99.7: ГЕНЕРАТОР EXCEL С ЖИВЫМИ ФОРМУЛАМИ И НАСТРОЙКАМИ
+# 🆕 v99.2: ГЕНЕРАТОР EXCEL С ЖИВЫМИ ФОРМУЛАМИ И НАСТРОЙКАМИ
 # ============================================================================
 def generate_standalone_excel_template(
     df_results: pd.DataFrame,
@@ -5339,14 +5197,6 @@ def generate_standalone_excel_template(
         ws_settings.add_data_validation(dv_tax)
         dv_tax.add(ws_settings['B5'])
         
-        # Ячейка для минимальной прибыли в процентах (доля) для использования в формулах
-        s_min_profit_val = ws_settings['B7'].value / 100 if ws_settings['B7'].value else 0.1
-        ws_settings['B8'] = s_min_profit_val
-        ws_settings['B8'].number_format = '0.0%'
-        ws_settings['B8'].font = Font(color="808080", italic=True)
-        ws_settings['A8'] = "Мин. прибыль (доля):"
-        ws_settings['A8'].font = Font(color="808080", italic=True)
-        
         # Таблица тарифов (скрытая справочная таблица для VLOOKUP)
         ws_settings['E1'] = "СПРАВОЧНИК ТАРИФОВ (НЕ РЕДАКТИРОВАТЬ)"
         ws_settings['E1'].font = Font(bold=True, color="FF0000")
@@ -5410,7 +5260,11 @@ def generate_standalone_excel_template(
         s_mp = "'⚙️ Настройки'!$B$3"      # Маркетплейс
         s_days = "'⚙️ Настройки'!$B$6"    # Дни хранения
         s_tax = "'⚙️ Настройки'!$B$5"     # Налог
-        s_min_profit = "'⚙️ Настройки'!$B$8" # Мин прибыль (доля)
+        s_min_profit_val = ws_settings['B7'].value / 100 if ws_settings['B7'].value else 0.1
+        # Создаем ячейку для минимальной прибыли в процентах (доля) для использования в формулах
+        ws_settings['B8'] = s_min_profit_val
+        ws_settings['B8'].number_format = '0.0%'
+        s_min_profit = "'⚙️ Настройки'!$B$8" 
 
         # Диапазон справочника тарифов
         tariff_range = f"'⚙️ Настройки'!$E$3:$Q${2 + len(configs)}"
@@ -6502,26 +6356,27 @@ def show_catalog_management(catalog):
                     st.rerun()
 
 # ============================================================================
-# БЛОК 14: AI ТАРИФЫ (MULTI-SOURCE)
+# БЛОК 14: AI ТАРИФЫ
 # ============================================================================
 def show_ai_tariffs_interface():
     """
-    🤖 РАЗДЕЛ 4: AI ТАРИФЫ (API + WEB + DOCS)
-    ==========================================
+    🤖 РАЗДЕЛ 4: AI ТАРИФЫ
+    ======================
     """
-    st.header("🤖 Шаг 4: AI Тарифы (Multi-Source)")
+    st.header("🤖 Шаг 4: AI Тарифы")
     st.info("""
-    🤖 **МУЛЬТИ-ИСТОЧНИК ТАРИФОВ:**
-    Система использует три источника данных в следующем порядке:
-    1. **Official API** (если настроен)
-    2. **Web Scraping** (парсинг официальных страниц)
-    3. **AI Analysis** (анализ текста сайта или загруженного документа)
+    🤖 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ ИИ:**
+    1. Получите API ключ на platform.deepseek.com
+    2. Введите ключ в поле ниже
+    3. Выберите маркетплейс
+    4. Поставьте галочку "Запросить ИИ"
+    5. Нажмите "Обновить тарифы"
     """)
     
     unit_economics = MarketplaceUnitEconomics()
     
     api_key = st.text_input(
-        "🔑 API ключ DeepSeek (для AI анализа)",
+        "🔑 API ключ DeepSeek",
         type="password",
         placeholder="sk-...",
         help="Получите API ключ на platform.deepseek.com",
@@ -6531,7 +6386,7 @@ def show_ai_tariffs_interface():
     if api_key:
         os.environ['DEEPSEEK_API_KEY'] = api_key
         
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         marketplace = st.selectbox(
             "🏪 Маркетплейс",
@@ -6544,56 +6399,43 @@ def show_ai_tariffs_interface():
             placeholder="например: двигатель",
             key="ai_category"
         )
+    with col3:
+        force_refresh = st.checkbox(
+            "🔄 Запросить ИИ (принудительное обновление)",
+            value=False,
+            key="ai_force_refresh",
+            help="Если установлено — тарифы будут запрошены у DeepSeek AI."
+        )
         
-    # Загрузка документации
-    st.subheader("📄 Анализ документации")
-    doc_file = st.file_uploader(
-        "Загрузите PDF/TXT с тарифами (опционально)",
-        type=['pdf', 'txt'],
-        key="ai_doc_file",
-        help="Если загрузить документ, AI проанализирует его вместо парсинга сайта"
-    )
-    
-    if st.button("🔄 Обновить тарифы (API + AI)", type="primary", key="ai_update"):
+    if st.button("🔄 Обновить тарифы", type="primary", key="ai_update"):
         if not api_key and not os.environ.get('DEEPSEEK_API_KEY'):
-            st.error("❌ Введите API ключ DeepSeek для AI анализа")
+            st.error("❌ Введите API ключ DeepSeek")
             return
             
-        with st.spinner("Обновление тарифов (Multi-Source)..."):
-            aggregator = TariffAggregator(api_key=api_key)
-            
-            doc_text = None
-            if doc_file:
-                try:
-                    doc_text = doc_file.read().decode('utf-8')
-                    st.info(f"📄 Загружен документ: {doc_file.name}")
-                except Exception as e:
-                    st.warning(f"Не удалось прочитать документ: {e}")
-            
+        with st.spinner("Обновление тарифов..."):
             if marketplace == "Все маркетплейсы":
-                mps = ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"]
-                success_count = 0
-                for mp in mps:
-                    rates, source = aggregator.get_tariffs(mp, doc_text=doc_text)
-                    if rates:
-                        unit_economics._apply_ai_tariffs(mp, rates)
-                        success_count += 1
-                        st.success(f"✅ {mp}: Тарифы обновлены (Источник: {source.value})")
-                    else:
-                        st.warning(f"⚠️ {mp}: Не удалось получить тарифы")
-                        
-                if success_count > 0:
-                    st.success(f"✅ Обновлены тарифы для {success_count} из {len(mps)} маркетплейсов")
-            else:
-                rates, source = aggregator.get_tariffs(marketplace, doc_text=doc_text)
-                if rates:
-                    unit_economics._apply_ai_tariffs(marketplace, rates)
-                    st.success(f"✅ Обновлены тарифы для {marketplace}")
-                    st.info(f"📥 Источник: **{source.value}**")
-                    with st.expander("📋 Полученные тарифы"):
-                        st.json(rates)
+                result = unit_economics.refresh_tariffs_from_ai(
+                    marketplace=None,
+                    category=category if category else None,
+                    force=force_refresh
+                )
+                if result.get('success'):
+                    st.success(f"✅ Обновлены тарифы для {result.get('marketplaces_updated', 0)} из {result.get('total', 0)} маркетплейсов")
                 else:
-                    st.error(f"❌ Не удалось получить тарифы для {marketplace}")
+                    st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+            else:
+                result = unit_economics.refresh_tariffs_from_ai(
+                    marketplace=marketplace,
+                    category=category if category else None,
+                    force=force_refresh
+                )
+                if result.get('success'):
+                    st.success(f"✅ Обновлены тарифы для {marketplace}")
+                    st.info(f"📥 Источник: **{result.get('source', 'Н/Д')}**")
+                    with st.expander("📋 Полученные тарифы"):
+                        st.json(result.get('rates', {}))
+                else:
+                    st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
                     
     st.divider()
     
@@ -6944,13 +6786,11 @@ def show_settings_interface():
             step=1.0, key="settings_min_profit_percent"
         )
     with col2:
-        # ИСПРАВЛЕНИЕ v99.7: Приведение всех параметров к int для избежания StreamlitMixedNumericTypesError
         insurance_contributions = st.number_input(
             "Страховые взносы в год (₽)",
             min_value=0,
             value=int(unit_economics._settings.get('insurance_contributions', 49500)),
-            step=1000,
-            key="settings_insurance"
+            step=1000, key="settings_insurance"
         )
     with col3:
         use_tax_deduction = st.checkbox(
@@ -7046,7 +6886,7 @@ def main():
         <div style="margin-top: 15px;">
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Расчет юнит-экономики для одного товара и каталога</p>
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Каталог для группировки (10M+ записей)</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI обновление тарифов (API + Web + Docs)</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI обновление тарифов</p>
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Поиск аналогов по OE номерам</p>
             <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Экспорт в Excel с живыми формулами</p>
         </div>
@@ -7113,7 +6953,7 @@ def main():
                 "OpenPyXL": OPENPYXL_AVAILABLE, "PDF": PDF_EXPORT,
                 "PyTorch": PYTORCH_AVAILABLE, "TensorFlow": TENSORFLOW_AVAILABLE,
                 "Transformers": TRANSFORMERS_AVAILABLE, "Async": ASYNC_AVAILABLE,
-                "Chardet": CHARDET_AVAILABLE, "BeautifulSoup": BS4_AVAILABLE
+                "Chardet": CHARDET_AVAILABLE
             }
             for lib, available in libs_status.items():
                 st.write(f"{'✅' if available else '❌'} {lib}")
