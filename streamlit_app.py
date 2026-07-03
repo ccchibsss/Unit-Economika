@@ -3,20 +3,10 @@
 🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.2 - STANDALONE EXCEL EXPORT
 ================================================================================
 📌 ВЕРСИЯ: 99.2.0 (ОБЪЕДИНЁННАЯ + САМОДОСТАТОЧНЫЙ ЭКСПОРТ)
-📌 ОБЩИЙ ОБЪЕМ: 7000+ СТРОК (ПОЛНАЯ ВЕРСИЯ БЕЗ СОКРАЩЕНИЙ)
-📌 СОВМЕСТИМОСТЬ: Python 3.10 - 3.14
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
-📌 НОВЫЙ ФУНКЦИОНАЛ В v99.2:
-✅ ЭКСПОРТИРУЕМЫЙ EXCEL ЯВЛЯЕТСЯ ПОЛНОЦЕННЫМ КАЛЬКУЛЯТОРОМ
-✅ ЛИСТ "НАСТРОЙКИ" С ВЫПАДАЮЩИМИ СПИСКАМИ (МАРКЕТПЛЕЙС, РЕЖИМ, НАЛОГ)
-✅ ФОРМУЛЫ ДИНАМИЧЕСКИ ПЕРЕСЧИТЫВАЮТСЯ ПРИ СМЕНЕ ПАРАМЕТРОВ В EXCEL
-✅ ПОДДЕРЖКА 300K+ ТОВАРОВ С ОПТИМИЗИРОВАННОЙ ГЕНЕРАЦИЕЙ
-✅ ГАБАРИТЫ КОРРЕКТНО БЕРУТСЯ ИЗ ЗАГРУЖЕННОГО ФАЙЛА
-✅ ОБЪЕДИНЕНИЕ "Юнит-экономика" и "Юнит-экономика по артикулам"
-✅ 🆕 КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HighVolumeAutoPartsCatalog) — 10M+ записей
-✅ ИСПРАВЛЕНИЕ ЭКСПОРТА CSV — разделитель ; (точка с запятой)
 ================================================================================
 """
+
 # ============================================================================
 # БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ
 # ============================================================================
@@ -91,6 +81,7 @@ from threading import Lock, RLock, Semaphore, Thread, Event, Barrier, Condition
 from contextlib import contextmanager, closing, suppress, ExitStack
 from pathlib import Path, PurePath
 from abc import ABC, abstractmethod
+
 # ============================================================================
 # ОПЦИОНАЛЬНЫЕ ИМПОРТЫ С ОБРАБОТКОЙ ОШИБОК
 # ============================================================================
@@ -99,11 +90,13 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
 try:
     import pytz
     PYTZ_AVAILABLE = True
 except ImportError:
     PYTZ_AVAILABLE = False
+
 try:
     import dateutil
     from dateutil.parser import parse
@@ -111,11 +104,13 @@ try:
     DATEUTIL_AVAILABLE = True
 except ImportError:
     DATEUTIL_AVAILABLE = False
+
 try:
     import holidays
     HOLIDAYS_AVAILABLE = True
 except ImportError:
     HOLIDAYS_AVAILABLE = False
+
 try:
     import phonenumbers
     from phonenumbers import PhoneNumberType, PhoneNumber
@@ -123,22 +118,26 @@ try:
     PHONENUMBERS_AVAILABLE = True
 except ImportError:
     PHONENUMBERS_AVAILABLE = False
+
 try:
     import validators
     from validators import url, email as validate_email, domain, ip_address
     VALIDATORS_AVAILABLE = True
 except ImportError:
     VALIDATORS_AVAILABLE = False
+
 try:
     import pycountry
     PYCOUNTRY_AVAILABLE = True
 except ImportError:
     PYCOUNTRY_AVAILABLE = False
+
 try:
     import tzlocal
     TZLOCAL_AVAILABLE = True
 except ImportError:
     TZLOCAL_AVAILABLE = False
+
 try:
     import polars as pl
     import polars.selectors as cs
@@ -148,12 +147,14 @@ try:
 except ImportError:
     POLARS_AVAILABLE = False
     pl = None
+
 try:
     import duckdb
     DUCKDB_AVAILABLE = True
 except ImportError:
     DUCKDB_AVAILABLE = False
     duckdb = None
+
 try:
     import dask
     import dask.dataframe as dd
@@ -163,17 +164,20 @@ try:
     DASK_AVAILABLE = True
 except ImportError:
     DASK_AVAILABLE = False
+
 try:
     import ray
     RAY_AVAILABLE = True
 except ImportError:
     RAY_AVAILABLE = False
+
 try:
     import modin.pandas as mpd
     import modin.config as mcfg
     MODIN_AVAILABLE = True
 except ImportError:
     MODIN_AVAILABLE = False
+
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -185,12 +189,14 @@ try:
     PYARROW_AVAILABLE = True
 except ImportError:
     PYARROW_AVAILABLE = False
+
 try:
     import pandera as pandera_schema
     from pandera import Column, DataFrameSchema, Check, Index
     PANDERA_AVAILABLE = True
 except ImportError:
     PANDERA_AVAILABLE = False
+
 try:
     import sklearn
     from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, HashingVectorizer
@@ -220,6 +226,7 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
+
 try:
     import plotly.graph_objects as go
     import plotly.express as px
@@ -233,6 +240,7 @@ except ImportError:
     go = None
     px = None
     make_subplots = None
+
 try:
     import matplotlib
     import matplotlib.pyplot as plt
@@ -250,11 +258,13 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+
 try:
     import altair as alt
     ALTAIR_AVAILABLE = True
 except ImportError:
     ALTAIR_AVAILABLE = False
+
 try:
     import bokeh
     from bokeh.plotting import figure, output_notebook, show
@@ -263,6 +273,7 @@ try:
     BOKEH_AVAILABLE = True
 except ImportError:
     BOKEH_AVAILABLE = False
+
 try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, GradientFill, NamedStyle
@@ -287,6 +298,7 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
+
 try:
     from reportlab.lib.pagesizes import letter, A4, A3, A5, landscape, portrait
     from reportlab.pdfgen import canvas
@@ -308,44 +320,52 @@ try:
     PDF_EXPORT = True
 except ImportError:
     PDF_EXPORT = False
+
 try:
     import xlsxwriter
     XLSXWRITER_AVAILABLE = True
 except ImportError:
     XLSXWRITER_AVAILABLE = False
+
 try:
     import tabulate
     TABULATE_AVAILABLE = True
 except ImportError:
     TABULATE_AVAILABLE = False
+
 try:
     import chardet
     CHARDET_AVAILABLE = True
 except ImportError:
     CHARDET_AVAILABLE = False
     chardet = None
+
 try:
     import openai
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
     openai = None
+
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
+
 try:
     import tiktoken
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
+
 try:
     import transformers
     from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
+
 try:
     import torch
     import torch.nn as nn
@@ -355,6 +375,7 @@ try:
     PYTORCH_AVAILABLE = True
 except ImportError:
     PYTORCH_AVAILABLE = False
+
 try:
     import tensorflow as tf
     from tensorflow import keras
@@ -362,28 +383,33 @@ try:
     TENSORFLOW_AVAILABLE = True
 except ImportError:
     TENSORFLOW_AVAILABLE = False
+
 try:
     import aiohttp
     import aiofiles
     ASYNC_AVAILABLE = True
 except ImportError:
     ASYNC_AVAILABLE = False
+
 try:
     import httpx
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
+
 try:
     import websockets
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
+
 try:
     import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
     psutil = None
+
 try:
     from babel.numbers import format_currency as babel_format_currency
     from babel.numbers import format_percent as babel_format_percent
@@ -391,6 +417,7 @@ try:
     BABEL_AVAILABLE = True
 except ImportError:
     BABEL_AVAILABLE = False
+
 # ============================================================================
 # ПОДАВЛЕНИЕ ПРЕДУПРЕЖДЕНИЙ
 # ============================================================================
@@ -399,6 +426,7 @@ os.environ['PYTHONWARNINGS'] = 'ignore'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
+
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
@@ -430,6 +458,7 @@ MAX_HISTORY_ENTRIES = 10000
 MAX_CACHE_SIZE = 1000
 DEFAULT_LOCALE = "ru_RU"
 TIMEZONE = "Europe/Moscow"
+
 # === НОВОЕ v97: Настройки налогов и прибыли ===
 DEFAULT_TAX_SYSTEM = "УСН_6"  # УСН 6%, УСН_15, ОСНО
 DEFAULT_USN_RATE = 0.06
@@ -442,6 +471,7 @@ SUPPORTED_CURRENCIES = ["RUB", "USD", "EUR", "CNY", "KZT", "UAH", "BYN", "AMD"]
 SUPPORTED_LANGUAGES = ["ru", "en", "uk", "kz", "by", "am"]
 SUPPORTED_MARKETPLACES = ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"]
 SUPPORTED_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP"]
+
 BASE_DIR = Path(__file__).parent.resolve()
 DATA_DIR = BASE_DIR / "data"
 CACHE_DIR = BASE_DIR / "cache"
@@ -454,22 +484,26 @@ PLUGINS_DIR = BASE_DIR / "plugins"
 EXPORTS_DIR = BASE_DIR / "exports"
 TARIFFS_DIR = BASE_DIR / "tariffs"
 HISTORY_DB_DIR = BASE_DIR / "history_db"
+
 for dir_path in [DATA_DIR, CACHE_DIR, LOG_DIR, REPORTS_DIR, TEMP_DIR, MODELS_DIR,
                  CONFIG_DIR, PLUGINS_DIR, EXPORTS_DIR, TARIFFS_DIR, HISTORY_DB_DIR]:
     try:
         dir_path.mkdir(exist_ok=True, parents=True)
     except Exception as e:
         print(f"Ошибка создания директории {dir_path}: {e}")
+
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_FILE = LOG_DIR / "auto_parts_economy.log"
 LOG_ROTATION_SIZE = 10 * 1024 * 1024
 LOG_RETENTION_DAYS = 30
+
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 OPENAI_MODEL = "gpt-4"
 ANTHROPIC_MODEL = "claude-3-sonnet-20240229"
+
 USE_CACHING = True
 USE_PARALLEL = True
 USE_GPU = False
@@ -477,6 +511,7 @@ OPTIMIZE_MEMORY = True
 USE_DUCKDB = True
 USE_POLARS = True
 USE_MULTIPROCESSING = False
+
 COLORS = {
     "primary": "#e94560",
     "secondary": "#0f3460",
@@ -492,6 +527,7 @@ COLORS = {
     "formula_fill": "#E2EFDA",
     "result_fill": "#DCE6F1",
 }
+
 PLOTLY_COLORS = [
     "#e94560", "#0f3460", "#00cc96", "#ffa600", "#ef553b",
     "#636efa", "#f9a825", "#26a69a", "#ab47bc", "#42a5f5",
@@ -499,6 +535,7 @@ PLOTLY_COLORS = [
     "#d4ac0d", "#1abc9c", "#2ecc71", "#3498db", "#9b59b6",
     "#e67e22", "#e74c3c", "#1abc9c", "#2ecc71", "#3498db"
 ]
+
 MARKETPLACE_ICONS = {
     "Ozon": "🟣",
     "Wildberries": "🟡",
@@ -507,6 +544,7 @@ MARKETPLACE_ICONS = {
     "Мегамаркет": "🟢",
     "СберМегаМаркет": "🟠"
 }
+
 MODE_ICONS = {
     "FBY": "📦",
     "FBS": "🏪",
@@ -514,6 +552,7 @@ MODE_ICONS = {
     "DBS": "🚚",
     "FBP": "🤝"
 }
+
 CATEGORY_ICONS = {
     "двигатель": "🔥",
     "трансмиссия": "⚙️",
@@ -535,6 +574,7 @@ CATEGORY_ICONS = {
     "климат": "🌡️",
     "безопасность": "🛡️"
 }
+
 # ============================================================================
 # КЛАССЫ ИСКЛЮЧЕНИЙ
 # ============================================================================
@@ -545,6 +585,7 @@ class AutoPartsException(Exception):
         self.timestamp = datetime.now()
         self.context = kwargs
         super().__init__(message, *args)
+
     def __str__(self):
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.message}"
 
@@ -665,6 +706,7 @@ class PriceImportError(AutoPartsException):
 class Logger:
     _instance = None
     _lock = Lock()
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -672,6 +714,7 @@ class Logger:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
+
     def __init__(self):
         if self._initialized:
             return
@@ -690,6 +733,7 @@ class Logger:
         ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
+
     def get(self):
         return self.logger
 
@@ -702,6 +746,7 @@ class PersistentHistoryDB:
     """Постоянное хранилище истории расчётов"""
     _instance = None
     _lock = Lock()
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
@@ -709,6 +754,7 @@ class PersistentHistoryDB:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
+
     def __init__(self, db_path: Optional[Path] = None):
         if self._initialized:
             return
@@ -720,6 +766,7 @@ class PersistentHistoryDB:
         self._init_connection()
         self._create_tables()
         logger.info(f"📚 PersistentHistoryDB инициализирован: {self.db_path}")
+
     def _init_connection(self):
         try:
             if self.use_duckdb:
@@ -730,6 +777,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка подключения к БД: {e}")
             self.conn = None
+
     def _create_tables(self):
         if self.conn is None:
             return
@@ -791,6 +839,7 @@ class PersistentHistoryDB:
             self.conn.commit()
         except Exception as e:
             logger.error(f"Ошибка создания таблиц: {e}")
+
     def save_calculation(self, result: 'UnitEconomicsResult', article: str = "", brand: str = "") -> bool:
         if self.conn is None:
             return False
@@ -810,6 +859,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка сохранения расчёта: {e}")
             return False
+
     def save_batch(self, results: List['UnitEconomicsResult'], articles: List[str] = None, brands: List[str] = None) -> int:
         if self.conn is None:
             return 0
@@ -824,6 +874,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка пакетного сохранения: {e}")
             return saved
+
     def load_history(self, limit: int = 1000, filters: Optional[Dict] = None) -> pd.DataFrame:
         if self.conn is None:
             return pd.DataFrame()
@@ -862,6 +913,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка загрузки истории: {e}")
             return pd.DataFrame()
+
     def get_stats(self) -> Dict[str, Any]:
         if self.conn is None:
             return {}
@@ -905,6 +957,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка получения статистики: {e}")
             return {}
+
     def clear_history(self) -> int:
         if self.conn is None:
             return 0
@@ -920,6 +973,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка очистки истории: {e}")
             return 0
+
     def save_price_import(self, file_name: str, records_count: int, updated_count: int,
                           source_type: str = "pricelist", notes: str = "") -> bool:
         if self.conn is None:
@@ -942,6 +996,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка сохранения импорта цен: {e}")
             return False
+
     def get_price_imports_history(self, limit: int = 50) -> pd.DataFrame:
         if self.conn is None:
             return pd.DataFrame()
@@ -954,6 +1009,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.error(f"Ошибка получения истории импортов: {e}")
             return pd.DataFrame()
+
     def close(self):
         if self.conn is not None:
             try:
@@ -986,6 +1042,7 @@ def cache_decorator(ttl: int = CACHE_TTL, maxsize: int = 1000) -> Callable:
         cache = {}
         timestamps = {}
         access_count = defaultdict(int)
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             if not USE_CACHING:
@@ -1772,6 +1829,7 @@ class SmartTariffCache:
     """Умный кэш тарифов с возможностью ручного редактирования."""
     _instance = None
     _lock = Lock()
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -1779,6 +1837,7 @@ class SmartTariffCache:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
+
     def __init__(self):
         if self._initialized:
             return
@@ -1794,9 +1853,11 @@ class SmartTariffCache:
         self._load_cache()
         self._load_history()
         logger.info(f"SmartTariffCache инициализирован: {len(self._cache)} записей")
+
     def _make_key(self, marketplace: str, category: Optional[str] = None) -> str:
         cat = (category or "all").lower().strip()
         return f"{marketplace.lower().strip()}::{cat}"
+
     def _load_cache(self):
         if not self.cache_file.exists():
             self._cache = {}
@@ -1813,6 +1874,7 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка загрузки кэша тарифов: {e}")
             self._cache = {}
+
     def _save_cache(self):
         try:
             data = {k: v.to_dict() for k, v in self._cache.items()}
@@ -1829,6 +1891,7 @@ class SmartTariffCache:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Ошибка сохранения кэша тарифов: {e}")
+
     def _load_history(self):
         if not self.history_file.exists():
             self._history = []
@@ -1839,12 +1902,14 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка загрузки истории: {e}")
             self._history = []
+
     def _save_history(self):
         try:
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self._history[-500:], f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Ошибка сохранения истории: {e}")
+
     def _add_history_entry(self, action: str, marketplace: str, category: Optional[str],
                            old_data: Optional[Dict], new_data: Optional[Dict], source: str):
         entry = {
@@ -1860,6 +1925,7 @@ class SmartTariffCache:
         if len(self._history) > 500:
             self._history = self._history[-500:]
         self._save_history()
+
     def get(self, marketplace: str, category: Optional[str] = None,
             use_expired: bool = True) -> Optional[TariffCacheEntry]:
         key = self._make_key(marketplace, category)
@@ -1872,6 +1938,7 @@ class SmartTariffCache:
         if entry.is_expired() and not use_expired:
             return None
         return entry
+
     def set(self, marketplace: str, category: Optional[str], data: Dict[str, Any],
             source: TariffSource, ttl_seconds: int = 86400, notes: str = "") -> bool:
         try:
@@ -1902,6 +1969,7 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка сохранения тарифов: {e}")
             return False
+
     def delete(self, marketplace: str, category: Optional[str] = None) -> bool:
         try:
             key = self._make_key(marketplace, category)
@@ -1921,6 +1989,7 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка удаления тарифов: {e}")
             return False
+
     def update_field(self, marketplace: str, category: Optional[str],
                      field: str, value: Any) -> bool:
         try:
@@ -1947,10 +2016,13 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка обновления поля: {e}")
             return False
+
     def get_all(self) -> Dict[str, TariffCacheEntry]:
         return self._cache.copy()
+
     def get_history(self, limit: int = 100) -> List[Dict[str, Any]]:
         return self._history[-limit:]
+
     def clear_expired(self) -> int:
         expired_keys = [k for k, v in self._cache.items() if v.is_expired()]
         for key in expired_keys:
@@ -1958,6 +2030,7 @@ class SmartTariffCache:
         if expired_keys:
             self._save_cache()
         return len(expired_keys)
+
     def clear_all(self) -> int:
         count = len(self._cache)
         self._cache = {}
@@ -1971,6 +2044,7 @@ class SmartTariffCache:
             source="MANUAL"
         )
         return count
+
     def export_to_file(self, file_path: Union[str, Path]) -> bool:
         try:
             data = {k: v.to_dict() for k, v in self._cache.items()}
@@ -1980,6 +2054,7 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка экспорта кэша: {e}")
             return False
+
     def import_from_file(self, file_path: Union[str, Path]) -> int:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -2004,6 +2079,7 @@ class SmartTariffCache:
         except Exception as e:
             logger.error(f"Ошибка импорта кэша: {e}")
             return 0
+
     def get_statistics(self) -> Dict[str, Any]:
         stats = {
             "total_entries": len(self._cache),
@@ -2310,6 +2386,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
             oem_codes=oem or [], seasonality=season,
             risk_level=risk, hazardous=hazardous, fragile=fragile
         )
+    
     # === ДВИГАТЕЛЬ ===
     categories["двигатель"] = make_cat("двигатель", "Двигатели и комплектующие",
                                        30, 80, 30, 60, 30, 70, 10, 200, 20.0, 80.0, risk=RiskLevel.HIGH)
@@ -2353,6 +2430,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                      25, 45, 25, 45, 5, 10, 5, 15, 10.0, 10.0, risk=RiskLevel.HIGH)
     categories["стартерный_венец"] = make_cat("стартерный_венец", "Стартерный венец",
                                               25, 40, 25, 40, 2, 5, 1, 5, 5.0, 3.0)
+    
     # === ТРАНСМИССИЯ ===
     categories["трансмиссия"] = make_cat("трансмиссия", "КПП и комплектующие",
                                          40, 80, 30, 60, 30, 60, 20, 100, 30.0, 50.0, risk=RiskLevel.HIGH)
@@ -2394,6 +2472,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                            5, 12, 5, 12, 3, 8, 0.3, 1.5, 2.0, 0.9)
     categories["муфта_кпп"] = make_cat("муфта_кпп", "Муфта КПП",
                                        5, 15, 5, 15, 3, 8, 0.5, 2, 3.0, 1.25)
+    
     # === ПОДВЕСКА ===
     categories["подвеска"] = make_cat("подвеска", "Элементы подвески",
                                       20, 80, 10, 40, 10, 60, 1, 20, 5.0, 8.0)
@@ -2431,6 +2510,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                              25, 65, 3, 8, 3, 8, 1, 4, 4.0, 2.5)
     categories["балка_моста"] = make_cat("балка_моста", "Балка моста",
                                          45, 85, 10, 20, 10, 20, 15, 40, 30.0, 27.5, risk=RiskLevel.HIGH)
+    
     # === ТОРМОЗНАЯ СИСТЕМА ===
     categories["тормозная_система"] = make_cat("тормозная_система", "Тормозная система",
                                                20, 40, 20, 40, 5, 15, 2, 15, 3.0, 8.0, risk=RiskLevel.HIGH)
@@ -2448,6 +2528,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                  10, 25, 8, 18, 8, 18, 1, 4, 3.0, 2.5)
     categories["вакуумный_усилитель"] = make_cat("вакуумный_усилитель", "Вакуумный усилитель тормозов",
                                                  20, 35, 20, 35, 10, 20, 2, 6, 10.0, 4.0)
+    
     # === РУЛЕВОЕ УПРАВЛЕНИЕ ===
     categories["рулевое_управление"] = make_cat("рулевое_управление", "Рулевое управление",
                                                 30, 100, 10, 30, 10, 30, 2, 15, 5.0, 10.0)
@@ -2461,6 +2542,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                             15, 30, 15, 30, 15, 25, 3, 10, 10.0, 6.5)
     categories["рулевой_насос"] = make_cat("рулевой_насос", "Насос ГУР",
                                            15, 30, 12, 22, 12, 22, 3, 8, 6.0, 5.5)
+    
     # === ЭЛЕКТРИКА ===
     categories["электрика"] = make_cat("электрика", "Электрооборудование",
                                        10, 40, 10, 30, 10, 30, 0.5, 10, 2.0, 5.0)
@@ -2478,6 +2560,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                       20, 100, 5, 20, 2, 10, 0.3, 3, 3.0, 1.5)
     categories["блоки_управления"] = make_cat("блоки_управления", "Блоки управления (ЭБУ)",
                                               15, 30, 10, 20, 5, 15, 0.5, 3, 3.0, 1.5)
+    
     # === СИСТЕМА ОХЛАЖДЕНИЯ ===
     categories["охлаждение"] = make_cat("охлаждение", "Система охлаждения",
                                         20, 80, 15, 50, 10, 40, 1, 15, 8.0, 15.0)
@@ -2491,6 +2574,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                                   30, 50, 30, 50, 5, 15, 2, 6, 15.0, 4.0, fragile=True)
     categories["расширительный_бачок"] = make_cat("расширительный_бачок", "Расширительный бачок",
                                                   15, 30, 10, 20, 10, 25, 0.3, 1.5, 4.0, 0.9)
+    
     # === ФИЛЬТРЫ ===
     categories["фильтры"] = make_cat("фильтры", "Фильтры",
                                      5, 30, 5, 30, 5, 40, 0.1, 3, 2.0, 5.0)
@@ -2502,6 +2586,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                                5, 15, 5, 15, 8, 20, 0.3, 1.5, 1.0, 2.0)
     categories["салонные_фильтры"] = make_cat("салонные_фильтры", "Салонные фильтры",
                                               20, 35, 15, 25, 2, 5, 0.2, 1, 1.5, 2.5)
+    
     # === МАСЛА И ЖИДКОСТИ (ОПАСНЫЕ) ===
     categories["масла"] = make_cat("масла", "Масла и технические жидкости",
                                    5, 30, 5, 30, 10, 40, 0.5, 20, 5.0, 15.0, hazardous=True)
@@ -2513,6 +2598,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                                 5, 10, 5, 10, 15, 25, 0.5, 2, 1.0, 2.0, hazardous=True)
     categories["антифриз"] = make_cat("антифриз", "Антифриз / Охлаждающая жидкость",
                                       10, 30, 10, 30, 20, 40, 1, 20, 5.0, 15.0, hazardous=True)
+    
     # === ОПТИКА (ХРУПКИЕ) ===
     categories["оптика"] = make_cat("оптика", "Оптика и освещение",
                                     15, 60, 15, 40, 15, 40, 0.5, 10, 5.0, 10.0, fragile=True)
@@ -2524,6 +2610,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                     20, 50, 15, 30, 10, 25, 1, 5, 5.0, 8.0, fragile=True)
     categories["led_лампы"] = make_cat("led_лампы", "LED лампы",
                                        5, 15, 3, 8, 3, 8, 0.1, 0.5, 0.3, 0.3, fragile=True)
+    
     # === КУЗОВ (КРУПНОГАБАРИТ + ХРУПКИЕ) ===
     categories["кузов"] = make_cat("кузов", "Кузовные детали",
                                    50, 200, 30, 150, 10, 100, 2, 50, 30.0, 80.0, fragile=True, risk=RiskLevel.HIGH)
@@ -2539,6 +2626,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                    100, 150, 50, 100, 5, 15, 15, 40, 80.0, 27.5, fragile=True, risk=RiskLevel.HIGH)
     categories["стёкла"] = make_cat("стёкла", "Автомобильные стёкла",
                                     50, 150, 30, 100, 0.5, 2, 5, 20, 40.0, 12.5, fragile=True, risk=RiskLevel.HIGH)
+    
     # === ШИНЫ И ДИСКИ ===
     categories["шины"] = make_cat("шины", "Шины и диски",
                                   40, 80, 40, 80, 15, 40, 5, 30, 20.0, 40.0)
@@ -2548,6 +2636,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                          50, 80, 50, 80, 15, 30, 8, 25, 25.0, 35.0, season=Seasonality.WINTER)
     categories["диски"] = make_cat("диски", "Колесные диски",
                                    40, 60, 40, 60, 15, 30, 5, 20, 15.0, 25.0, fragile=True)
+    
     # === ИНСТРУМЕНТЫ ===
     categories["инструменты"] = make_cat("инструменты", "Автоинструменты",
                                          10, 60, 5, 30, 3, 20, 0.2, 10, 3.0, 8.0)
@@ -2557,17 +2646,21 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                            15, 40, 10, 25, 3, 10, 1, 8, 3.0, 6.0)
     categories["компрессоры_воздушные"] = make_cat("компрессоры_воздушные", "Воздушные компрессоры",
                                                    25, 60, 20, 40, 20, 40, 5, 25, 15.0, 15.0)
+    
     # === РЕМНИ И ПРИВОДЫ ===
     categories["ремни"] = make_cat("ремни", "Ремни ГРМ и приводов",
                                    50, 150, 1, 3, 1, 3, 0.1, 0.8, 0.5, 1.0)
     categories["ролики"] = make_cat("ролики", "Ролики натяжители",
                                     5, 12, 5, 12, 2, 5, 0.2, 1.5, 0.5, 1.0)
+    
     # === ПОДШИПНИКИ ===
     categories["подшипники"] = make_cat("подшипники", "Подшипники",
                                         3, 15, 3, 15, 1, 5, 0.1, 3, 0.5, 2.0)
+    
     # === КРЕПЁЖ ===
     categories["крепёж"] = make_cat("крепёж", "Крепёж и метизы",
                                     0.5, 10, 0.5, 10, 0.5, 10, 0.01, 2, 0.2, 1.0)
+    
     # === КЛИМАТ ===
     categories["климат"] = make_cat("климат", "Климат-контроль и кондиционер",
                                     20, 80, 20, 60, 15, 50, 2, 20, 10.0, 20.0)
@@ -2575,6 +2668,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                          20, 40, 15, 30, 15, 30, 5, 15, 8.0, 12.0)
     categories["конденсоры"] = make_cat("конденсоры", "Конденсоры кондиционера",
                                         40, 80, 30, 60, 5, 15, 2, 8, 10.0, 5.0, fragile=True)
+    
     # === ВЫХЛОПНАЯ СИСТЕМА ===
     categories["выпуск"] = make_cat("выпуск", "Выхлопная система",
                                     30, 150, 10, 40, 10, 40, 2, 25, 10.0, 25.0)
@@ -2584,11 +2678,13 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
                                           30, 80, 15, 30, 15, 30, 3, 15, 10.0, 20.0, hazardous=True, risk=RiskLevel.HIGH)
     categories["гофры"] = make_cat("гофры", "Гофры выхлопной системы",
                                    10, 30, 5, 15, 5, 15, 0.3, 2, 2.0, 1.15)
+    
     # === БЕЗОПАСНОСТЬ ===
     categories["безопасность"] = make_cat("безопасность", "Системы безопасности",
                                           10, 50, 10, 40, 5, 30, 0.5, 8, 3.0, 6.0, risk=RiskLevel.HIGH)
     categories["подушки_безопасности"] = make_cat("подушки_безопасности", "Подушки безопасности",
                                                   20, 50, 15, 30, 10, 20, 1, 5, 5.0, 3.0, risk=RiskLevel.HIGH)
+    
     # === ПРОЧЕЕ ===
     categories["щетки_стеклоочистителя"] = make_cat("щетки_стеклоочистителя", "Щетки стеклоочистителя",
                                                     30, 70, 2, 5, 2, 5, 0.1, 0.5, 1.0, 1.5)
@@ -2781,6 +2877,7 @@ class MarketplaceUnitEconomics:
     """
     _instance = None
     _lock = Lock()
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -2788,6 +2885,7 @@ class MarketplaceUnitEconomics:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
+
     def __init__(self):
         if self._initialized:
             return
@@ -4705,7 +4803,7 @@ class CategoryClassifier:
                 "Масла и жидкости": ["масло", "жидкость", "смазка", "антифриз", "тормозуха"],
                 "Кузовные детали": ["бампер", "капот", "крыло", "дверь", "стекло", "фара"],
                 "Шины и диски": ["шина", "диск", "колесо", "покрышка", "резина"],
-                "Инструменты": ["инструмент", "ключ", "домкрат", "насос"],
+                "Инструменты": ["инструмент", "ключ", "домкрат"],
                 "Прочее": []
             }
             for category, keywords in category_keywords.items():
@@ -5194,10 +5292,9 @@ def show_data_upload_interface():
                         st.metric("🏷️ Брендов", "Ошибка")
                 else:
                     st.metric("🏷️ Брендов", "—")
-              # Действия с данными
+            # Действия с данными
             st.subheader("🔧 Доступные действия")
             action_col1, action_col2, action_col3 = st.columns(3)
-            
             with action_col1:
                 if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
                     with st.spinner("Классификация товаров..."):
@@ -5208,58 +5305,29 @@ def show_data_upload_interface():
                             if any(w in col_lower for w in ['наименование', 'название', 'name', 'товар']):
                                 name_col = col
                                 break
-                        
                         if name_col:
-                            # Параллельная обработка для скорости
-                            categories = []
-                            names = df[name_col].astype(str).tolist()
-                            
-                            # Прогресс бар для классификации
-                            progress_bar = st.progress(0, text="Анализ названий...")
-                            batch_size = 100
-                            total_batches = (len(names) + batch_size - 1) // batch_size
-                            
-                            for i in range(0, len(names), batch_size):
-                                batch = names[i:i+batch_size]
-                                preds = classifier.predict_batch(batch)
-                                categories.extend([p[0] for p in preds])
-                                progress_bar.progress((i + len(batch)) / len(names), 
-                                                     text=f"Обработано {i + len(batch)}/{len(names)}")
-                            
-                            df['Категория'] = categories
+                            df['Категория'] = df[name_col].apply(lambda x: classifier.predict(str(x))[0])
                             st.session_state.uploaded_data = df
-                            progress_bar.empty()
                             st.success("✅ Классификация завершена!")
-                            
                             st.subheader("📊 Распределение по категориям")
                             category_counts = df['Категория'].value_counts()
-                            st.dataframe(category_counts.head(20), use_container_width=True, key="category_counts")
-                            
-                            if PLOTLY_AVAILABLE and px is not None:
-                                fig = px.pie(values=category_counts.head(10).values, 
-                                            names=category_counts.head(10).index,
-                                            title="Топ-10 категорий")
-                                st.plotly_chart(fig, use_container_width=True)
+                            st.dataframe(category_counts, use_container_width=True, key="category_counts")
                         else:
                             st.warning("⚠️ Не найдена колонка с названием товара")
-
             with action_col2:
                 if st.button("📊 Обогатить каталог", type="primary", key="upload_enrich_button"):
-                    st.info("ℹ️ Перейдите в раздел '🔍 Обогащение каталога' для поиска аналогов")
-
+                    st.info("ℹ️ Перейдите в раздел '📊 Обогащение каталога' для поиска аналогов")
             with action_col3:
                 if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
                     if st.session_state.get('uploaded_data') is not None:
                         del st.session_state.uploaded_data
                         st.success("✅ Данные очищены")
                         st.rerun()
-
         except Exception as e:
             st.error(f"❌ Ошибка загрузки файла: {str(e)}")
             with st.expander("📋 Подробности ошибки", expanded=True):
                 st.code(traceback.format_exc())
-
-    # Кнопка скачивания шаблона
+      # Кнопка скачивания шаблона
     if st.button("📥 Скачать шаблон данных"):
         template_df = pd.DataFrame({
             "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
