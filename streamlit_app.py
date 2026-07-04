@@ -1,8 +1,8 @@
 """
 ================================================================================
-🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.8 - API INTEGRATION & DIMENSIONS
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v99.9 - FINAL OPTIMIZATION
 ================================================================================
-📌 ВЕРСИЯ: 99.8.0 (API МАРКЕТПЛЕЙСОВ + ПРОВЕРКА ГАБАРИТОВ)
+📌 ВЕРСИЯ: 99.9.0 (FIXED ENCODING, TARIFF REFERENCE, CLEAN UI)
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ И АВТОТОВАРЫ
 ================================================================================
 """
@@ -429,7 +429,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "99.8.0"
+APP_VERSION = "99.9.0"
 APP_NAME = "🚗 Юнит-экономика автозапчастей 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Полный расчет юнит-экономики для автозапчастей с AI-оптимизацией и API"
@@ -6305,42 +6305,8 @@ def show_single_product_calculation():
             key="ue_category",
             help="Категория товара для точного расчета комиссии"
         )
-    with st.expander("💰 Настройки налогов и прибыли"):
-        st.info("""
-        📋 **НАСТРОЙКИ НАЛОГООБЛОЖЕНИЯ:**
-        Выберите систему налогообложения и укажите параметры:
-        - УСН 6% - налог с доходов
-        - УСН 15% - налог с разницы доходов и расходов
-        - ОСНО - общая система (НДС + налог на прибыль)
-        """)
-        col_t1, col_t2, col_t3 = st.columns(3)
-        with col_t1:
-            tax_system = st.selectbox(
-                "Система налогообложения",
-                ["УСН_6", "УСН_15", "ОСНО"],
-                index=0,
-                key="ue_tax_system",
-                help="УСН 6% - с доходов; УСН 15% - доходы-расходы; ОСНО - НДС + прибыль"
-            )
-        with col_t2:
-            min_profit_percent = st.number_input(
-                "Желаемая прибыль (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=10.0,
-                step=1.0,
-                key="ue_min_profit",
-                help="Минимальная прибыль после уплаты налогов и всех комиссий"
-            ) / 100
-        with col_t3:
-            annual_revenue = st.number_input(
-                "Годовая выручка (₽)",
-                min_value=0.0,
-                value=0.0,
-                step=100000.0,
-                key="ue_annual_revenue",
-                help="Для расчёта 1% налога сверх лимита 300 млн"
-            )
+    
+    # Убран интерфейс настроек налогов, используются глобальные настройки
     is_premium = st.checkbox("⭐ Премиум-раздел (доп. комиссия)", key="ue_premium")
     if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_calc"):
         with st.spinner("Расчет юнит-экономики..."):
@@ -6350,10 +6316,8 @@ def show_single_product_calculation():
                 marketplace=marketplace,
                 weight=weight,
                 category=category if category else None,
-                is_premium=is_premium,
-                tax_system=tax_system,
-                min_profit_percent=min_profit_percent,
-                annual_revenue=annual_revenue
+                is_premium=is_premium
+                # tax_system, min_profit_percent, annual_revenue берутся из настроек по умолчанию
             )
             st.subheader("📊 Результаты расчета")
             col1, col2, col3, col4 = st.columns(4)
@@ -6374,7 +6338,7 @@ def show_single_product_calculation():
                     delta=f"{economics.recommended_min_price - price:.2f} ₽"
                 )
             with col_rec2:
-                st.metric(f"💵 Налог ({tax_system})", f"{economics.tax_amount:.2f} ₽")
+                st.metric(f"💵 Налог ({economics.tax_system})", f"{economics.tax_amount:.2f} ₽")
             with col_rec3:
                 if price < economics.recommended_min_price:
                     st.warning(f"⚠️ Цена ниже рекомендованной на {economics.recommended_min_price - price:.2f} ₽")
@@ -6425,8 +6389,7 @@ def show_single_product_calculation():
             st.subheader("🏆 Сравнение всех маркетплейсов")
             comparison_df = unit_economics.calculate_for_all_marketplaces(
                 price=price, cost=cost, weight=weight, category=category if category else None,
-                operation_mode=operation_mode, tax_system=tax_system,
-                min_profit_percent=min_profit_percent, annual_revenue=annual_revenue
+                operation_mode=operation_mode
             )
             st.dataframe(comparison_df, use_container_width=True, key="ue_comparison_table")
             if not comparison_df.empty:
@@ -6527,32 +6490,9 @@ def show_catalog_calculation():
         else:
             markup_percent = 0.0
         is_premium = st.checkbox("⭐ Премиум-раздел", value=False, key="ue_article_premium")
-    with st.expander("💰 Настройки налогов и прибыли"):
-        col_t1, col_t2, col_t3 = st.columns(3)
-        with col_t1:
-            tax_system = st.selectbox(
-                "Система налогообложения",
-                ["УСН_6", "УСН_15", "ОСНО"],
-                index=0,
-                key="ue_article_tax_system"
-            )
-        with col_t2:
-            min_profit_percent = st.number_input(
-                "Желаемая прибыль (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=10.0,
-                step=1.0,
-                key="ue_article_min_profit"
-            ) / 100
-        with col_t3:
-            annual_revenue = st.number_input(
-                "Годовая выручка (₽)",
-                min_value=0.0,
-                value=0.0,
-                step=100000.0,
-                key="ue_article_annual_revenue"
-            )
+    
+    # Убран интерфейс настроек налогов для каталога
+
     st.subheader("📋 Определение колонок в данных")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -6644,9 +6584,6 @@ def show_catalog_calculation():
                             weight=weight,
                             category=category,
                             is_premium=is_premium,
-                            tax_system=tax_system,
-                            min_profit_percent=min_profit_percent,
-                            annual_revenue=annual_revenue,
                             article=article,
                             brand=brand
                         )
@@ -6773,7 +6710,68 @@ def show_catalog_grouping_interface():
     - ✅ Поиск и фильтрация товаров
     - ✅ Экспорт в Excel, CSV, Parquet
     - ✅ Статистика и аналитика
+    
+    ⚠️ **ТРЕБОВАНИЯ К ФАЙЛАМ:**
+    Для корректной работы необходимо загрузить файлы со следующими столбцами:
+    - **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
+    - **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
+    - **Штрих-коды:** `artikul`, `brand`, `barcode`, `multiplicity`
+    - **Габариты:** `artikul`, `brand`, `length`, `width`, `height`, `weight`
+    - **Изображения:** `artikul`, `brand`, `image_url`
+    - **Цены:** `artikul`, `brand`, `price`, `currency`
     """)
+    
+    # Кнопка скачивания шаблона
+    if st.button("📥 Скачать шаблон файлов для каталога"):
+        # Создаем простой Excel с несколькими листами-примерами
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Лист 1: Основные данные
+            df_oe = pd.DataFrame({
+                "oe_number": ["123456", "789012"],
+                "artikul": ["ART-001", "ART-002"],
+                "brand": ["Bosch", "Siemens"],
+                "name": ["Фильтр масляный", "Свеча зажигания"],
+                "applicability": ["VW Golf", "BMW 3 Series"]
+            })
+            df_oe.to_excel(writer, sheet_name="OE_Data", index=False)
+            
+            # Лист 2: Кросс-ссылки
+            df_cross = pd.DataFrame({
+                "oe_number": ["123456", "123456"],
+                "artikul": ["ART-001", "ART-003"],
+                "brand": ["Bosch", "Mann"]
+            })
+            df_cross.to_excel(writer, sheet_name="CrossRefs", index=False)
+            
+            # Лист 3: Габариты
+            df_dims = pd.DataFrame({
+                "artikul": ["ART-001", "ART-002"],
+                "brand": ["Bosch", "Siemens"],
+                "length": [10.0, 5.0],
+                "width": [10.0, 5.0],
+                "height": [15.0, 10.0],
+                "weight": [0.5, 0.1]
+            })
+            df_dims.to_excel(writer, sheet_name="Dimensions", index=False)
+            
+            # Лист 4: Цены
+            df_prices = pd.DataFrame({
+                "artikul": ["ART-001", "ART-002"],
+                "brand": ["Bosch", "Siemens"],
+                "price": [500.0, 150.0],
+                "currency": ["RUB", "RUB"]
+            })
+            df_prices.to_excel(writer, sheet_name="Prices", index=False)
+            
+        output.seek(0)
+        st.download_button(
+            label="⬇️ Скачать шаблон Excel",
+            data=output,
+            file_name="template_catalog_files.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
         st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
         return
@@ -6805,7 +6803,7 @@ def show_catalog_upload(catalog):
     st.subheader("📥 Загрузка данных")
     st.info("""
     📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
-    1. Подготовьте файлы с данными
+    1. Подготовьте файлы с данными (см. требования выше)
     2. Загрузите файлы в соответствующие поля
     3. Нажмите "Обработать и загрузить"
     """)
@@ -7036,8 +7034,13 @@ def show_ai_tariffs_interface():
                         st.json(result.get('rates', {}))
                 else:
                     st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+    
     st.divider()
-    st.subheader("📊 Текущие тарифы маркетплейсов")
+    
+    # 🆕 v99.9: Генерация справочника тарифов
+    st.subheader("📄 Справочник тарифов и услуг")
+    st.info("Ниже представлен актуальный справочник тарифов по всем маркетплейсам. Вы можете скачать его в виде Excel-файла.")
+    
     tariff_data = []
     for mp_name, config in unit_economics._configs.items():
         tariff_data.append({
@@ -7046,12 +7049,47 @@ def show_ai_tariffs_interface():
             "Мин. комиссия (₽)": f"{config.min_commission:.0f}",
             "Логистика база (₽)": f"{config.logistics_base:.0f}",
             "Логистика за кг (₽)": f"{config.logistics_per_kg:.0f}",
+            "Логистика за литр (₽)": f"{config.logistics_per_liter:.0f}",
             "Хранение/день (₽/л)": f"{config.storage_per_day:.2f}",
             "Возвраты (%)": f"{config.return_fee * 100:.1f}%",
+            "Эквайринг (%)": f"{config.acquiring_fee * 100:.1f}%",
+            "Последняя миля (₽)": f"{config.last_mile_fee:.0f}",
+            "Доставка (%)": f"{config.delivery_fee_percent * 100:.1f}%",
+            "Премиум (%)": f"{config.premium_fee * 100:.1f}%",
+            "РКО (%)": f"{config.rko_fee * 100:.1f}%",
+            "Подписка (₽/мес)": f"{config.subscription_fee:.0f}",
+            "Страховка (%)": f"{config.insurance_fee * 100:.1f}%",
+            "Упаковка (₽)": f"{config.packing_fee:.0f}",
+            "Маркетинг (%)": f"{config.marketing_fee * 100:.1f}%",
+            "Опасные грузы (%)": f"{config.hazardous_surcharge * 100:.1f}%",
+            "Хрупкие товары (%)": f"{config.fragile_surcharge * 100:.1f}%",
+            "Крупногабарит (%)": f"{config.oversized_surcharge * 100:.1f}%",
             "Источник": config.tariff_source.value,
             "Обновлено": config.last_updated.strftime("%Y-%m-%d %H:%M")
         })
-    st.dataframe(pd.DataFrame(tariff_data), use_container_width=True, key="ai_tariffs_table")
+    
+    df_tariffs = pd.DataFrame(tariff_data)
+    st.dataframe(df_tariffs, use_container_width=True, key="ai_tariffs_table_detailed")
+    
+    if st.button("📥 Скачать справочник тарифов (Excel)", key="btn_download_tariff_ref"):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_tariffs.to_excel(writer, index=False, sheet_name="Тарифы")
+            
+            # Добавляем лист с детальными ставками по категориям для Ozon как пример
+            if "Ozon" in unit_economics._configs:
+                ozon_cats = unit_economics._configs["Ozon"].category_rates
+                df_cats = pd.DataFrame(list(ozon_cats.items()), columns=["Категория", "Ставка"])
+                df_cats["Ставка %"] = df_cats["Ставка"].apply(lambda x: f"{x*100:.1f}%")
+                df_cats.to_excel(writer, index=False, sheet_name="Категории Ozon")
+                
+        output.seek(0)
+        st.download_button(
+            label="⬇️ Скачать Excel",
+            data=output,
+            file_name=f"Справочник_тарифов_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ============================================================================
 # БЛОК 15: ОБОГАЩЕНИЕ КАТАЛОГА
@@ -7065,7 +7103,60 @@ def show_catalog_enhance_interface():
     st.info("""
     🔍 **ПОИСК АНАЛОГОВ:**
     Система ищет аналоги через общие OE номера (2 уровня).
+    
+    ⚠️ **ТРЕБОВАНИЯ К ФАЙЛАМ:**
+    Для загрузки данных подготовьте файлы со следующими столбцами:
+    - **OE данные:** `oe_number`, `artikul`, `brand`, `name`, `applicability`
+    - **Детали (артикулы):** `artikul`, `brand`, `multiplicity`, `barcode`, `length`, `width`, `height`, `weight`, `image_url`, `dimensions_str`, `description`
+    - **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
     """)
+    
+    # Кнопка скачивания шаблона
+    if st.button("📥 Скачать шаблон файлов для обогащения"):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Лист 1: OE данные
+            df_oe = pd.DataFrame({
+                "oe_number": ["123456", "789012"],
+                "artikul": ["ART-001", "ART-002"],
+                "brand": ["Bosch", "Siemens"],
+                "name": ["Фильтр масляный", "Свеча зажигания"],
+                "applicability": ["VW Golf", "BMW 3 Series"]
+            })
+            df_oe.to_excel(writer, sheet_name="OE_Data", index=False)
+            
+            # Лист 2: Детали
+            df_parts = pd.DataFrame({
+                "artikul": ["ART-001", "ART-002"],
+                "brand": ["Bosch", "Siemens"],
+                "multiplicity": [1, 1],
+                "barcode": ["123456789", "987654321"],
+                "length": [10.0, 5.0],
+                "width": [10.0, 5.0],
+                "height": [15.0, 10.0],
+                "weight": [0.5, 0.1],
+                "image_url": ["http://example.com/1.jpg", "http://example.com/2.jpg"],
+                "dimensions_str": ["10x10x15", "5x5x10"],
+                "description": ["Масляный фильтр Bosch", "Свеча Siemens"]
+            })
+            df_parts.to_excel(writer, sheet_name="Parts", index=False)
+            
+            # Лист 3: Кросс-ссылки
+            df_cross = pd.DataFrame({
+                "oe_number": ["123456", "123456"],
+                "artikul": ["ART-001", "ART-003"],
+                "brand": ["Bosch", "Mann"]
+            })
+            df_cross.to_excel(writer, sheet_name="CrossRefs", index=False)
+            
+        output.seek(0)
+        st.download_button(
+            label="⬇️ Скачать шаблон Excel",
+            data=output,
+            file_name="template_enrichment_files.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     if 'catalog_enhancer' not in st.session_state:
         st.session_state.catalog_enhancer = CatalogEnhancer()
     enhancer = st.session_state.catalog_enhancer
