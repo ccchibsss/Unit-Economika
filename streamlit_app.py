@@ -14,6 +14,7 @@
 ✅ ЭКСПОРТ ДЛЯ 1С И TELEGRAM-БОТОВ
 ✅ ИСПРАВЛЕНА КОДИРОВКА UTF-8-SIG ДЛЯ КИРИЛЛИЦЫ
 ✅ УДАЛЕН РАЗДЕЛ НАСТРОЙКИ НАЛОГОВ
+✅ УДАЛЕН DASK (КОНФЛИКТ С PANDAS 2.3.3)
 ================================================================================
 """
 # ============================================================================
@@ -166,15 +167,9 @@ except ImportError:
     DUCKDB_AVAILABLE = False
     duckdb = None
 
-try:
-    import dask
-    import dask.dataframe as dd
-    import dask.array as da
-    import dask.bag as db
-    from dask.distributed import Client, LocalCluster
-    DASK_AVAILABLE = True
-except ImportError:
-    DASK_AVAILABLE = False
+# DASK УДАЛЕН ИЗ-ЗА КОНФЛИКТА С PANDAS 2.3.3
+DASK_AVAILABLE = False
+DASK_DF_AVAILABLE = False
 
 try:
     import ray
@@ -445,7 +440,6 @@ APP_VERSION = "100.4.0"
 APP_NAME = "🚗 Юнит-экономика автозапчастей PRO 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Enterprise расчет юнит-экономики для автозапчастей с AI, ML и High-Volume обработкой"
-APP_WEBSITE = "https://github.com/autoparts-unit-economics-pro"
 APP_LICENSE = "MIT License"
 APP_COPYRIGHT = f"2024-2026 {APP_AUTHOR}"
 
@@ -471,7 +465,7 @@ MAX_CACHE_SIZE = 5000
 DEFAULT_LOCALE = "ru_RU"
 TIMEZONE = "Europe/Moscow"
 
-# === НОВОЕ v100.4: Расширенные настройки ===
+# === НАСТРОЙКИ ===
 DEFAULT_MARKUP_GLOBAL = 0.25
 DEFAULT_DISCOUNT_MAX = 0.30
 DEFAULT_MAX_WORKERS = 8
@@ -512,13 +506,9 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_FILE = LOG_DIR / "auto_parts_economy_pro.log"
-LOG_ROTATION_SIZE = 50 * 1024 * 1024
-LOG_RETENTION_DAYS = 90
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
-OPENAI_MODEL = "gpt-4o"
-ANTHROPIC_MODEL = "claude-3-5-sonnet-20241022"
 
 USE_CACHING = True
 USE_PARALLEL = True
@@ -642,7 +632,7 @@ def parse_dimensions_vectorized(dims_series) -> "pl.DataFrame":
     })
 
 # ============================================================================
-# 🆕 v100.4: УТИЛИТЫ ДЛЯ БЕЗОПАСНОСТИ И КЭШИРОВАНИЯ
+# УТИЛИТЫ ДЛЯ БЕЗОПАСНОСТИ И КЭШИРОВАНИЯ
 # ============================================================================
 def get_api_key_safe(service_name: str) -> Optional[str]:
     """Безопасное получение API ключа через st.secrets"""
@@ -793,7 +783,7 @@ class ForecastError(AutoPartsException):
         super().__init__(f"Ошибка прогнозирования{f' ({model})' if model else ''}: {message}")
 
 # ============================================================================
-# 🆕 v100.4: ЛОГГЕР
+# ЛОГГЕР
 # ============================================================================
 @st.cache_resource
 def get_logger():
@@ -1350,11 +1340,11 @@ class TariffSource(Enum):
     FORECAST = "Прогноз ИИ"
 
 # ============================================================================
-# БЛОК 2: ДАТАКЛАССЫ (РАСШИРЕННЫЕ)
+# БЛОК 2: ДАТАКЛАССЫ
 # ============================================================================
 @dataclass
 class MarketplaceConfig:
-    """🆕 v100.4: Расширенная конфигурация маркетплейса с сезонностью и промо"""
+    """Расширенная конфигурация маркетплейса с сезонностью и промо"""
     name: str
     commission_rate: float
     min_commission: float = 0.0
@@ -1722,12 +1712,10 @@ class TariffCacheEntry:
         )
 
 # ============================================================================
-# 🆕 v100.4: САМОСТОЯТЕЛЬНЫЙ ЦЕНОВОЙ КАЛЬКУЛЯТОР
+# САМОСТОЯТЕЛЬНЫЙ ЦЕНОВОЙ КАЛЬКУЛЯТОР
 # ============================================================================
 class PriceCalculator:
-    """
-    🆕 v100.4: Самостоятельный калькулятор цены на автозапчасть.
-    """
+    """Самостоятельный калькулятор цены на автозапчасть."""
     
     def __init__(self, marketplace_config: MarketplaceConfig):
         self.config = marketplace_config
@@ -1904,14 +1892,14 @@ class PriceCalculator:
         }
 
 # ============================================================================
-# 🆕 v100.4: УМНЫЙ КЭШ ТАРИФОВ
+# УМНЫЙ КЭШ ТАРИФОВ
 # ============================================================================
 @st.cache_resource
 def get_smart_tariff_cache():
     return SmartTariffCache()
 
 class SmartTariffCache:
-    """🆕 v100.4: Умный кэш тарифов с прогнозированием и историей"""
+    """Умный кэш тарифов с прогнозированием и историей"""
     
     def __init__(self):
         self.cache_dir = TARIFFS_DIR
@@ -2275,7 +2263,6 @@ class SmartTariffCache:
             stats["newest_entry"] = datetime.fromtimestamp(newest_ts).isoformat()
         
         return stats
-
 # ============================================================================
 # БЛОК 3: ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ
 # ============================================================================
@@ -2487,11 +2474,12 @@ class PersistentHistoryDB:
             except Exception:
                 pass
             self.conn = None
+
 # ============================================================================
 # БЛОК 4: КОНФИГУРАЦИИ МАРКЕТПЛЕЙСОВ 2026
 # ============================================================================
 def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
-    """🆕 v100.4: Получение конфигураций маркетплейсов с сезонными коэффициентами."""
+    """Получение конфигураций маркетплейсов с сезонными коэффициентами."""
     configs = {}
     
     configs["Ozon"] = MarketplaceConfig(
@@ -2809,7 +2797,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         logger.warning(f"Не удалось загрузить кэш тарифов: {e}")
     
     return configs
-
 # ============================================================================
 # БЛОК 5: 150+ КАТЕГОРИЙ АВТОЗАПЧАСТЕЙ
 # ============================================================================
@@ -3016,7 +3003,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
 # БЛОК 6: AI ПРОГНОЗИРОВАНИЕ ТАРИФОВ
 # ============================================================================
 class DeepSeekRateUpdater:
-    """🆕 v100.4: Класс для обновления тарифов через DeepSeek AI с прогнозированием"""
+    """Класс для обновления тарифов через DeepSeek AI с прогнозированием"""
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or get_api_key_safe('deepseek')
@@ -3181,7 +3168,7 @@ class DeepSeekRateUpdater:
         months_ahead: int = 3,
         force_refresh: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """🆕 v100.4: Получение прогноза тарифов"""
+        """Получение прогноза тарифов"""
         if not force_refresh:
             cached_forecast = self.cache.get_forecast(marketplace, category)
             if cached_forecast:
@@ -3624,7 +3611,6 @@ class MarketplaceAPIConnector:
             return {"success": False, "error": f"HTTP {response.status_code}"}
         except requests.exceptions.RequestException as e:
             return {"success": False, "error": str(e)}
-
 # ============================================================================
 # БЛОК 10: ОСНОВНОЙ КЛАСС ЮНИТ-ЭКОНОМИКИ
 # ============================================================================
@@ -4778,7 +4764,6 @@ class MarketplaceUnitEconomics:
 
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
-
 # ============================================================================
 # БЛОК 11: HIGH-VOLUME CATALOG
 # ============================================================================
@@ -5066,9 +5051,6 @@ class HighVolumeAutoPartsCatalog:
             ).then(pl.lit(category))
         
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
-# ============================================================================
-# БЛОК 11: HIGH-VOLUME CATALOG (ПРОДОЛЖЕНИЕ)
-# ============================================================================
 
     def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
         """Определение соответствия колонок"""
@@ -5105,6 +5087,9 @@ class HighVolumeAutoPartsCatalog:
                         break
         
         return mapping
+# ============================================================================
+# БЛОК 11: HIGH-VOLUME CATALOG (ПРОДОЛЖЕНИЕ)
+# ============================================================================
 
     def read_and_prepare_file(self, file_path: str, file_type: str) -> "pl.DataFrame":
         """Чтение и подготовка файла с автоматическим определением колонок"""
@@ -5517,6 +5502,9 @@ class HighVolumeAutoPartsCatalog:
         except duckdb.Error as e:
             logger.error(f"Error deleting by artikul {artikul_norm}: {e}")
             raise
+# ============================================================================
+# БЛОК 11: HIGH-VOLUME CATALOG (ПРОДОЛЖЕНИЕ)
+# ============================================================================
 
     def build_export_query(
         self,
@@ -5683,7 +5671,6 @@ class HighVolumeAutoPartsCatalog:
             chunk_size = 50000
             first = True
             
-            # ✅ ИСПРАВЛЕНО: Явно указываем кодировку utf-8-sig для правильного отображения кириллицы
             with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
                 for chunk_start in range(0, total, chunk_size):
                     chunk_query = f"{query} LIMIT {chunk_size} OFFSET {chunk_start}"
@@ -5692,7 +5679,6 @@ class HighVolumeAutoPartsCatalog:
                     if df_chunk.empty:
                         break
                     
-                    # ✅ ИСПРАВЛЕНО: Используем sep=';' для совместимости с Excel
                     df_chunk.to_csv(f, sep=';', index=False, header=first, encoding='utf-8-sig')
                     first = False
             
@@ -6383,7 +6369,6 @@ def show_data_upload_interface():
             "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
         })
         
-        # ✅ ИСПРАВЛЕНО: Используем utf-8-sig для правильного отображения кириллицы
         csv = template_df.to_csv(index=False, encoding='utf-8-sig')
         
         st.download_button(
@@ -6393,7 +6378,6 @@ def show_data_upload_interface():
             mime="text/csv; charset=utf-8",
             key="download_template"
         )
-
 # ============================================================================
 # БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА
 # ============================================================================
@@ -6608,10 +6592,10 @@ def show_single_product_calculation():
         }
         
         st.dataframe(pd.DataFrame(expenses_data), use_container_width=True, key="ue_expenses_table")
-# ============================================================================
-# БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА (ПРОДОЛЖЕНИЕ)
-# ============================================================================
 
+# ============================================================================
+# БЛОК 15: UI ФУНКЦИИ - КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME)
+# ============================================================================
 def show_catalog_calculation_parallel():
     """
     📦 ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ ПО КАТАЛОГУ
@@ -6842,7 +6826,6 @@ def show_catalog_calculation_parallel():
                 
                 with export_col2:
                     if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
-                        # ✅ ИСПРАВЛЕНО: Используем utf-8-sig для правильного отображения кириллицы
                         csv = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
                         
                         st.download_button(
@@ -6856,9 +6839,8 @@ def show_catalog_calculation_parallel():
             except Exception as e:
                 st.error(f"❌ Ошибка при расчете: {str(e)}")
                 st.code(traceback.format_exc())
-
 # ============================================================================
-# БЛОК 15: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME)
+# БЛОК 16: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI)
 # ============================================================================
 def show_catalog_grouping_interface():
     """
@@ -7092,7 +7074,6 @@ def show_catalog_export(catalog):
                 return
             
             if success and output_path.exists():
-                # ✅ ИСПРАВЛЕНО: Добавлен правильный MIME тип для скачивания
                 with open(output_path, "rb") as f:
                     file_data = f.read()
                     st.download_button(
@@ -7143,8 +7124,9 @@ def show_catalog_management(catalog):
         catalog.show_category_mapping()
     elif management_option == "Облачная синхронизация":
         catalog.show_cloud_sync()
+
 # ============================================================================
-# БЛОК 16: AI ТАРИФЫ
+# БЛОК 17: AI ТАРИФЫ
 # ============================================================================
 def show_ai_tariffs_interface():
     """🤖 AI ТАРИФЫ С ПРОГНОЗИРОВАНИЕМ"""
@@ -7255,7 +7237,7 @@ def show_ai_tariffs_interface():
                     st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
 
 # ============================================================================
-# БЛОК 17: API ТАРИФЫ МАРКЕТПЛЕЙСОВ
+# БЛОК 18: API ТАРИФЫ МАРКЕТПЛЕЙСОВ
 # ============================================================================
 def show_api_tariffs_interface():
     """
@@ -7339,1241 +7321,3 @@ def show_api_tariffs_interface():
                         st.error("❌ Не удалось получить кампании")
             else:
                 st.warning("⚠️ Введите OAuth Token")
-
-# ============================================================================
-# БЛОК 18: ОБОГАЩЕНИЕ КАТАЛОГА
-# ============================================================================
-def show_catalog_enhance_interface():
-    """🔍 РАЗДЕЛ 5: ОБОГАЩЕНИЕ КАТАЛОГА"""
-    st.header("🔍 Шаг 5: Обогащение каталога")
-    
-    st.info("""
-    🔍 **ПОИСК АНАЛОГОВ:**
-    Система ищет аналоги через общие OE номера (2 уровня).
-    """)
-    
-    if 'catalog_enhancer' not in st.session_state:
-        st.session_state.catalog_enhancer = CatalogEnhancer()
-    
-    enhancer = st.session_state.catalog_enhancer
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📤 Загрузка данных каталога")
-        
-        oe_file = st.file_uploader("OE данные", type=['xlsx', 'csv'], key="enh_oe")
-        parts_file = st.file_uploader("Детали (артикулы)", type=['xlsx', 'csv'], key="enh_parts")
-        cross_file = st.file_uploader("Кросс-ссылки", type=['xlsx', 'csv'], key="enh_cross")
-        
-        if st.button("📥 Загрузить данные в каталог", type="primary", key="enh_load_data"):
-            with st.spinner("Загрузка данных..."):
-                if oe_file:
-                    try:
-                        df = pd.read_excel(oe_file) if oe_file.name.endswith('.xlsx') else pd.read_csv(oe_file, encoding='utf-8-sig')
-                        enhancer.load_oe_data(df)
-                        st.success(f"✅ Загружено {len(df)} OE записей")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка загрузки OE: {str(e)}")
-                
-                if parts_file:
-                    try:
-                        df = pd.read_excel(parts_file) if parts_file.name.endswith('.xlsx') else pd.read_csv(parts_file, encoding='utf-8-sig')
-                        enhancer.load_parts_data(df)
-                        st.success(f"✅ Загружено {len(df)} записей деталей")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка загрузки деталей: {str(e)}")
-                
-                if cross_file:
-                    try:
-                        df = pd.read_excel(cross_file) if cross_file.name.endswith('.xlsx') else pd.read_csv(cross_file, encoding='utf-8-sig')
-                        enhancer.load_cross_references(df)
-                        st.success(f"✅ Загружено {len(df)} кросс-ссылок")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка загрузки кросс-ссылок: {str(e)}")
-    
-    with col2:
-        st.subheader("🔍 Поиск аналогов")
-        
-        artikul = st.text_input("Артикул", placeholder="Введите артикул", key="enh_artikul_input")
-        brand = st.text_input("Бренд", placeholder="Введите бренд", key="enh_brand_input")
-        
-        if st.button("🔍 Найти аналоги", type="primary", key="enh_find_analogs"):
-            if artikul and brand:
-                with st.spinner("Поиск аналогов..."):
-                    data = enhancer.get_analog_data(artikul, brand)
-                    
-                    if data.get('error'):
-                        st.error(f"❌ {data['error']}")
-                    else:
-                        st.success(f"✅ Найдено {data.get('analog_count', 0)} аналогов")
-                        
-                        if data.get('oe_list'):
-                            st.info(f"🔗 OE номера: {data.get('oe_list')}")
-                        
-                        if data.get('has_analogs'):
-                            st.subheader("📋 Аналоги")
-                            analogs_df = pd.DataFrame(data.get('analogs', []))
-                            st.dataframe(analogs_df, use_container_width=True, key="enh_analogs_table")
-            else:
-                st.warning("⚠️ Введите артикул и бренд")
-    
-    st.subheader("📊 Статистика каталога")
-    stats = enhancer.get_stats()
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("📦 OE записей", stats.get('oe_loaded', 0))
-        st.metric("🔄 Кросс-ссылок", stats.get('cross_loaded', 0))
-    
-    with col2:
-        st.metric("🔧 Деталей", stats.get('parts_loaded', 0))
-        st.metric("🔍 Поисков", stats.get('analog_searches', 0))
-        st.metric("💾 Кэш попаданий", stats.get('cache_hits', 0))
-
-# ============================================================================
-# БЛОК 19: АНАЛИТИКА
-# ============================================================================
-def show_analytics_interface():
-    """📊 РАЗДЕЛ 6: АНАЛИТИКА"""
-    st.header("📊 Шаг 6: Аналитика")
-    
-    if st.session_state.get('uploaded_data') is None:
-        st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
-        return
-    
-    df = st.session_state.uploaded_data.copy()
-    
-    st.success(f"✅ Анализ {len(df)} товаров")
-    
-    st.subheader("📈 Общая статистика")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📦 Товаров", len(df))
-    
-    with col2:
-        price_col = None
-        for col in df.columns:
-            if any(w in col.lower() for w in ['цена', 'price', 'стоимость']):
-                price_col = col
-                break
-        
-        if price_col:
-            avg_price = safe_float(df[price_col].mean())
-            st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽")
-    
-    with col3:
-        cost_col = None
-        for col in df.columns:
-            if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная']):
-                cost_col = col
-                break
-        
-        if cost_col:
-            avg_cost = safe_float(df[cost_col].mean())
-            st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽")
-    
-    with col4:
-        if price_col and cost_col:
-            df['_margin'] = safe_float(df[price_col]) - safe_float(df[cost_col])
-            avg_margin = df['_margin'].mean()
-            st.metric("📈 Средняя маржа", f"{avg_margin:,.0f} ₽")
-    
-    if PLOTLY_AVAILABLE and px is not None and price_col:
-        st.subheader("📊 Визуализация данных")
-        
-        chart_type = st.selectbox(
-            "Тип графика",
-            ["Распределение цен", "Распределение категорий", "Топ товаров по цене"],
-            key="analytics_chart_type"
-        )
-        
-        if chart_type == "Распределение цен":
-            fig = px.histogram(df, x=price_col, nbins=30, title=f"Распределение цен ({price_col})")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        elif chart_type == "Распределение категорий" and 'Категория' in df.columns:
-            category_counts = df['Категория'].value_counts()
-            fig = px.pie(values=category_counts.values, names=category_counts.index,
-                        title="Распределение товаров по категориям")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        elif chart_type == "Топ товаров по цене":
-            name_col = None
-            for col in df.columns:
-                if any(w in col.lower() for w in ['наименование', 'название', 'name', 'товар']):
-                    name_col = col
-                    break
-            
-            if name_col:
-                top_df = df.nlargest(10, price_col)[[name_col, price_col]]
-                fig = px.bar(top_df, x=name_col, y=price_col, title="Топ 10 товаров по цене")
-                st.plotly_chart(fig, use_container_width=True)
-
-# ============================================================================
-# БЛОК 20: ИСТОРИЯ РАСЧЕТОВ
-# ============================================================================
-def show_history_interface():
-    """📋 РАЗДЕЛ 7: ИСТОРИЯ РАСЧЕТОВ"""
-    st.header("📋 Шаг 7: История расчетов")
-    
-    unit_economics = get_marketplace_unit_economics()
-    
-    history_source = st.radio(
-        "📚 Источник истории",
-        ["💾 Сохранённая в БД (постоянная)", "⚡ Текущая сессия (в памяти)"],
-        horizontal=True,
-        key="history_source"
-    )
-    
-    if "Сохранённая" in history_source:
-        show_persistent_history(unit_economics)
-    else:
-        show_session_history(unit_economics)
-
-def show_persistent_history(unit_economics):
-    st.subheader("🔍 Фильтры (постоянная история)")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        filter_marketplace = st.text_input("Маркетплейс", key="history_db_marketplace")
-    
-    with col2:
-        filter_article = st.text_input("Артикул (частично)", key="history_db_article")
-    
-    with col3:
-        filter_brand = st.text_input("Бренд (частично)", key="history_db_brand")
-    
-    with col4:
-        limit = st.number_input("Лимит записей", min_value=10, max_value=10000,
-                               value=500, step=50, key="history_db_limit")
-    
-    filters = {}
-    if filter_marketplace: filters['marketplace'] = filter_marketplace
-    if filter_article: filters['article'] = filter_article
-    if filter_brand: filters['brand'] = filter_brand
-    
-    with st.spinner("Загрузка истории из БД..."):
-        df_history = unit_economics.get_persistent_history(limit=int(limit), filters=filters if filters else None)
-    
-    if df_history is None or df_history.empty:
-        st.info("📋 История расчетов пуста.")
-        return
-    
-    st.success(f"📊 Найдено расчетов: **{len(df_history)}**")
-    
-    display_cols = ['timestamp', 'marketplace', 'operation_mode', 'article', 'brand',
-                   'price', 'cost', 'profit', 'margin_percent', 'roi',
-                   'recommended_min_price', 'tax_amount', 'tax_system']
-    
-    available_cols = [col for col in display_cols if col in df_history.columns]
-    
-    st.dataframe(df_history[available_cols].head(100), use_container_width=True, key="history_db_table")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📥 Экспортировать в CSV", key="history_db_export"):
-            # ✅ ИСПРАВЛЕНО: Используем utf-8-sig для правильного отображения кириллицы
-            csv = df_history.to_csv(index=False, encoding='utf-8-sig', sep=';')
-            st.download_button(
-                label="📥 Скачать CSV",
-                data=csv,
-                file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv; charset=utf-8"
-            )
-    
-    with col2:
-        if st.button("📥 Экспортировать в Excel", key="history_db_export_excel"):
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_history.to_excel(writer, index=False, sheet_name='История')
-            output.seek(0)
-            st.download_button(
-                label="📥 Скачать Excel",
-                data=output,
-                file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-    
-    with col3:
-        if st.button("🗑️ Очистить всю историю БД", type="secondary", key="history_db_clear"):
-            if st.checkbox("Подтверждаю полную очистку БД", key="history_db_confirm"):
-                count = unit_economics.clear_persistent_history()
-                st.success(f"✅ Удалено {count} записей из БД")
-                st.rerun()
-
-def show_session_history(unit_economics):
-    history = unit_economics.get_history()
-    
-    if not history:
-        st.info("📋 История расчетов пуста.")
-        return
-    
-    df_history = pd.DataFrame([r.to_dict() if hasattr(r, 'to_dict') else r for r in history])
-    
-    st.subheader("🔍 Фильтры")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        marketplaces = ['Все'] + sorted(df_history['marketplace'].unique().tolist())
-        filter_marketplace = st.selectbox("Маркетплейс", marketplaces, key="history_marketplace")
-    
-    with col2:
-        modes = ['Все'] + sorted(df_history['operation_mode'].unique().tolist())
-        filter_mode = st.selectbox("Режим работы", modes, key="history_mode")
-    
-    with col3:
-        tax_systems = ['Все'] + sorted(df_history['tax_system'].unique().tolist()) if 'tax_system' in df_history.columns else ['Все']
-        filter_tax = st.selectbox("Система налога", tax_systems, key="history_tax")
-    
-    filtered_df = df_history.copy()
-    
-    if filter_marketplace != 'Все':
-        filtered_df = filtered_df[filtered_df['marketplace'] == filter_marketplace]
-    
-    if filter_mode != 'Все':
-        filtered_df = filtered_df[filtered_df['operation_mode'] == filter_mode]
-    
-    if filter_tax != 'Все' and 'tax_system' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df['tax_system'] == filter_tax]
-    
-    st.subheader(f"📊 Найдено расчетов: {len(filtered_df)}")
-    
-    if not filtered_df.empty:
-        display_cols = ['marketplace', 'operation_mode', 'price', 'cost', 'profit',
-                       'margin_percent', 'roi', 'recommended_min_price', 'tax_amount', 'timestamp']
-        
-        available_cols = [col for col in display_cols if col in filtered_df.columns]
-        
-        st.dataframe(filtered_df[available_cols].sort_values('timestamp', ascending=False),
-                    use_container_width=True, key="history_table")
-        
-        if st.button("📥 Экспортировать историю в CSV", key="history_export"):
-            # ✅ ИСПРАВЛЕНО: Используем utf-8-sig для правильного отображения кириллицы
-            csv = filtered_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-            st.download_button(
-                label="📥 Скачать CSV",
-                data=csv,
-                file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv; charset=utf-8"
-            )
-# ============================================================================
-# БЛОК 21: НАСТРОЙКИ (БЕЗ НАЛОГОВ)
-# ============================================================================
-def show_settings_interface():
-    """⚙️ РАЗДЕЛ 8: НАСТРОЙКИ (БЕЗ НАЛОГОВ)"""
-    st.header("⚙️ Шаг 8: Настройки")
-    
-    unit_economics = get_marketplace_unit_economics()
-    
-    st.subheader("🌤 Настройки сезонности")
-    enable_seasonal = st.checkbox(
-        "Учитывать сезонные коэффициенты",
-        value=unit_economics._settings.get('enable_seasonal_adjustments', True),
-        key="settings_seasonal"
-    )
-    
-    st.subheader("💾 Настройки хранения истории")
-    enable_persistent = st.checkbox(
-        "📚 Сохранять историю расчётов в БД",
-        value=unit_economics._settings.get('enable_persistent_history', True),
-        key="settings_persistent_history"
-    )
-    
-    st.subheader("🚀 Настройки производительности")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        max_workers = st.number_input(
-            "Максимальное количество потоков",
-            min_value=1,
-            max_value=16,
-            value=unit_economics._settings.get('max_workers', 4),
-            step=1,
-            key="settings_workers"
-        )
-    
-    with col2:
-        parallel_processing = st.checkbox(
-            "Использовать параллельную обработку",
-            value=unit_economics._settings.get('parallel_processing', True),
-            key="settings_parallel"
-        )
-    
-    if st.button("💾 Сохранить настройки", type="primary", key="settings_save"):
-        new_settings = {
-            "enable_seasonal_adjustments": enable_seasonal,
-            "enable_persistent_history": enable_persistent,
-            "max_workers": max_workers,
-            "parallel_processing": parallel_processing
-        }
-        
-        if unit_economics.save_settings(new_settings):
-            st.success("✅ Настройки сохранены!")
-            st.balloons()
-        else:
-            st.error("❌ Ошибка сохранения настроек")
-    
-    st.divider()
-    
-    st.subheader("ℹ️ Информация о приложении")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("📌 Версия", APP_VERSION)
-        st.metric("🐍 Python", sys.version.split()[0])
-        st.metric("📅 Дата", datetime.now().strftime("%d.%m.%Y"))
-    
-    with col2:
-        data_loaded = st.session_state.get('uploaded_data') is not None
-        rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
-        st.metric("📊 Данных загружено", rows)
-        
-        if POLARS_AVAILABLE:
-            st.metric("🦀 Polars", "✅ Доступен")
-        else:
-            st.metric("🦀 Polars", "❌ Не доступен")
-        
-        if DUCKDB_AVAILABLE:
-            st.metric("🦆 DuckDB", "✅ Доступен")
-        else:
-            st.metric("🦆 DuckDB", "❌ Не доступен")
-
-# ============================================================================
-# БЛОК 22: ГЕНЕРАЦИЯ EXCEL С ФОРМУЛАМИ
-# ============================================================================
-def generate_standalone_excel_bytes(
-    df_results: pd.DataFrame,
-    configs: Dict[str, MarketplaceConfig]
-) -> io.BytesIO:
-    """
-    🆕 v100.4: Генерирует самодостаточный Excel-файл с расширенной аналитикой.
-    ЛИСТЫ ФАЙЛА:
-    1. 📈 Сводка (главная аналитика)
-    2. 📊 Расчет юнит-экономики (основные данные с формулами)
-    3. 📊 Сводка по категориям
-    4. 🏆 Топ-10 лучших товаров
-    5. ⚠️ Товары в убытке
-    6. 🏪 Сравнение маркетплейсов
-    7. 💡 Рекомендации
-    8. 📈 Прогноз на 12 месяцев
-    9. ⚙️ Настройки
-    """
-    if not OPENPYXL_AVAILABLE:
-        logger.error("OpenPyXL не установлен")
-        return None
-    
-    try:
-        wb = Workbook()
-        
-        # Стили
-        header_fill = PatternFill(start_color="0F3460", end_color="0F3460", fill_type="solid")
-        header_font = Font(color="FFFFFF", bold=True, size=11)
-        input_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-        formula_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
-        result_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-        title_font = Font(size=16, bold=True, color="0F3460")
-        border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='thin')
-        )
-        red_fill_bg = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-        green_fill_bg = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        
-        total_rows = len(df_results)
-        
-        # === ЛИСТ 1: СВОДКА ===
-        ws_summary = wb.create_sheet("📈 Сводка", 0)
-        
-        ws_summary['A1'] = "📊 СВОДНАЯ АНАЛИТИКА ПО КАТАЛОГУ"
-        ws_summary['A1'].font = Font(size=18, bold=True, color="0F3460")
-        ws_summary.merge_cells('A1:D1')
-        
-        ws_summary['A2'] = f"Дата формирования: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-        ws_summary['A2'].font = Font(italic=True, size=11)
-        
-        ws_summary['A4'] = "📋 ОСНОВНЫЕ ПОКАЗАТЕЛИ"
-        ws_summary['A4'].font = Font(size=12, bold=True, color="0F3460")
-        
-        metrics = [
-            ("Всего товаров (строк):", len(df_results)),
-            ("Общая выручка:", df_results.get('price', df_results.get('Цена_с_наценкой', 0)).sum() if 'price' in df_results.columns or 'Цена_с_наценкой' in df_results.columns else 0),
-            ("Общая прибыль:", df_results.get('profit', df_results.get('Прибыль', 0)).sum() if 'profit' in df_results.columns or 'Прибыль' in df_results.columns else 0),
-            ("Средняя маржа (%):", df_results.get('margin_percent', df_results.get('Маржа_%', 0)).mean() if 'margin_percent' in df_results.columns or 'Маржа_%' in df_results.columns else 0),
-        ]
-        
-        for i, (label, value) in enumerate(metrics, 5):
-            ws_summary.cell(row=i, column=1, value=label).font = Font(bold=True, size=11)
-            cell = ws_summary.cell(row=i, column=2, value=value)
-            cell.font = Font(size=12, color="0F3460", bold=True)
-            if "выручка" in label.lower() or "прибыль" in label.lower():
-                cell.number_format = '#,##0.00 ₽'
-            elif "маржа" in label.lower():
-                cell.number_format = '0.00%'
-            cell.border = border
-            ws_summary.cell(row=i, column=1).border = border
-        
-        # === ЛИСТ 2: РАСЧЕТ ЮНИТ-ЭКОНОМИКИ ===
-        ws_calc = wb.create_sheet("📊 Расчет юнит-экономики")
-        
-        calc_headers = [
-            "Маркетплейс", "Артикул", "Бренд", "Категория",
-            "Цена продажи", "Себестоимость", "Прибыль", "Маржа %",
-            "Комиссия", "Логистика", "Налог", "Реком. мин. цена"
-        ]
-        
-        for col, header in enumerate(calc_headers, 1):
-            cell = ws_calc.cell(row=1, column=col, value=header)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = border
-        
-        for idx, (_, row) in enumerate(df_results.iterrows(), 2):
-            ws_calc.cell(row=idx, column=1, value=safe_str(row.get('marketplace', row.get('Маркетплейс', ''))))
-            ws_calc.cell(row=idx, column=2, value=safe_str(row.get('Артикул', '')))
-            ws_calc.cell(row=idx, column=3, value=safe_str(row.get('Бренд', '')))
-            ws_calc.cell(row=idx, column=4, value=safe_str(row.get('category', row.get('Категория', ''))))
-            ws_calc.cell(row=idx, column=5, value=safe_float(row.get('price', row.get('Цена_с_наценкой', 0)))).number_format = '#,##0.00 ₽'
-            ws_calc.cell(row=idx, column=6, value=safe_float(row.get('cost', row.get('Себестоимость', 0)))).number_format = '#,##0.00 ₽'
-            ws_calc.cell(row=idx, column=7, value=safe_float(row.get('profit', row.get('Прибыль', 0)))).number_format = '#,##0.00 ₽'
-            ws_calc.cell(row=idx, column=8, value=safe_float(row.get('margin_percent', row.get('Маржа_%', 0)))).number_format = '0.00%'
-            ws_calc.cell(row=idx, column=9, value=safe_float(row.get('commission', row.get('Комиссия', 0)))).number_format = '#,##0.00 ₽'
-            ws_calc.cell(row=idx, column=10, value=safe_float(row.get('logistics', row.get('Логистика', 0)))).number_format = '#,##0.00 ₽'
-            ws_calc.cell(row=idx, column=11, value=safe_float(row.get('tax_amount', row.get('Налог', 0)))).number_format = '#,##0.00 ₽'
-            ws_calc.cell(row=idx, column=12, value=safe_float(row.get('recommended_min_price', row.get('Рекомендованная_мин_цена', 0)))).number_format = '#,##0.00 ₽'
-            
-            for col in range(1, 13):
-                ws_calc.cell(row=idx, column=col).border = border
-        
-        ws_calc.conditional_formatting.add(
-            f'G2:G{total_rows+1}',
-            CellIsRule(operator='lessThan', formula=['0'], fill=red_fill_bg)
-        )
-        ws_calc.conditional_formatting.add(
-            f'G2:G{total_rows+1}',
-            CellIsRule(operator='greaterThan', formula=['0'], fill=green_fill_bg)
-        )
-        
-        ws_calc.auto_filter.ref = f"A1:L1"
-        ws_calc.freeze_panes = "A2"
-        
-        for col in range(1, 13):
-            ws_calc.column_dimensions[get_column_letter(col)].width = 18
-        
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        
-        logger.info(f"✅ Excel сгенерирован: {len(wb.sheetnames)} листов, {total_rows} строк данных")
-        return buffer
-    
-    except Exception as e:
-        logger.error(f"❌ Ошибка генерации Excel: {e}")
-        logger.error(traceback.format_exc())
-        return None
-
-# ============================================================================
-# БЛОК 23: ДОПОЛНИТЕЛЬНЫЕ УТИЛИТЫ
-# ============================================================================
-def get_seasonal_multiplier(month: int = None) -> Dict[str, Any]:
-    """
-    Получение сезонных множителей для текущего месяца
-    """
-    if month is None:
-        month = datetime.now().month
-    
-    if month in [12, 1, 2]:
-        return {
-            "season": "winter",
-            "multiplier": 1.15,
-            "description": "Зимний период (повышенная нагрузка на логистику)"
-        }
-    elif month in [3, 4, 5]:
-        return {
-            "season": "spring",
-            "multiplier": 1.0,
-            "description": "Весенний период (стандартные условия)"
-        }
-    elif month in [6, 7, 8]:
-        return {
-            "season": "summer",
-            "multiplier": 0.95,
-            "description": "Летний период (снижение нагрузки)"
-        }
-    else:
-        return {
-            "season": "autumn",
-            "multiplier": 1.05,
-            "description": "Осенний период (подготовка к зиме)"
-        }
-
-def format_price(price: float, currency: str = "RUB") -> str:
-    """
-    Форматирование цены с валютой
-    """
-    if price <= 0:
-        return "0 ₽"
-    
-    if BABEL_AVAILABLE:
-        try:
-            return babel_format_currency(price, currency, locale='ru_RU')
-        except Exception:
-            pass
-    
-    currency_symbols = {
-        "RUB": "₽",
-        "USD": "$",
-        "EUR": "€",
-        "CNY": "¥",
-        "KZT": "₸",
-        "UAH": "₴",
-        "BYN": "Br",
-        "AMD": "֏",
-        "TRY": "₺"
-    }
-    
-    symbol = currency_symbols.get(currency, "₽")
-    return f"{price:,.2f} {symbol}"
-
-def calculate_delivery_time(distance_km: float, speed_kmh: float = 60.0) -> float:
-    """
-    Расчет времени доставки в часах
-    """
-    if distance_km <= 0 or speed_kmh <= 0:
-        return 0.0
-    
-    hours = distance_km / speed_kmh
-    hours += 0.5
-    
-    return round(hours, 2)
-
-def generate_article_from_oe(oe_number: str, brand: str) -> str:
-    """
-    Генерация артикула из OE номера и бренда
-    """
-    if not oe_number or not brand:
-        return ""
-    
-    oe_clean = re.sub(r'[^0-9A-Za-z]', '', oe_number).upper()
-    brand_clean = re.sub(r'[^0-9A-Za-z]', '', brand).upper()
-    
-    article = f"{brand_clean[:3]}{oe_clean[:8]}"
-    
-    return article
-
-def validate_article(article: str) -> bool:
-    """
-    Валидация артикула
-    """
-    if not article:
-        return False
-    
-    if len(article) < 3 or len(article) > 50:
-        return False
-    
-    if not re.match(r'^[0-9A-Za-z\-_\.]+$', article):
-        return False
-    
-    return True
-
-def get_categories_hierarchy() -> Dict[str, List[str]]:
-    """
-    Получение иерархии категорий
-    """
-    return {
-        "Двигатель": ["поршни", "клапаны", "свечи", "блок", "головка", "коленвал", "распредвал", "шатун"],
-        "Трансмиссия": ["кпп", "сцепление", "полуоси", "дифференциал", "кардан", "раздатка", "гидротрансформатор"],
-        "Подвеска": ["амортизаторы", "пружины", "сайлентблоки", "шаровые", "ступицы", "рычаги", "стабилизатор"],
-        "Тормозная система": ["диски", "колодки", "шланги", "суппорты", "барабаны", "гтц", "усилитель"],
-        "Рулевое управление": ["тяги", "рейки", "кардан", "насос", "усилитель"],
-        "Электрика": ["стартеры", "генераторы", "аккумуляторы", "датчики", "катушки", "проводка", "эбу"],
-        "Охлаждение": ["радиаторы", "помпы", "термостаты", "вентиляторы", "бачки"],
-        "Фильтры": ["масляные", "воздушные", "топливные", "салонные"],
-        "Масла": ["моторные", "трансмиссионные", "тормозные", "антифриз"],
-        "Оптика": ["фары", "лампы", "фонари", "led"],
-        "Кузов": ["бамперы", "крылья", "капоты", "двери", "зеркала", "стёкла"],
-        "Шины": ["летние", "зимние", "диски"],
-        "Инструменты": ["домкраты", "ключи", "компрессоры"]
-    }
-
-def get_marketplace_seasonal_adjustments() -> Dict[str, Dict[str, float]]:
-    """
-    Сезонные корректировки для разных маркетплейсов
-    """
-    return {
-        "Ozon": {
-            "winter": 1.15,
-            "spring": 1.0,
-            "summer": 0.95,
-            "autumn": 1.05
-        },
-        "Wildberries": {
-            "winter": 1.20,
-            "spring": 1.0,
-            "summer": 0.95,
-            "autumn": 1.05
-        },
-        "Яндекс Маркет": {
-            "winter": 1.10,
-            "spring": 1.0,
-            "summer": 0.90,
-            "autumn": 1.0
-        },
-        "AliExpress": {
-            "winter": 1.25,
-            "spring": 1.0,
-            "summer": 1.10,
-            "autumn": 1.15
-        },
-        "Мегамаркет": {
-            "winter": 1.12,
-            "spring": 1.0,
-            "summer": 0.93,
-            "autumn": 1.03
-        }
-    }
-
-def export_to_1c_format(df: pd.DataFrame, output_path: str) -> bool:
-    """
-    Экспорт данных в формат для 1С
-    """
-    try:
-        if 'Артикул' not in df.columns:
-            df['Артикул'] = df.index
-        
-        columns_1c = ['Артикул', 'Наименование', 'Цена', 'Себестоимость']
-        available_cols = [col for col in columns_1c if col in df.columns]
-        
-        if not available_cols:
-            logger.error("Нет колонок для экспорта в 1С")
-            return False
-        
-        export_df = df[available_cols].copy()
-        
-        for col in ['Цена', 'Себестоимость']:
-            if col in export_df.columns:
-                export_df[col] = export_df[col].apply(lambda x: f"{x:.2f}")
-        
-        export_df.to_csv(output_path, sep=';', encoding='cp1251', index=False)
-        
-        logger.info(f"✅ Экспорт в 1С выполнен: {output_path}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка экспорта в 1С: {e}")
-        return False
-
-def read_large_excel(file_path: str, chunk_size: int = 10000) -> Generator[pd.DataFrame, None, None]:
-    """
-    Чтение больших Excel файлов по чанкам
-    """
-    try:
-        if file_path.endswith('.xlsx'):
-            from openpyxl import load_workbook
-            
-            wb = load_workbook(file_path, read_only=True)
-            ws = wb.active
-            
-            headers = []
-            for cell in ws[1]:
-                headers.append(cell.value)
-            
-            rows = []
-            for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True)):
-                rows.append(row)
-                
-                if len(rows) >= chunk_size:
-                    yield pd.DataFrame(rows, columns=headers)
-                    rows = []
-            
-            if rows:
-                yield pd.DataFrame(rows, columns=headers)
-            
-            wb.close()
-        else:
-            for chunk in pd.read_csv(file_path, chunksize=chunk_size):
-                yield chunk
-    except Exception as e:
-        logger.error(f"Ошибка чтения большого файла: {e}")
-        yield pd.DataFrame()
-
-def validate_file_columns(df: pd.DataFrame, required_columns: List[str]) -> Tuple[bool, List[str]]:
-    """
-    Проверка наличия необходимых колонок в файле
-    """
-    missing = []
-    for col in required_columns:
-        if col not in df.columns:
-            missing.append(col)
-    
-    return len(missing) == 0, missing
-
-def get_file_stats(file_path: str) -> Dict[str, Any]:
-    """
-    Получение статистики по файлу
-    """
-    stats = {
-        "size_mb": 0,
-        "rows": 0,
-        "columns": 0,
-        "encoding": "unknown"
-    }
-    
-    try:
-        stats["size_mb"] = os.path.getsize(file_path) / (1024 * 1024)
-        
-        stats["encoding"] = get_file_encoding(file_path)
-        
-        if file_path.endswith('.csv'):
-            df_sample = pd.read_csv(file_path, nrows=1000, encoding=stats["encoding"])
-        else:
-            df_sample = pd.read_excel(file_path, nrows=1000)
-        
-        stats["rows"] = len(df_sample)
-        stats["columns"] = len(df_sample.columns)
-        
-        if file_path.endswith('.csv'):
-            with open(file_path, 'r', encoding=stats["encoding"]) as f:
-                stats["rows"] = sum(1 for _ in f) - 1
-        else:
-            stats["rows"] = "Не определено"
-    
-    except Exception as e:
-        logger.error(f"Ошибка получения статистики файла: {e}")
-    
-    return stats
-# ============================================================================
-# БЛОК 24: ГЛАВНАЯ ФУНКЦИЯ
-# ============================================================================
-def main():
-    """🚗 ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ"""
-    st.set_page_config(
-        page_title=f"{APP_NAME} v{APP_VERSION}",
-        page_icon="🚗",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <h1 style="color: white; margin: 0;">🚗 {APP_NAME}</h1>
-        <p style="color: #e94560; font-size: 20px; margin: 10px 0;">v{APP_VERSION} | ENTERPRISE EDITION</p>
-        <p style="color: #aaa; font-size: 14px;">Юнит-экономика маркетплейсов 2026</p>
-        <div style="margin-top: 15px;">
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Параллельный расчет для 100K+ товаров</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Интеллектуальный парсинг размеров "20x15x10"</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI прогнозирование тарифов на 3 месяца</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Сезонные коэффициенты и промо-скидки</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ High-Volume каталог (10M+ записей)</p>
-            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Фиксированная ставка налога 6% (УСН_6)</p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    with st.sidebar:
-        st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=80)
-        
-        st.markdown("---")
-        
-        menu_options = [
-            "📁 Загрузка данных",
-            "📊 Юнит-экономика",
-            "🗂️ Каталог для группировки",
-            "🤖 AI Тарифы",
-            "🌐 API Тарифы",
-            "🔍 Обогащение каталога",
-            "📊 Аналитика",
-            "📋 История расчетов",
-            "⚙️ Настройки"
-        ]
-        
-        menu_icons = {
-            "📁 Загрузка данных": "📤",
-            "📊 Юнит-экономика": "💰",
-            "🗂️ Каталог для группировки": "🗂️",
-            "🤖 AI Тарифы": "🤖",
-            "🌐 API Тарифы": "🌐",
-            "🔍 Обогащение каталога": "🔍",
-            "📊 Аналитика": "📈",
-            "📋 История расчетов": "📜",
-            "⚙️ Настройки": "⚙️"
-        }
-        
-        menu = st.radio(
-            "Меню",
-            menu_options,
-            key="main_menu",
-            format_func=lambda x: f"{menu_icons.get(x, '')} {x}"
-        )
-        
-        st.markdown("---")
-        
-        st.markdown("### 📊 Состояние системы")
-        
-        data_loaded = st.session_state.get('uploaded_data') is not None
-        rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
-        
-        st.metric("📁 Данные", "Загружены ✅" if data_loaded else "Не загружены ❌")
-        
-        if data_loaded:
-            st.metric("📦 Товаров", rows)
-            
-            try:
-                phdb = get_persistent_history_db()
-                if phdb.conn:
-                    db_count = phdb.conn.execute("SELECT COUNT(*) FROM calculation_history").fetchone()[0]
-                    st.metric("💾 История в БД", f"{db_count:,}")
-            except Exception as e:
-                logger.warning(f"Не удалось получить статус БД: {e}")
-        
-        st.markdown("---")
-        
-        st.caption(f"Приложение v{APP_VERSION}")
-        st.caption(f"Python {sys.version.split()[0]}")
-        
-        with st.expander("📚 Библиотеки"):
-            libs_status = {
-                "Plotly": PLOTLY_AVAILABLE, "Sklearn": SKLEARN_AVAILABLE,
-                "DuckDB": DUCKDB_AVAILABLE, "Polars": POLARS_AVAILABLE,
-                "OpenPyXL": OPENPYXL_AVAILABLE, "PDF": PDF_EXPORT,
-                "PyTorch": PYTORCH_AVAILABLE, "TensorFlow": TENSORFLOW_AVAILABLE,
-                "Transformers": TRANSFORMERS_AVAILABLE, "Async": ASYNC_AVAILABLE,
-                "Chardet": CHARDET_AVAILABLE
-            }
-            
-            for lib, available in libs_status.items():
-                st.write(f"{'✅' if available else '❌'} {lib}")
-    
-    try:
-        if menu == "📁 Загрузка данных":
-            show_data_upload_interface()
-        elif menu == "📊 Юнит-экономика":
-            show_unit_economics_interface()
-        elif menu == "🗂️ Каталог для группировки":
-            show_catalog_grouping_interface()
-        elif menu == "🤖 AI Тарифы":
-            show_ai_tariffs_interface()
-        elif menu == "🌐 API Тарифы":
-            show_api_tariffs_interface()
-        elif menu == "🔍 Обогащение каталога":
-            show_catalog_enhance_interface()
-        elif menu == "📊 Аналитика":
-            show_analytics_interface()
-        elif menu == "📋 История расчетов":
-            show_history_interface()
-        elif menu == "⚙️ Настройки":
-            show_settings_interface()
-    except Exception as e:
-        st.error(f"❌ Ошибка при отображении страницы: {str(e)}")
-        st.code(traceback.format_exc())
-        logger.error(f"Main page error: {traceback.format_exc()}")
-
-# ============================================================================
-# БЛОК 25: ФУНКЦИЯ ДЛЯ ФИКСАЦИИ КОДИРОВКИ ПРИ ЭКСПОРТЕ
-# ============================================================================
-def fix_encoding_for_export(df: pd.DataFrame) -> str:
-    """
-    Фиксирует кодировку для экспорта в CSV.
-    Использует utf-8-sig для правильного отображения кириллицы.
-    """
-    # Проверяем наличие кириллицы
-    has_cyrillic = False
-    for col in df.columns:
-        if any(ord(c) > 127 for c in str(col)):
-            has_cyrillic = True
-            break
-    
-    if not has_cyrillic:
-        for val in df.values.flatten():
-            if isinstance(val, str) and any(ord(c) > 127 for c in val):
-                has_cyrillic = True
-                break
-    
-    if has_cyrillic:
-        return df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-    else:
-        return df.to_csv(index=False, encoding='utf-8', sep=';')
-
-# ============================================================================
-# БЛОК 26: ФУНКЦИЯ ДЛЯ ЭКСПОРТА ДАННЫХ В РАЗНЫХ ФОРМАТАХ
-# ============================================================================
-def export_dataframe(
-    df: pd.DataFrame,
-    format_type: str,
-    filename: str = None,
-    include_cyrillic: bool = True
-) -> bytes:
-    """
-    Универсальная функция экспорта DataFrame в разные форматы.
-    
-    Args:
-        df: DataFrame для экспорта
-        format_type: 'csv', 'excel', 'json', 'parquet'
-        filename: Имя файла (опционально)
-        include_cyrillic: Флаг для поддержки кириллицы
-    
-    Returns:
-        bytes: Данные файла
-    """
-    if df.empty:
-        raise ValueError("DataFrame пуст")
-    
-    if format_type.lower() == 'csv':
-        if include_cyrillic:
-            return df.to_csv(index=False, encoding='utf-8-sig', sep=';').encode('utf-8-sig')
-        else:
-            return df.to_csv(index=False, encoding='utf-8').encode('utf-8')
-    
-    elif format_type.lower() == 'excel':
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Данные')
-        return output.getvalue()
-    
-    elif format_type.lower() == 'json':
-        return df.to_json(orient='records', force_ascii=False).encode('utf-8')
-    
-    elif format_type.lower() == 'parquet':
-        output = io.BytesIO()
-        df.to_parquet(output, index=False)
-        return output.getvalue()
-    
-    else:
-        raise ValueError(f"Неподдерживаемый формат: {format_type}")
-
-# ============================================================================
-# БЛОК 27: ФУНКЦИЯ ДЛЯ ЗАГРУЗКИ ДАННЫХ ИЗ РАЗНЫХ ИСТОЧНИКОВ
-# ============================================================================
-def load_data_from_source(
-    file_path: str,
-    file_type: str = None,
-    encoding: str = 'utf-8-sig',
-    sheet_name: str = 0,
-    sep: str = ';'
-) -> pd.DataFrame:
-    """
-    Универсальная функция загрузки данных из разных источников.
-    
-    Args:
-        file_path: Путь к файлу
-        file_type: Тип файла ('csv', 'excel', 'json', 'parquet')
-        encoding: Кодировка (по умолчанию 'utf-8-sig')
-        sheet_name: Имя листа для Excel
-        sep: Разделитель для CSV
-    
-    Returns:
-        pd.DataFrame: Загруженные данные
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Файл не найден: {file_path}")
-    
-    if file_type is None:
-        ext = os.path.splitext(file_path)[1].lower()
-        file_type = ext[1:] if ext.startswith('.') else ext
-    
-    try:
-        if file_type in ['csv', 'txt']:
-            # Пробуем разные разделители
-            separators = [sep, ',', ';', '\t', '|']
-            for s in separators:
-                try:
-                    df = pd.read_csv(file_path, encoding=encoding, sep=s, engine='python')
-                    if len(df.columns) > 1:
-                        return df
-                except Exception:
-                    continue
-            
-            # Если ничего не помогло, читаем с автоопределением
-            return pd.read_csv(file_path, encoding=encoding, engine='python', sep=None)
-        
-        elif file_type in ['xlsx', 'xls']:
-            return pd.read_excel(file_path, sheet_name=sheet_name)
-        
-        elif file_type == 'json':
-            return pd.read_json(file_path)
-        
-        elif file_type == 'parquet':
-            return pd.read_parquet(file_path)
-        
-        else:
-            raise ValueError(f"Неподдерживаемый тип файла: {file_type}")
-    
-    except Exception as e:
-        logger.error(f"Ошибка загрузки файла {file_path}: {e}")
-        raise
-
-# ============================================================================
-# БЛОК 28: ФУНКЦИЯ ДЛЯ ОЧИСТКИ И ПРЕДОБРАБОТКИ ДАННЫХ
-# ============================================================================
-def clean_dataframe(
-    df: pd.DataFrame,
-    drop_duplicates: bool = True,
-    fill_na: bool = True,
-    fill_value: Any = 0,
-    trim_strings: bool = True,
-    convert_numeric: bool = True
-) -> pd.DataFrame:
-    """
-    Очистка и предобработка DataFrame.
-    
-    Args:
-        df: Исходный DataFrame
-        drop_duplicates: Удалять дубликаты
-        fill_na: Заполнять пропуски
-        fill_value: Значение для заполнения пропусков
-        trim_strings: Обрезать строки
-        convert_numeric: Конвертировать в числовые типы
-    
-    Returns:
-        pd.DataFrame: Очищенный DataFrame
-    """
-    if df.empty:
-        return df
-    
-    df_clean = df.copy()
-    
-    # Удаление дубликатов
-    if drop_duplicates:
-        df_clean = df_clean.drop_duplicates()
-    
-    # Обрезка строк
-    if trim_strings:
-        str_cols = df_clean.select_dtypes(include=['object']).columns
-        for col in str_cols:
-            df_clean[col] = df_clean[col].astype(str).str.strip()
-    
-    # Конвертация в числовые типы
-    if convert_numeric:
-        for col in df_clean.columns:
-            try:
-                df_clean[col] = pd.to_numeric(df_clean[col], errors='ignore')
-            except Exception:
-                pass
-    
-    # Заполнение пропусков
-    if fill_na:
-        for col in df_clean.columns:
-            if pd.api.types.is_numeric_dtype(df_clean[col]):
-                df_clean[col] = df_clean[col].fillna(0)
-            else:
-                df_clean[col] = df_clean[col].fillna('')
-    
-    return df_clean
-
-# ============================================================================
-# БЛОК 29: ФУНКЦИЯ ДЛЯ ВАЛИДАЦИИ ДАННЫХ
-# ============================================================================
-def validate_dataframe(
-    df: pd.DataFrame,
-    required_columns: List[str] = None,
-    numeric_columns: List[str] = None,
-    positive_columns: List[str] = None,
-    min_rows: int = 1
-) -> Tuple[bool, List[str]]:
-    """
-    Валидация DataFrame.
-    
-    Args:
-        df: DataFrame для проверки
-        required_columns: Обязательные колонки
-        numeric_columns: Колонки, которые должны быть числовыми
-        positive_columns: Колонки, которые должны быть положительными
-        min_rows: Минимальное количество строк
-    
-    Returns:
-        Tuple[bool, List[str]]: (Результат валидации, Список ошибок)
-    """
-    errors = []
-    
-    # Проверка на пустой DataFrame
-    if df.empty:
-        errors.append("DataFrame пуст")
-        return False, errors
-    
-    # Проверка минимального количества строк
-    if len(df) < min_rows:
-        errors.append(f"Недостаточно строк: {len(df)} < {min_rows}")
-    
-    # Проверка обязательных колонок
-    if required_columns:
-        missing_cols = [col for col in required_columns if col not in df.columns]
-        if missing_cols:
-            errors.append(f"Отсутствуют обязательные колонки: {missing_cols}")
-    
-    # Проверка числовых колонок
-    if numeric_columns:
-        for col in numeric_columns:
-            if col in df.columns:
-                if not pd.api.types.is_numeric_dtype(df[col]):
-                    errors.append(f"Колонка '{col}' не является числовой")
-    
-    # Проверка положительных значений
-    if positive_columns:
-        for col in positive_columns:
-            if col in df.columns:
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    if (df[col] <= 0).any():
-                        errors.append(f"Колонка '{col}' содержит неположительные значения")
-    
-    return len(errors) == 0, errors
-
-# ============================================================================
-# БЛОК 30: ФУНКЦИЯ ДЛЯ ОБЪЕДИНЕНИЯ НЕСКОЛЬКИХ ФАЙЛОВ
-# ============================================================================
-def merge_files(
-    file_paths: List[str],
-    file_type: str = None,
-    encoding: str = 'utf-8-sig',
-    how: str = 'outer',
-    on: str = None
-) -> pd.DataFrame:
-    """
-    Объединение нескольких файлов в один DataFrame.
-    
-    Args:
-        file_paths: Список путей к файлам
-        file_type: Тип файла (если None - определяется по расширению)
-        encoding: Кодировка
-        how: Тип объединения ('inner', 'outer', 'left', 'right')
-        on: Колонка для объединения
-    
-    Returns:
-        pd.DataFrame: Объединенный DataFrame
-    """
-    if not file_paths:
-        return pd.DataFrame()
-    
-    dataframes = []
-    
-    for file_path in file_paths:
-        try:
-            df = load_data_from_source(file_path, file_type, encoding)
-            dataframes.append(df)
-            logger.info(f"Загружен файл: {file_path} ({len(df)} строк)")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки {file_path}: {e}")
-    
-    if not dataframes:
-        return pd.DataFrame()
-    
-    if len(dataframes) == 1:
-        return dataframes[0]
-    
-    # Объединение
-    if on:
-        result = dataframes[0]
-        for df in dataframes[1:]:
-            result = result.merge(df, on=on, how=how)
-        return result
-    else:
-        return pd.concat(dataframes, ignore_index=True)
-
-# ============================================================================
-# ТОЧКА ВХОДА
-# ============================================================================
-if __name__ == "__main__":
-    main()
