@@ -2139,7 +2139,172 @@ class SmartTariffCache:
         return entry
 
     def set(self, marketplace: str, category: Optional[str], data: Dict[str, Any],
-            source: TariffSource, ttl_seconds: int = 
+            source: TariffSource, ttl_seconds: int = 86400, notes: str = "") -> bool:
+        """Сохранение тарифов в кэш с записью в историю."""
+        try:
+            key = self._make_key(marketplace, category)
+            old_entry = self._cache.get(key)
+            old_data = old_entry.data if old_entry else None
+            entry = TariffCacheEntry(
+                marketplace=marketplace,
+                category=category,
+                data=data,
+                source=source,
+                timestamp=time.time(),
+                ttl_seconds=ttl_seconds,
+                version="2026.1",
+                notes=notes
+            )
+            self._cache[key] = entry
+            self._save_cache()
+            self._add_history_entry(
+                action="UPDATE" if old_entry else "CREATE",
+                marketplace=marketplace,
+                category=category,
+                old_data=old_data,
+                new_data=data,
+                source=source.value
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка сохранения тарифов: {e}")
+            return False
+
+    def delete(self, marketplace: str, category: Optional[str] = None) -> bool:
+        try:
+            key = self._make_key(marketplace, category)
+            old_entry = self._cache.get(key)
+            if old_entry:
+                self._add_history_entry(
+                    action="DELETE",
+                    marketplace=marketplace,
+                    category=category,
+                    old_data=old_entry.data,
+                    new_data=None,
+                    source="MANUAL"
+                )
+                del self._cache[key]
+                self._save_cache()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка удаления тарифов: {e}")
+            return False
+
+    def update_field(self, marketplace: str, category: Optional[str], field: str, value: Any) -> bool:
+        try:
+            key = self._make_key(marketplace, category)
+            entry = self._cache.get(key)
+            if entry is None:
+                logger.warning(f"Запись не найдена: {key}")
+                return False
+            old_data = entry.data.copy()
+            entry.data[field] = value
+            entry.timestamp = time.time()
+            entry.source = TariffSource.MANUAL
+            self._cache[key] = entry
+            self._save_cache()
+            self._add_history_entry(
+                action="FIELD_UPDATE",
+                marketplace=marketplace,
+                category=category,
+                old_data=old_data,
+                new_data=entry.data,
+                source="MANUAL"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления поля: {e}")
+            return False
+
+    def get_all(self) -> Dict[str, TariffCacheEntry]:
+        return self._cache.copy()
+
+    def get_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self._history[-limit:]
+
+    def clear_expired(self) -> int:
+        expired_keys = [k for k, v in self._cache.items() if v.is_expired()]
+        for key in expired_keys:
+            del self._cache[key]
+        if expired_keys:
+            self._save_cache()
+        return len(expired_keys)
+
+    def clear_all(self) -> int:
+        count = len(self._cache)
+        self._cache = {}
+        self._save_cache()
+        self._add_history_entry(
+            action="CLEAR_ALL",
+            marketplace="ALL",
+            category=None,
+            old_data={"count": count},
+            new_data=None,
+            source="MANUAL"
+        )
+        return count
+
+    def export_to_file(self, file_path: Union[str, Path]) -> bool:
+        try:
+            data = {k: v.to_dict() for k, v in self._cache.items()}
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка экспорта кэша: {e}")
+            return False
+
+    def import_from_file(self, file_path: Union[str, Path]) -> int:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            count = 0
+            for key, entry_dict in data.items():
+                try:
+                    self._cache[key] = TariffCacheEntry.from_dict(entry_dict)
+                    count += 1
+                except Exception as e:
+                    logger.warning(f"Ошибка импорта записи {key}: {e}")
+            self._save_cache()
+            self._add_history_entry(
+                action="IMPORT",
+                marketplace="ALL",
+                category=None,
+                old_data=None,
+                new_data={"count": count, "file": str(file_path)},
+                source="IMPORTED"
+            )
+            return count
+        except Exception as e:
+            logger.error(f"Ошибка импорта кэша: {e}")
+            return 0
+
+    def get_statistics(self) -> Dict[str, Any]:
+        stats = {
+            "total_entries": len(self._cache),
+            "by_marketplace": defaultdict(int),
+            "by_source": defaultdict(int),
+            "expired_count": 0,
+            "oldest_entry": None,
+            "newest_entry": None,
+            "history_count": len(self._history)
+        }
+        if not self._cache:
+            return stats
+        timestamps = []
+        for entry in self._cache.values():
+            stats["by_marketplace"][entry.marketplace] += 1
+            stats["by_source"][entry.source.value] += 1
+            if entry.is_expired():
+                stats["expired_count"] += 1
+            timestamps.append(entry.timestamp)
+        if timestamps:
+            oldest_ts = min(timestamps)
+            newest_ts = max(timestamps)
+            stats["oldest_entry"] = datetime.fromtimestamp(oldest_ts).isoformat()
+            stats["newest_entry"] = datetime.fromtimestamp(newest_ts).isoformat()
+        return stats
 # ============================================================================
 # 🆕 v100.2: ПРОДВИНУТЫЙ ГЕНЕРАТОР EXCEL С 6 АНАЛИТИЧЕСКИМИ ЛИСТАМИ
 # ============================================================================
