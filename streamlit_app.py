@@ -7321,3 +7321,536 @@ def show_api_tariffs_interface():
                         st.error("❌ Не удалось получить кампании")
             else:
                 st.warning("⚠️ Введите OAuth Token")
+# ============================================================================
+# БЛОК 19: ОБОГАЩЕНИЕ КАТАЛОГА
+# ============================================================================
+def show_catalog_enhance_interface():
+    """🔍 РАЗДЕЛ 5: ОБОГАЩЕНИЕ КАТАЛОГА"""
+    st.header("🔍 Шаг 5: Обогащение каталога")
+    
+    st.info("""
+    🔍 **ПОИСК АНАЛОГОВ:**
+    Система ищет аналоги через общие OE номера (2 уровня).
+    """)
+    
+    if 'catalog_enhancer' not in st.session_state:
+        st.session_state.catalog_enhancer = CatalogEnhancer()
+    
+    enhancer = st.session_state.catalog_enhancer
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📤 Загрузка данных каталога")
+        
+        oe_file = st.file_uploader("OE данные", type=['xlsx', 'csv'], key="enh_oe")
+        parts_file = st.file_uploader("Детали (артикулы)", type=['xlsx', 'csv'], key="enh_parts")
+        cross_file = st.file_uploader("Кросс-ссылки", type=['xlsx', 'csv'], key="enh_cross")
+        
+        if st.button("📥 Загрузить данные в каталог", type="primary", key="enh_load_data"):
+            with st.spinner("Загрузка данных..."):
+                if oe_file:
+                    try:
+                        df = pd.read_excel(oe_file) if oe_file.name.endswith('.xlsx') else pd.read_csv(oe_file, encoding='utf-8-sig')
+                        enhancer.load_oe_data(df)
+                        st.success(f"✅ Загружено {len(df)} OE записей")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка загрузки OE: {str(e)}")
+                
+                if parts_file:
+                    try:
+                        df = pd.read_excel(parts_file) if parts_file.name.endswith('.xlsx') else pd.read_csv(parts_file, encoding='utf-8-sig')
+                        enhancer.load_parts_data(df)
+                        st.success(f"✅ Загружено {len(df)} записей деталей")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка загрузки деталей: {str(e)}")
+                
+                if cross_file:
+                    try:
+                        df = pd.read_excel(cross_file) if cross_file.name.endswith('.xlsx') else pd.read_csv(cross_file, encoding='utf-8-sig')
+                        enhancer.load_cross_references(df)
+                        st.success(f"✅ Загружено {len(df)} кросс-ссылок")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка загрузки кросс-ссылок: {str(e)}")
+    
+    with col2:
+        st.subheader("🔍 Поиск аналогов")
+        
+        artikul = st.text_input("Артикул", placeholder="Введите артикул", key="enh_artikul_input")
+        brand = st.text_input("Бренд", placeholder="Введите бренд", key="enh_brand_input")
+        
+        if st.button("🔍 Найти аналоги", type="primary", key="enh_find_analogs"):
+            if artikul and brand:
+                with st.spinner("Поиск аналогов..."):
+                    data = enhancer.get_analog_data(artikul, brand)
+                    
+                    if data.get('error'):
+                        st.error(f"❌ {data['error']}")
+                    else:
+                        st.success(f"✅ Найдено {data.get('analog_count', 0)} аналогов")
+                        
+                        if data.get('oe_list'):
+                            st.info(f"🔗 OE номера: {data.get('oe_list')}")
+                        
+                        if data.get('has_analogs'):
+                            st.subheader("📋 Аналоги")
+                            analogs_df = pd.DataFrame(data.get('analogs', []))
+                            st.dataframe(analogs_df, use_container_width=True, key="enh_analogs_table")
+            else:
+                st.warning("⚠️ Введите артикул и бренд")
+    
+    st.subheader("📊 Статистика каталога")
+    stats = enhancer.get_stats()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("📦 OE записей", stats.get('oe_loaded', 0))
+        st.metric("🔄 Кросс-ссылок", stats.get('cross_loaded', 0))
+    
+    with col2:
+        st.metric("🔧 Деталей", stats.get('parts_loaded', 0))
+        st.metric("🔍 Поисков", stats.get('analog_searches', 0))
+        st.metric("💾 Кэш попаданий", stats.get('cache_hits', 0))
+
+# ============================================================================
+# БЛОК 20: АНАЛИТИКА
+# ============================================================================
+def show_analytics_interface():
+    """📊 РАЗДЕЛ 6: АНАЛИТИКА"""
+    st.header("📊 Шаг 6: Аналитика")
+    
+    if st.session_state.get('uploaded_data') is None:
+        st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
+        return
+    
+    df = st.session_state.uploaded_data.copy()
+    
+    st.success(f"✅ Анализ {len(df)} товаров")
+    
+    st.subheader("📈 Общая статистика")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("📦 Товаров", len(df))
+    
+    with col2:
+        price_col = None
+        for col in df.columns:
+            if any(w in col.lower() for w in ['цена', 'price', 'стоимость']):
+                price_col = col
+                break
+        
+        if price_col:
+            avg_price = safe_float(df[price_col].mean())
+            st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽")
+    
+    with col3:
+        cost_col = None
+        for col in df.columns:
+            if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная']):
+                cost_col = col
+                break
+        
+        if cost_col:
+            avg_cost = safe_float(df[cost_col].mean())
+            st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽")
+    
+    with col4:
+        if price_col and cost_col:
+            df['_margin'] = safe_float(df[price_col]) - safe_float(df[cost_col])
+            avg_margin = df['_margin'].mean()
+            st.metric("📈 Средняя маржа", f"{avg_margin:,.0f} ₽")
+    
+    if PLOTLY_AVAILABLE and px is not None and price_col:
+        st.subheader("📊 Визуализация данных")
+        
+        chart_type = st.selectbox(
+            "Тип графика",
+            ["Распределение цен", "Распределение категорий", "Топ товаров по цене"],
+            key="analytics_chart_type"
+        )
+        
+        if chart_type == "Распределение цен":
+            fig = px.histogram(df, x=price_col, nbins=30, title=f"Распределение цен ({price_col})")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == "Распределение категорий" and 'Категория' in df.columns:
+            category_counts = df['Категория'].value_counts()
+            fig = px.pie(values=category_counts.values, names=category_counts.index,
+                        title="Распределение товаров по категориям")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == "Топ товаров по цене":
+            name_col = None
+            for col in df.columns:
+                if any(w in col.lower() for w in ['наименование', 'название', 'name', 'товар']):
+                    name_col = col
+                    break
+            
+            if name_col:
+                top_df = df.nlargest(10, price_col)[[name_col, price_col]]
+                fig = px.bar(top_df, x=name_col, y=price_col, title="Топ 10 товаров по цене")
+                st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================================
+# БЛОК 21: ИСТОРИЯ РАСЧЕТОВ
+# ============================================================================
+def show_history_interface():
+    """📋 РАЗДЕЛ 7: ИСТОРИЯ РАСЧЕТОВ"""
+    st.header("📋 Шаг 7: История расчетов")
+    
+    unit_economics = get_marketplace_unit_economics()
+    
+    history_source = st.radio(
+        "📚 Источник истории",
+        ["💾 Сохранённая в БД (постоянная)", "⚡ Текущая сессия (в памяти)"],
+        horizontal=True,
+        key="history_source"
+    )
+    
+    if "Сохранённая" in history_source:
+        show_persistent_history(unit_economics)
+    else:
+        show_session_history(unit_economics)
+
+def show_persistent_history(unit_economics):
+    st.subheader("🔍 Фильтры (постоянная история)")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        filter_marketplace = st.text_input("Маркетплейс", key="history_db_marketplace")
+    
+    with col2:
+        filter_article = st.text_input("Артикул (частично)", key="history_db_article")
+    
+    with col3:
+        filter_brand = st.text_input("Бренд (частично)", key="history_db_brand")
+    
+    with col4:
+        limit = st.number_input("Лимит записей", min_value=10, max_value=10000,
+                               value=500, step=50, key="history_db_limit")
+    
+    filters = {}
+    if filter_marketplace: filters['marketplace'] = filter_marketplace
+    if filter_article: filters['article'] = filter_article
+    if filter_brand: filters['brand'] = filter_brand
+    
+    with st.spinner("Загрузка истории из БД..."):
+        df_history = unit_economics.get_persistent_history(limit=int(limit), filters=filters if filters else None)
+    
+    if df_history is None or df_history.empty:
+        st.info("📋 История расчетов пуста.")
+        return
+    
+    st.success(f"📊 Найдено расчетов: **{len(df_history)}**")
+    
+    display_cols = ['timestamp', 'marketplace', 'operation_mode', 'article', 'brand',
+                   'price', 'cost', 'profit', 'margin_percent', 'roi',
+                   'recommended_min_price', 'tax_amount', 'tax_system']
+    
+    available_cols = [col for col in display_cols if col in df_history.columns]
+    
+    st.dataframe(df_history[available_cols].head(100), use_container_width=True, key="history_db_table")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📥 Экспортировать в CSV", key="history_db_export"):
+            csv = df_history.to_csv(index=False, encoding='utf-8-sig', sep=';')
+            st.download_button(
+                label="📥 Скачать CSV",
+                data=csv,
+                file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv; charset=utf-8"
+            )
+    
+    with col2:
+        if st.button("📥 Экспортировать в Excel", key="history_db_export_excel"):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_history.to_excel(writer, index=False, sheet_name='История')
+            output.seek(0)
+            st.download_button(
+                label="📥 Скачать Excel",
+                data=output,
+                file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    
+    with col3:
+        if st.button("🗑️ Очистить всю историю БД", type="secondary", key="history_db_clear"):
+            if st.checkbox("Подтверждаю полную очистку БД", key="history_db_confirm"):
+                count = unit_economics.clear_persistent_history()
+                st.success(f"✅ Удалено {count} записей из БД")
+                st.rerun()
+
+def show_session_history(unit_economics):
+    history = unit_economics.get_history()
+    
+    if not history:
+        st.info("📋 История расчетов пуста.")
+        return
+    
+    df_history = pd.DataFrame([r.to_dict() if hasattr(r, 'to_dict') else r for r in history])
+    
+    st.subheader("🔍 Фильтры")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        marketplaces = ['Все'] + sorted(df_history['marketplace'].unique().tolist())
+        filter_marketplace = st.selectbox("Маркетплейс", marketplaces, key="history_marketplace")
+    
+    with col2:
+        modes = ['Все'] + sorted(df_history['operation_mode'].unique().tolist())
+        filter_mode = st.selectbox("Режим работы", modes, key="history_mode")
+    
+    with col3:
+        tax_systems = ['Все'] + sorted(df_history['tax_system'].unique().tolist()) if 'tax_system' in df_history.columns else ['Все']
+        filter_tax = st.selectbox("Система налога", tax_systems, key="history_tax")
+    
+    filtered_df = df_history.copy()
+    
+    if filter_marketplace != 'Все':
+        filtered_df = filtered_df[filtered_df['marketplace'] == filter_marketplace]
+    
+    if filter_mode != 'Все':
+        filtered_df = filtered_df[filtered_df['operation_mode'] == filter_mode]
+    
+    if filter_tax != 'Все' and 'tax_system' in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df['tax_system'] == filter_tax]
+    
+    st.subheader(f"📊 Найдено расчетов: {len(filtered_df)}")
+    
+    if not filtered_df.empty:
+        display_cols = ['marketplace', 'operation_mode', 'price', 'cost', 'profit',
+                       'margin_percent', 'roi', 'recommended_min_price', 'tax_amount', 'timestamp']
+        
+        available_cols = [col for col in display_cols if col in filtered_df.columns]
+        
+        st.dataframe(filtered_df[available_cols].sort_values('timestamp', ascending=False),
+                    use_container_width=True, key="history_table")
+        
+        if st.button("📥 Экспортировать историю в CSV", key="history_export"):
+            csv = filtered_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+            st.download_button(
+                label="📥 Скачать CSV",
+                data=csv,
+                file_name=f"история_расчетов_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv; charset=utf-8"
+            )
+
+# ============================================================================
+# БЛОК 22: НАСТРОЙКИ (БЕЗ НАЛОГОВ)
+# ============================================================================
+def show_settings_interface():
+    """⚙️ РАЗДЕЛ 8: НАСТРОЙКИ (БЕЗ НАЛОГОВ)"""
+    st.header("⚙️ Шаг 8: Настройки")
+    
+    unit_economics = get_marketplace_unit_economics()
+    
+    st.subheader("🌤 Настройки сезонности")
+    enable_seasonal = st.checkbox(
+        "Учитывать сезонные коэффициенты",
+        value=unit_economics._settings.get('enable_seasonal_adjustments', True),
+        key="settings_seasonal"
+    )
+    
+    st.subheader("💾 Настройки хранения истории")
+    enable_persistent = st.checkbox(
+        "📚 Сохранять историю расчётов в БД",
+        value=unit_economics._settings.get('enable_persistent_history', True),
+        key="settings_persistent_history"
+    )
+    
+    st.subheader("🚀 Настройки производительности")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        max_workers = st.number_input(
+            "Максимальное количество потоков",
+            min_value=1,
+            max_value=16,
+            value=unit_economics._settings.get('max_workers', 4),
+            step=1,
+            key="settings_workers"
+        )
+    
+    with col2:
+        parallel_processing = st.checkbox(
+            "Использовать параллельную обработку",
+            value=unit_economics._settings.get('parallel_processing', True),
+            key="settings_parallel"
+        )
+    
+    if st.button("💾 Сохранить настройки", type="primary", key="settings_save"):
+        new_settings = {
+            "enable_seasonal_adjustments": enable_seasonal,
+            "enable_persistent_history": enable_persistent,
+            "max_workers": max_workers,
+            "parallel_processing": parallel_processing
+        }
+        
+        if unit_economics.save_settings(new_settings):
+            st.success("✅ Настройки сохранены!")
+            st.balloons()
+        else:
+            st.error("❌ Ошибка сохранения настроек")
+    
+    st.divider()
+    
+    st.subheader("ℹ️ Информация о приложении")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("📌 Версия", APP_VERSION)
+        st.metric("🐍 Python", sys.version.split()[0])
+        st.metric("📅 Дата", datetime.now().strftime("%d.%m.%Y"))
+    
+    with col2:
+        data_loaded = st.session_state.get('uploaded_data') is not None
+        rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
+        st.metric("📊 Данных загружено", rows)
+        
+        if POLARS_AVAILABLE:
+            st.metric("🦀 Polars", "✅ Доступен")
+        else:
+            st.metric("🦀 Polars", "❌ Не доступен")
+        
+        if DUCKDB_AVAILABLE:
+            st.metric("🦆 DuckDB", "✅ Доступен")
+        else:
+            st.metric("🦆 DuckDB", "❌ Не доступен")
+
+# ============================================================================
+# БЛОК 23: ГЛАВНАЯ ФУНКЦИЯ
+# ============================================================================
+def main():
+    """🚗 ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ"""
+    st.set_page_config(
+        page_title=f"{APP_NAME} v{APP_VERSION}",
+        page_icon="🚗",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, #0f3460 0%, #16213e 100%); border-radius: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h1 style="color: white; margin: 0;">🚗 {APP_NAME}</h1>
+        <p style="color: #e94560; font-size: 20px; margin: 10px 0;">v{APP_VERSION} | ENTERPRISE EDITION</p>
+        <p style="color: #aaa; font-size: 14px;">Юнит-экономика маркетплейсов 2026</p>
+        <div style="margin-top: 15px;">
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Параллельный расчет для 100K+ товаров</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Интеллектуальный парсинг размеров "20x15x10"</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ AI прогнозирование тарифов на 3 месяца</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Сезонные коэффициенты и промо-скидки</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ High-Volume каталог (10M+ записей)</p>
+            <p style="color: #00cc96; font-size: 14px; margin: 5px 0;">✅ Фиксированная ставка налога 6% (УСН_6)</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.sidebar:
+        st.image("https://img.icons8.com/fluency/96/000000/bar-chart.png", width=80)
+        
+        st.markdown("---")
+        
+        menu_options = [
+            "📁 Загрузка данных",
+            "📊 Юнит-экономика",
+            "🗂️ Каталог для группировки",
+            "🤖 AI Тарифы",
+            "🌐 API Тарифы",
+            "🔍 Обогащение каталога",
+            "📊 Аналитика",
+            "📋 История расчетов",
+            "⚙️ Настройки"
+        ]
+        
+        menu_icons = {
+            "📁 Загрузка данных": "📤",
+            "📊 Юнит-экономика": "💰",
+            "🗂️ Каталог для группировки": "🗂️",
+            "🤖 AI Тарифы": "🤖",
+            "🌐 API Тарифы": "🌐",
+            "🔍 Обогащение каталога": "🔍",
+            "📊 Аналитика": "📈",
+            "📋 История расчетов": "📜",
+            "⚙️ Настройки": "⚙️"
+        }
+        
+        menu = st.radio(
+            "Меню",
+            menu_options,
+            key="main_menu",
+            format_func=lambda x: f"{menu_icons.get(x, '')} {x}"
+        )
+        
+        st.markdown("---")
+        
+        st.markdown("### 📊 Состояние системы")
+        
+        data_loaded = st.session_state.get('uploaded_data') is not None
+        rows = len(st.session_state.get('uploaded_data', pd.DataFrame())) if data_loaded else 0
+        
+        st.metric("📁 Данные", "Загружены ✅" if data_loaded else "Не загружены ❌")
+        
+        if data_loaded:
+            st.metric("📦 Товаров", rows)
+            
+            try:
+                phdb = get_persistent_history_db()
+                if phdb.conn:
+                    db_count = phdb.conn.execute("SELECT COUNT(*) FROM calculation_history").fetchone()[0]
+                    st.metric("💾 История в БД", f"{db_count:,}")
+            except Exception as e:
+                logger.warning(f"Не удалось получить статус БД: {e}")
+        
+        st.markdown("---")
+        
+        st.caption(f"Приложение v{APP_VERSION}")
+        st.caption(f"Python {sys.version.split()[0]}")
+        
+        with st.expander("📚 Библиотеки"):
+            libs_status = {
+                "Plotly": PLOTLY_AVAILABLE, "Sklearn": SKLEARN_AVAILABLE,
+                "DuckDB": DUCKDB_AVAILABLE, "Polars": POLARS_AVAILABLE,
+                "OpenPyXL": OPENPYXL_AVAILABLE, "PDF": PDF_EXPORT,
+                "PyTorch": PYTORCH_AVAILABLE, "TensorFlow": TENSORFLOW_AVAILABLE,
+                "Transformers": TRANSFORMERS_AVAILABLE, "Async": ASYNC_AVAILABLE,
+                "Chardet": CHARDET_AVAILABLE
+            }
+            
+            for lib, available in libs_status.items():
+                st.write(f"{'✅' if available else '❌'} {lib}")
+    
+    try:
+        if menu == "📁 Загрузка данных":
+            show_data_upload_interface()
+        elif menu == "📊 Юнит-экономика":
+            show_unit_economics_interface()
+        elif menu == "🗂️ Каталог для группировки":
+            show_catalog_grouping_interface()
+        elif menu == "🤖 AI Тарифы":
+            show_ai_tariffs_interface()
+        elif menu == "🌐 API Тарифы":
+            show_api_tariffs_interface()
+        elif menu == "🔍 Обогащение каталога":
+            show_catalog_enhance_interface()
+        elif menu == "📊 Аналитика":
+            show_analytics_interface()
+        elif menu == "📋 История расчетов":
+            show_history_interface()
+        elif menu == "⚙️ Настройки":
+            show_settings_interface()
+    except Exception as e:
+        st.error(f"❌ Ошибка при отображении страницы: {str(e)}")
+        st.code(traceback.format_exc())
+        logger.error(f"Main page error: {traceback.format_exc()}")
+
+# ============================================================================
+# ТОЧКА ВХОДА
+# ============================================================================
+if __name__ == "__main__":
+    main()
