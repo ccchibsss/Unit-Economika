@@ -7033,8 +7033,8 @@ def show_data_upload_interface():
                 st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
                 return
             
+            # ✅ ИСПРАВЛЕНО: убран дублирующий dropna
             df = df.dropna(how='all')
-            df = df.dropna(axis=0, how='all')
             
             if df.empty:
                 st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
@@ -7099,7 +7099,7 @@ def show_data_upload_interface():
                     
                     sample_data = []
                     for i in range(min(5, len(parsed_data))):
-                        row = parsed_data[i]
+                        row = parsed_data.iloc[i]
                         sample_data.append({
                             'Исходная строка': df.iloc[row['index']].get(dims_col, ''),
                             'Длина': row['parsed_length'],
@@ -7216,37 +7216,45 @@ def show_data_upload_interface():
             with st.expander("📋 Подробности ошибки", expanded=True):
                 st.code(traceback.format_exc())
     
+    # ========================================================================
+    # 🆕 v100.5.1: ИСПРАВЛЕННАЯ ГЕНЕРАЦИЯ ШАБЛОНА С ПРАВИЛЬНЫМ BOM
+    # ========================================================================
     if st.button("📥 Скачать шаблон данных"):
-    template_df = pd.DataFrame({
-        "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
-        "Бренд": ["Bosch", "Bosch", "Siemens"],
-        "Цена": [1000, 1500, 2000],
-        "Себестоимость": [500, 750, 1000],
-        "Категория": ["Автозапчасти", "Автозапчасти", "Инструменты"],
-        "Длина": [10, 15, 20],
-        "Ширина": [5, 7, 10],
-        "Высота": [3, 4, 5],
-        "Вес": [0.5, 0.8, 1.2],
-        "Весогабариты": ["10x5x3", "15x7x4", "20x10x5"],
-        "OE номер": ["123456", "654321", "789012"],
-        "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
-    })
-    
-    # ✅ ПРАВИЛЬНО: используем BytesIO для сохранения BOM
-    output = io.StringIO()
-    template_df.to_csv(output, index=False, encoding='utf-8-sig', sep=';')
-    csv_string = output.getvalue()
-    
-    # Кодируем в байты с BOM
-    csv_bytes = csv_string.encode('utf-8-sig')
-    
-    st.download_button(
-        label="📥 Скачать шаблон CSV (Excel-совместимый)",
-        data=csv_bytes,  # ✅ БАЙТЫ с BOM
-        file_name="шаблон_каталога.csv",
-        mime="text/csv; charset=utf-8",
-        key="download_template"
-    )
+        template_df = pd.DataFrame({
+            "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
+            "Бренд": ["Bosch", "Bosch", "Siemens"],
+            "Цена": [1000, 1500, 2000],
+            "Себестоимость": [500, 750, 1000],
+            "Категория": ["Автозапчасти", "Автозапчасти", "Инструменты"],
+            "Длина": [10, 15, 20],
+            "Ширина": [5, 7, 10],
+            "Высота": [3, 4, 5],
+            "Вес": [0.5, 0.8, 1.2],
+            "Весогабариты": ["10x5x3", "15x7x4", "20x10x5"],
+            "OE номер": ["123456", "654321", "789012"],
+            "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
+        })
+        
+        # ✅ ИСПРАВЛЕНО: используем BytesIO + codecs для корректного BOM
+        import codecs
+        output = io.BytesIO()
+        
+        # Записываем BOM вручную (один раз!)
+        output.write(codecs.BOM_UTF8)
+        
+        # Пишем CSV в UTF-8 без BOM (BOM уже добавлен)
+        csv_string = template_df.to_csv(index=False, encoding='utf-8', sep=';')
+        output.write(csv_string.encode('utf-8'))
+        
+        output.seek(0)
+        
+        st.download_button(
+            label="📥 Скачать шаблон CSV (Excel-совместимый)",
+            data=output,  # ✅ BytesIO с одним BOM
+            file_name="шаблон_каталога.csv",
+            mime="text/csv; charset=utf-8",
+            key="download_template"
+        )
 # ============================================================================
 # БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА
 # ============================================================================
