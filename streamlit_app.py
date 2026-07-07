@@ -6143,7 +6143,7 @@ class HighVolumeAutoPartsCatalog:
         
         return df
     
-        def upsert_data(self, table_name: str, df: "pl.DataFrame", pk: List[str]):
+    def upsert_data(self, table_name: str, df: "pl.DataFrame", pk: List[str]):
         """
         🆕 v100.7: UPSERT данных в таблицу с оптимизацией памяти.
         ИСПРАВЛЕНО: Вместо df.to_arrow() используется временный Parquet файл.
