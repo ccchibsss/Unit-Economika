@@ -8410,148 +8410,155 @@ def show_catalog_calculation_parallel():
         if available_display:
             st.dataframe(results_df[available_display].head(100), use_container_width=True)
         
-        # ====================================================================
-        # 🆕 v100.5.2: ЭКСПОРТ РЕЗУЛЬТАТОВ (теперь работает корректно!)
-        # ====================================================================
-        # ========================================================================
-# 📤 ЭКСПОРТ РЕЗУЛЬТАТОВ (PRO с формулами и условным форматированием)
 # ========================================================================
-st.subheader("📤 Экспорт результатов")
-
-export_col1, export_col2, export_col3 = st.columns(3)
-
-with export_col1:
-    if st.button("📥 Экспорт в Excel (PRO)", type="primary", key="ue_parallel_export_excel_pro"):
-        with st.spinner("Генерация профессионального отчёта..."):
-            output_path = TEMP_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            
-            metadata = {
-                'marketplaces': selected_marketplaces,
-                'operation_mode': operation_mode,
-                'days_in_storage': days_in_storage,
-                'seasonal': use_seasonal,
-                'tariff_source': 'Актуальные тарифы 2026',
-            }
-            
-            exporter = ProfessionalExcelExporter()
-            success = exporter.export_unit_economics(
-                results_df, str(output_path), metadata
-            )
-            
-            if success and output_path.exists():
-                with open(output_path, "rb") as f:
-                    st.download_button(
-                        label="⬇️ Скачать PRO-отчёт",
-                        data=f.read(),
-                        file_name=output_path.name,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="ue_parallel_download_excel_pro"
-                    )
-                st.success("✅ PRO-отчёт готов!")
-            else:
-                st.error("❌ Ошибка генерации отчёта")
-
-with export_col2:
-    if st.button("📥 Экспорт в Excel (базовый)", key="ue_parallel_export_excel"):
-        with st.spinner("Генерация Excel файла..."):
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                results_df.to_excel(writer, index=False, sheet_name='Результаты')
-                
-                if 'marketplace' in results_df.columns:
-                    mp_summary = results_df.groupby('marketplace').agg({
-                        'profit': ['sum', 'mean'],
-                        'margin_percent': 'mean',
-                        'price': 'mean'
-                    }).reset_index()
-                    mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
-                                         'Средняя маржа %', 'Средняя цена']
-                    mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
-            
-            output.seek(0)
-            st.download_button(
-                label="⬇️ Скачать Excel",
-                data=output,
-                file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="ue_parallel_download_excel"
-            )
-
-with export_col3:
-    if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
-        csv = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-        st.download_button(
-            label="⬇️ Скачать CSV",
-            data=csv,
-            file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv; charset=utf-8",
-            key="ue_parallel_download_csv"
-        )
-        
-        with export_col1:
-            if st.button("📥 Экспорт в Excel", key="ue_parallel_export_excel"):
-                try:
-                    with st.spinner("Генерация Excel файла..."):
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                            results_df.to_excel(writer, index=False, sheet_name='Результаты')
-                            
-                            if 'marketplace' in results_df.columns:
-                                mp_summary = results_df.groupby('marketplace').agg({
-                                    'profit': ['sum', 'mean'],
-                                    'margin_percent': 'mean',
-                                    'price': 'mean'
-                                }).reset_index()
-                                mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
-                                                     'Средняя маржа %', 'Средняя цена']
-                                mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
-                        
-                        output.seek(0)
-                        
-                        st.download_button(
-                            label="⬇️ Скачать Excel",
-                            data=output,
-                            file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="ue_parallel_download_excel"
-                        )
-                        st.success("✅ Excel файл готов к скачиванию!")
-                        
-                except Exception as e:
-                    st.error(f"❌ Ошибка генерации Excel: {str(e)}")
-                    logger.error(f"Ошибка экспорта Excel: {e}")
-        
-        with export_col2:
-            if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
-                try:
-                    with st.spinner("Генерация CSV файла..."):
-                        csv_data = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-                        
-                        st.download_button(
-                            label="⬇️ Скачать CSV",
-                            data=csv_data.encode('utf-8-sig'),
-                            file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv; charset=utf-8",
-                            key="ue_parallel_download_csv"
-                        )
-                        st.success("✅ CSV файл готов к скачиванию!")
-                        
-                except Exception as e:
-                    st.error(f"❌ Ошибка генерации CSV: {str(e)}")
-                    logger.error(f"Ошибка экспорта CSV: {e}")
-        
-        # Кнопка очистки результатов
-        st.divider()
-        if st.button("🗑️ Очистить результаты расчета", key="ue_parallel_clear"):
-            if 'ue_parallel_results' in st.session_state:
-                del st.session_state.ue_parallel_results
-            if 'ue_parallel_metadata' in st.session_state:
-                del st.session_state.ue_parallel_metadata
-            st.success("✅ Результаты очищены")
-            st.rerun()
+# 🆕 v100.5.2: ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ И ЭКСПОРТ (ВНЕ блока расчёта!)
+# ========================================================================
+if 'ue_parallel_results' in st.session_state and st.session_state.ue_parallel_results is not None:
+    results_df = st.session_state.ue_parallel_results
+    metadata = st.session_state.get('ue_parallel_metadata', {})
     
-    else:
-        st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
+    # ====================================================================
+    # 📊 Сводная статистика
+    # ====================================================================
+    st.subheader("📊 Сводная статистика")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        total_profit = results_df['profit'].sum()
+        st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
+    with col2:
+        avg_profit = results_df['profit'].mean()
+        st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
+    with col3:
+        avg_margin = results_df['margin_percent'].mean()
+        st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
+    with col4:
+        try:
+            best_mp = results_df.groupby('marketplace')['profit'].sum().idxmax()
+            st.metric("🏆 Лучший МП", best_mp)
+        except Exception:
+            st.metric("🏆 Лучший МП", "Н/Д")
+    
+    # ====================================================================
+    # 📋 Результаты расчета
+    # ====================================================================
+    st.subheader("📋 Результаты расчета")
+    
+    display_cols = ['Артикул', 'marketplace', 'price', 'profit', 'margin_percent',
+                   'recommended_min_price', 'tax_amount', 'breakeven_price']
+    available_display = [col for col in display_cols if col in results_df.columns]
+    
+    if available_display:
+        st_dataframe_compat(results_df[available_display].head(100))
+    
+    # ====================================================================
+    # 📤 ЭКСПОРТ РЕЗУЛЬТАТОВ (PRO с формулами и условным форматированием)
+    # ====================================================================
+    st.subheader("📤 Экспорт результатов")
+    
+    export_col1, export_col2, export_col3 = st.columns(3)
+    
+    # 🟦 КОЛОНКА 1: PRO-экспорт с живыми формулами
+    with export_col1:
+        if st.button("📥 Экспорт в Excel (PRO)", type="primary", key="ue_parallel_export_excel_pro"):
+            try:
+                with st.spinner("Генерация профессионального отчёта..."):
+                    output_path = TEMP_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    
+                    export_metadata = {
+                        'marketplaces': metadata.get('marketplaces', []),
+                        'operation_mode': metadata.get('operation_mode', 'FBS'),
+                        'days_in_storage': metadata.get('days_in_storage', 30),
+                        'seasonal': metadata.get('seasonal', True),
+                        'tariff_source': 'Актуальные тарифы 2026',
+                    }
+                    
+                    exporter = ProfessionalExcelExporter()
+                    success = exporter.export_unit_economics(
+                        results_df, str(output_path), export_metadata
+                    )
+                    
+                    if success and output_path.exists():
+                        with open(output_path, "rb") as f:
+                            st.download_button(
+                                label="⬇️ Скачать PRO-отчёт",
+                                data=f.read(),
+                                file_name=output_path.name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key="ue_parallel_download_excel_pro"
+                            )
+                        st.success("✅ PRO-отчёт готов! Содержит живые формулы и условное форматирование")
+                    else:
+                        st.error("❌ Ошибка генерации отчёта")
+            except Exception as e:
+                st.error(f"❌ Ошибка генерации PRO-отчёта: {str(e)}")
+                logger.error(f"Ошибка PRO-экспорта: {e}")
+    
+    # 🟦 КОЛОНКА 2: Базовый Excel
+    with export_col2:
+        if st.button("📥 Экспорт в Excel (базовый)", key="ue_parallel_export_excel"):
+            try:
+                with st.spinner("Генерация Excel файла..."):
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        results_df.to_excel(writer, index=False, sheet_name='Результаты')
+                        
+                        if 'marketplace' in results_df.columns:
+                            mp_summary = results_df.groupby('marketplace').agg({
+                                'profit': ['sum', 'mean'],
+                                'margin_percent': 'mean',
+                                'price': 'mean'
+                            }).reset_index()
+                            mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
+                                                 'Средняя маржа %', 'Средняя цена']
+                            mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
+                    
+                    output.seek(0)
+                    st.download_button(
+                        label="⬇️ Скачать Excel",
+                        data=output,
+                        file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="ue_parallel_download_excel"
+                    )
+                    st.success("✅ Excel файл готов к скачиванию!")
+            except Exception as e:
+                st.error(f"❌ Ошибка генерации Excel: {str(e)}")
+                logger.error(f"Ошибка экспорта Excel: {e}")
+    
+    # 🟦 КОЛОНКА 3: CSV
+    with export_col3:
+        if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
+            try:
+                with st.spinner("Генерация CSV файла..."):
+                    csv_data = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+                    
+                    st.download_button(
+                        label="⬇️ Скачать CSV",
+                        data=csv_data.encode('utf-8-sig'),
+                        file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv; charset=utf-8",
+                        key="ue_parallel_download_csv"
+                    )
+                    st.success("✅ CSV файл готов к скачиванию!")
+            except Exception as e:
+                st.error(f"❌ Ошибка генерации CSV: {str(e)}")
+                logger.error(f"Ошибка экспорта CSV: {e}")
+    
+    # ====================================================================
+    # 🗑️ Кнопка очистки результатов
+    # ====================================================================
+    st.divider()
+    if st.button("🗑️ Очистить результаты расчета", key="ue_parallel_clear"):
+        if 'ue_parallel_results' in st.session_state:
+            del st.session_state.ue_parallel_results
+        if 'ue_parallel_metadata' in st.session_state:
+            del st.session_state.ue_parallel_metadata
+        st.success("✅ Результаты очищены")
+        st.rerun()
+
+else:
+    st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 # ============================================================================
 # БЛОК 16: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI)
 # ============================================================================
