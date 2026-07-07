@@ -6955,204 +6955,319 @@ class AdvancedDimensionsValidator:
             "weight_kg": round(weight, 2)
         }
 # ============================================================================
-# БЛОК 13: ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ИСПРАВЛЕНИЯ КОДИРОВКИ
+# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.6 - С ИСПРАВЛЕНИЕМ КРАКОЗЯБР)
 # ============================================================================
-def detect_mojibake(text: str) -> bool:
-    """
-    🆕 v100.5.2: Определяет наличие кракозябр (двойного UTF-8 кодирования).
-    Примеры: РђСЂС‚РёРєСѓР», Р‘СЂРµРЅРґ, Р¦РµРЅР°
-    """
-    if not isinstance(text, str) or not text:
-        return False
+def show_data_upload_interface():
+    """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ"""
+    st.header("📁 Шаг 1: Загрузка данных каталога")
     
-    # Паттерны типичных кракозябр
-    mojibake_patterns = [
-        r'Р[°-Џ]{2,}',
-        r'Р[РЎ][°-Џ]{2,}',
-        r'[РЎР][°-Џ]{3,}',
-        r'Р[°-Џ]Р[°-Џ]',
-    ]
-    
-    for pattern in mojibake_patterns:
-        if re.search(pattern, text):
-            return True
-    
-    # Дополнительная проверка: частота "Р" в начале слов
-    words = text.split()
-    if len(words) >= 3:
-        r_words = sum(1 for w in words if w.startswith('Р') and len(w) >= 2)
-        if r_words / len(words) > 0.5:
-            return True
-    
-    return False
+    st.info("""
+📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
+**ШАГ 1:** Подготовьте файл с данными товаров (Excel или CSV)
+**ШАГ 2:** Убедитесь, что файл содержит обязательные колонки:
+- ✅ Артикул (идентификатор товара)
+- ✅ Бренд (производитель)
+- ✅ Цена (цена продажи)
+- ✅ Себестоимость (закупочная цена)
+**ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
+- 📏 Длина, Ширина, Высота (числовые значения)
+- 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
+**🆕 v100.6:** Автоматическое исправление кракозябр (двойного UTF-8 кодирования)
+**ШАГ 3:** Нажмите кнопку ниже и выберите файл
+**ШАГ 4:** Дождитесь успешной загрузки
 
-
-def fix_double_utf8(text: str) -> str:
-    """
-    🆕 v100.5.2: Исправляет двойное кодирование UTF-8.
-    РђСЂС‚РёРєСѓР» → Артикул
-    """
-    if not isinstance(text, str) or not text:
-        return text
+💡 **КАК ПРАВИЛЬНО СОХРАНИТЬ CSV В EXCEL:**
+1. Файл → Сохранить как → **CSV UTF-8 (разделитель — запятая)**
+2. Или используйте кнопку "Скачать шаблон" ниже (он уже в правильной кодировке)
+""")
     
-    encodings_to_try = [
-        ('cp1251', 'utf-8'),
-        ('latin1', 'utf-8'),
-        ('iso-8859-1', 'utf-8'),
-        ('cp1252', 'utf-8'),
-    ]
+    uploaded_file = st.file_uploader(
+        "📤 Загрузите файл каталога (Excel или CSV)",
+        type=['xlsx', 'xls', 'csv'],
+        key="data_upload_file",
+        help="Поддерживаются форматы: .xlsx, .xls, .csv"
+    )
     
-    for source_enc, target_enc in encodings_to_try:
+    if uploaded_file is not None:
         try:
-            fixed = text.encode(source_enc).decode(target_enc)
-            if fixed and not detect_mojibake(fixed):
-                return fixed
-        except (UnicodeDecodeError, UnicodeEncodeError):
-            continue
-    
-    return text
-
-
-def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
-    """
-    🆕 v100.5.2: Исправляет кракозябры во всём DataFrame.
-    Возвращает: (исправленный DataFrame, количество исправленных ячеек)
-    """
-    fixed_count = 0
-    
-    # Исправляем названия колонок
-    new_columns = []
-    for col in df.columns:
-        col_str = str(col)
-        if detect_mojibake(col_str):
-            new_col = fix_double_utf8(col_str)
-            new_columns.append(new_col)
-            fixed_count += 1
-        else:
-            new_columns.append(col)
-    
-    df.columns = new_columns
-    
-    # Исправляем строковые значения
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            try:
-                df[col] = df[col].apply(
-                    lambda x: fix_double_utf8(x) if isinstance(x, str) and detect_mojibake(x) else x
-                )
-            except Exception:
-                pass
-    
-    return df, fixed_count
-
-
-def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
-    """
-    🆕 v100.5.2: Умное чтение CSV с автоматическим исправлением кракозябр.
-    Приоритет кодировок: UTF-8-sig → UTF-8 → CP1251 → другие
-    """
-    separators = [';', ',', '\t', '|']
-    encodings_priority = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251']
-    
-    best_df = None
-    best_encoding = None
-    best_sep = None
-    mojibake_count = 0
-    
-    for encoding in encodings_priority:
-        for sep in separators:
-            try:
-                file_obj.seek(0)
-                df = pd.read_csv(
-                    file_obj,
-                    encoding=encoding,
-                    sep=sep,
-                    engine='python',
-                    on_bad_lines='skip',
-                    skipinitialspace=True,
-                    quotechar='"',
-                    doublequote=True,
-                    **kwargs
-                )
-                
-                if df is None or df.empty or len(df.columns) <= 1:
-                    continue
-                
-                # Проверяем наличие кракозябр
-                current_mojibake = sum(
-                    1 for col in df.columns 
-                    if isinstance(col, str) and detect_mojibake(col)
-                )
-                
-                # Если нашли вариант без кракозябр — используем его
-                if current_mojibake == 0:
-                    logger.info(f"✅ CSV прочитан без кракозябр: кодировка={encoding}, разделитель='{sep}'")
-                    return df
-                
-                # Запоминаем лучший вариант
-                if best_df is None or current_mojibake < mojibake_count:
-                    best_df = df
-                    best_encoding = encoding
-                    best_sep = sep
-                    mojibake_count = current_mojibake
-                    
-            except (pd.errors.ParserError, UnicodeDecodeError, Exception):
-                continue
-    
-    # Если нашли DataFrame с кракозябрами — исправляем
-    if best_df is not None:
-        logger.warning(f"⚠️ CSV прочитан с кракозябрами (кодировка={best_encoding}). Исправляем...")
-        fixed_df, fixed_count = fix_dataframe_encoding(best_df)
-        logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
-        return fixed_df
-    
-    # Fallback: chardet
-    if CHARDET_AVAILABLE and chardet is not None:
-        try:
-            file_obj.seek(0)
-            raw_data = file_obj.read(100000)
-            detected = chardet.detect(raw_data)
+            df = None
+            file_name = uploaded_file.name.lower()
             
-            if detected and detected.get('encoding'):
-                file_obj.seek(0)
-                for sep in separators:
+            if file_name.endswith('.csv'):
+                # 🆕 v100.6: Используем умное чтение CSV с исправлением кракозябр
+                try:
+                    df = smart_read_csv(uploaded_file)
+                except Exception as e:
+                    logger.error(f"Ошибка умного чтения CSV: {e}")
+                    raise ValueError(f"Не удалось прочитать CSV файл: {e}")
+            
+            elif file_name.endswith(('.xlsx', '.xls')):
+                excel_engines = ['openpyxl', 'xlrd']
+                
+                for engine in excel_engines:
                     try:
-                        df = pd.read_csv(
-                            file_obj,
-                            encoding=detected['encoding'],
-                            sep=sep,
-                            engine='python',
-                            on_bad_lines='skip'
-                        )
+                        uploaded_file.seek(0)
+                        df = pd.read_excel(uploaded_file, engine=engine)
                         
-                        if df is not None and not df.empty and len(df.columns) > 1:
-                            logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
-                            
-                            has_mojibake = any(
-                                isinstance(col, str) and detect_mojibake(col) 
-                                for col in df.columns
-                            )
-                            if has_mojibake:
-                                df, _ = fix_dataframe_encoding(df)
-                            
-                            return df
-                    except (pd.errors.ParserError, UnicodeDecodeError):
+                        if df is not None and not df.empty:
+                            logger.info(f"Excel прочитан с движком: {engine}")
+                            break
+                    except Exception:
                         continue
+                
+                if df is None or df.empty:
+                    available_engines = ['openpyxl', 'xlrd', 'odf']
+                    
+                    for engine in available_engines:
+                        try:
+                            uploaded_file.seek(0)
+                            df = pd.read_excel(uploaded_file, engine=engine)
+                            
+                            if df is not None and not df.empty:
+                                break
+                        except Exception:
+                            continue
+                    else:
+                        raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
+            else:
+                raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
+            
+            if df is None or df.empty:
+                st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
+                return
+            
+            # Убираем полностью пустые строки
+            df = df.dropna(how='all')
+            
+            if df.empty:
+                st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
+                return
+            
+            # 🆕 v100.6: Дополнительная проверка и исправление кракозябр
+            mojibake_cols = [col for col in df.columns if isinstance(col, str) and detect_mojibake(col)]
+            if mojibake_cols:
+                st.warning(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
+                df, fixed_count = fix_dataframe_encoding(df)
+                st.success(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
+                
+                # Показываем исправленные колонки
+                st.info(f"📋 Колонки после исправления: {', '.join(str(c) for c in df.columns.tolist())}")
+            
+            df.columns = df.columns.str.strip()
+            
+            # ====================================================================
+            # 📏 Автоматический парсинг размеров
+            # ====================================================================
+            st.subheader("📏 Автоматический парсинг размеров")
+            
+            dims_cols = []
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if any(w in col_lower for w in ['весогабариты', 'размеры', 'dimensions', 'габариты', 'размер']):
+                    dims_cols.append(col)
+            
+            if dims_cols:
+                dims_col = dims_cols[0]
+                st.info(f"🔍 Найдена колонка с размерами: **{dims_col}**")
+                
+                parsed_data = []
+                for idx, row in df.iterrows():
+                    dim_str = str(row.get(dims_col, ''))
+                    if dim_str and dim_str != 'nan':
+                        l, w, h = parse_dimensions_string(dim_str)
+                        parsed_data.append({
+                            'index': idx,
+                            'parsed_length': l,
+                            'parsed_width': w,
+                            'parsed_height': h
+                        })
+                
+                if parsed_data:
+                    parsed_df = pd.DataFrame(parsed_data)
+                    
+                    for i, row in parsed_df.iterrows():
+                        idx = row['index']
+                        if row['parsed_length'] > 0:
+                            df.at[idx, 'Длина_парс'] = row['parsed_length']
+                            df.at[idx, 'Ширина_парс'] = row['parsed_width']
+                            df.at[idx, 'Высота_парс'] = row['parsed_height']
+                    
+                    rename_map = {}
+                    if 'Длина_парс' in df.columns and 'Длина' not in df.columns:
+                        rename_map['Длина_парс'] = 'Длина'
+                    if 'Ширина_парс' in df.columns and 'Ширина' not in df.columns:
+                        rename_map['Ширина_парс'] = 'Ширина'
+                    if 'Высота_парс' in df.columns and 'Высота' not in df.columns:
+                        rename_map['Высота_парс'] = 'Высота'
+                    
+                    if rename_map:
+                        df = df.rename(columns=rename_map)
+                    
+                    st.success(f"✅ Распарсено {len(parsed_data)} записей")
+                    
+                    sample_data = []
+                    for i in range(min(5, len(parsed_data))):
+                        row = parsed_data[i]
+                        sample_data.append({
+                            'Исходная строка': df.iloc[row['index']].get(dims_col, ''),
+                            'Длина': row['parsed_length'],
+                            'Ширина': row['parsed_width'],
+                            'Высота': row['parsed_height']
+                        })
+                    
+                    if sample_data:
+                        st_dataframe_compat(pd.DataFrame(sample_data))
+            
+            # Сохраняем в session_state
+            st.session_state.uploaded_data = df
+            
+            st.success(f"✅ Успешно загружено {len(df)} товаров")
+            
+            # ====================================================================
+            # 👁️ Предпросмотр данных
+            # ====================================================================
+            st.subheader("👁️ Предпросмотр данных (первые 10 строк)")
+            st_dataframe_compat(df.head(10), key="upload_preview_table")
+            
+            # ====================================================================
+            # 📊 Статистика загруженных данных
+            # ====================================================================
+            st.subheader("📊 Статистика загруженных данных")
+            
+            stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+            
+            with stats_col1:
+                st.metric("📦 Всего товаров", len(df))
+            
+            with stats_col2:
+                price_col = None
+                for col in df.columns:
+                    if any(w in str(col).lower() for w in ['цена', 'price', 'стоимость']):
+                        price_col = col
+                        break
+                
+                if price_col:
+                    try:
+                        avg_price = safe_float(df[price_col].mean())
+                        st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽" if avg_price > 0 else "Н/Д")
+                    except Exception:
+                        st.metric("💰 Средняя цена", "Ошибка")
+                else:
+                    st.metric("💰 Средняя цена", "—")
+            
+            with stats_col3:
+                cost_col = None
+                for col in df.columns:
+                    if any(w in str(col).lower() for w in ['себестоимость', 'cost', 'закупочная']):
+                        cost_col = col
+                        break
+                
+                if cost_col:
+                    try:
+                        avg_cost = safe_float(df[cost_col].mean())
+                        st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽" if avg_cost > 0 else "Н/Д")
+                    except Exception:
+                        st.metric("💵 Средняя себестоимость", "Ошибка")
+                else:
+                    st.metric("💵 Средняя себестоимость", "—")
+            
+            with stats_col4:
+                brand_col = None
+                for col in df.columns:
+                    if any(w in str(col).lower() for w in ['бренд', 'brand', 'производитель']):
+                        brand_col = col
+                        break
+                
+                if brand_col:
+                    try:
+                        unique_brands = df[brand_col].nunique()
+                        st.metric("🏷️ Уникальных брендов", unique_brands)
+                    except Exception:
+                        st.metric("🏷️ Брендов", "Ошибка")
+                else:
+                    st.metric("🏷️ Брендов", "—")
+            
+            # ====================================================================
+            # 🔧 Доступные действия
+            # ====================================================================
+            st.subheader("🔧 Доступные действия")
+            
+            action_col1, action_col2, action_col3 = st.columns(3)
+            
+            with action_col1:
+                if st.button("🏷️ Классифицировать категории", type="secondary", key="classify_btn"):
+                    with st.spinner("Классификация товаров..."):
+                        classifier = CategoryClassifier()
+                        
+                        name_col = None
+                        for col in df.columns:
+                            col_lower = str(col).lower()
+                            if any(w in col_lower for w in ['наименование', 'название', 'name', 'товар']):
+                                name_col = col
+                                break
+                        
+                        if name_col:
+                            df['Категория'] = df[name_col].apply(lambda x: classifier.predict(str(x))[0])
+                            st.session_state.uploaded_data = df
+                            
+                            st.success("✅ Классификация завершена!")
+                            
+                            st.subheader("📊 Распределение по категориям")
+                            category_counts = df['Категория'].value_counts()
+                            st_dataframe_compat(category_counts, key="category_counts")
+                        else:
+                            st.warning("⚠️ Не найдена колонка с названием товара")
+            
+            with action_col2:
+                if st.button("📊 Обогатить каталог", type="primary", key="upload_enrich_button"):
+                    st.info("ℹ️ Перейдите в раздел '🔍 Обогащение каталога' для поиска аналогов")
+            
+            with action_col3:
+                if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
+                    if st.session_state.get('uploaded_data') is not None:
+                        del st.session_state.uploaded_data
+                        st.success("✅ Данные очищены")
+                        st.rerun()
+        
         except Exception as e:
-            logger.warning(f"Ошибка chardet: {e}")
+            st.error(f"❌ Ошибка загрузки файла: {str(e)}")
+            with st.expander("📋 Подробности ошибки", expanded=True):
+                st.code(traceback.format_exc())
     
-    raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
-
-
-def st_dataframe_compat(df, *args, **kwargs):
-    """
-    🆕 v100.5.2: Совместимая обёртка для st.dataframe.
-    Для Streamlit 1.58+: width='stretch' вместо use_container_width=True
-    """
-    kwargs.pop('use_container_width', None)
-    if 'width' not in kwargs:
-        kwargs['width'] = 'stretch'
-    return st.dataframe(df, *args, **kwargs)
+    # ========================================================================
+    # 📥 Скачать шаблон данных
+    # ========================================================================
+    if st.button("📥 Скачать шаблон данных"):
+        template_df = pd.DataFrame({
+            "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
+            "Бренд": ["Bosch", "Bosch", "Siemens"],
+            "Цена": [1000, 1500, 2000],
+            "Себестоимость": [500, 750, 1000],
+            "Категория": ["Автозапчасти", "Автозапчасти", "Инструменты"],
+            "Длина": [10, 15, 20],
+            "Ширина": [5, 7, 10],
+            "Высота": [3, 4, 5],
+            "Вес": [0.5, 0.8, 1.2],
+            "Весогабариты": ["10x5x3", "15x7x4", "20x10x5"],
+            "OE номер": ["123456", "654321", "789012"],
+            "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
+        })
+        
+        # ✅ Правильный BOM для Excel
+        import codecs
+        output = io.BytesIO()
+        output.write(codecs.BOM_UTF8)
+        csv_string = template_df.to_csv(index=False, encoding='utf-8', sep=';')
+        output.write(csv_string.encode('utf-8'))
+        output.seek(0)
+        
+        st.download_button(
+            label="📥 Скачать шаблон CSV (Excel-совместимый)",
+            data=output,
+            file_name="шаблон_каталога.csv",
+            mime="text/csv; charset=utf-8",
+            key="download_template"
+        )
 # ============================================================================
 # 🆕 БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА (v100.6 - УЛУЧШЕННАЯ)
 # ============================================================================
