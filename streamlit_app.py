@@ -2,30 +2,26 @@
 ================================================================================
 🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v100.5 - ENTERPRISE EDITION
 ================================================================================
-📌 ВЕРСИЯ: 100.5.0 (ENTERPRISE)
+📌 ВЕРСИЯ: 100.5.1 (ENTERPRISE)
 📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ, АВТОТОВАРЫ И АГРЕГАТЫ
 📌 ТЕХНОЛОГИИ: STREAMLIT, POLARS, DUCKDB, SCIKIT-LEARN, OPENPYXL, PLOTLY
-📌 УЛУЧШЕНИЯ v100.5:
+📌 УЛУЧШЕНИЯ v100.5.1:
+✅ ИСПРАВЛЕНЫ КРАКОЗЯБРЫ (двойное UTF-8 кодирование)
+✅ АВТООПРЕДЕЛЕНИЕ И ИСПРАВЛЕНИЕ КОДИРОВКИ КОЛОНОК
+✅ ПРАВИЛЬНЫЙ ПОРЯДОК ЧТЕНИЯ CSV (UTF-8 приоритет)
 ✅ ОБЪЁМНЫЙ ВЕС ДЛЯ ТОЧНОЙ ЛОГИСТИКИ
 ✅ ПРОГРЕССИВНАЯ СТОИМОСТЬ ХРАНЕНИЯ
 ✅ РЕАЛЬНЫЕ ВОЗВРАТЫ С ОБРАТНОЙ ЛОГИСТИКОЙ
-✅ СПЕЦИФИЧЕСКИЕ РАСХОДЫ АВТОЗАПЧАСТЕЙ (Честный знак, упаковка, маркировка)
+✅ СПЕЦИФИЧЕСКИЕ РАСХОДЫ АВТОЗАПЧАСТЕЙ
 ✅ УЧЁТ СКИДОК И АКЦИЙ В КОМИССИЯХ
 ✅ РЕКЛАМНЫЕ РАСХОДЫ (ДРР)
 ✅ РАЗНЫЕ НАЛОГОВЫЕ РЕЖИМЫ (УСН 6%, УСН 15%, ОСН, ПСН, НПД)
 ✅ ПРОФЕССИОНАЛЬНЫЙ EXCEL-ЭКСПОРТ С ДАШБОРДОМ И ГРАФИКАМИ
 ✅ ТОЧНЫЕ РАСЧЁТЫ ЧЕРЕЗ DECIMAL
 ✅ БЕНЧМАРКИ РЫНКА И АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ
-✅ ИНТЕЛЛЕКТУАЛЬНЫЙ ПАРСИНГ РАЗМЕРОВ "20x15x10"
-✅ ДИНАМИЧЕСКИЕ ТАРИФЫ С СЕЗОННОСТЬЮ И ПРОМО-СКИДКАМИ
-✅ AI ПРОГНОЗИРОВАНИЕ ТАРИФОВ НА 3 МЕСЯЦА ВПЕРЕД
-✅ САМОСТОЯТЕЛЬНЫЙ ЦЕНОВОЙ КАЛЬКУЛЯТОР
 ✅ ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ ДЛЯ 100K+ ТОВАРОВ
-✅ ЭКСПОРТ ДЛЯ 1С И TELEGRAM-БОТОВ
-✅ ИСПРАВЛЕНА КОДИРОВКА UTF-8-SIG ДЛЯ КИРИЛЛИЦЫ
-✅ УДАЛЕН DASK (КОНФЛИКТ С PANDAS 2.3.3)
-✅ ИСПРАВЛЕНА МИГРАЦИЯ БД (авто-добавление новых колонок)
-✅ ИСПРАВЛЕНА СОВМЕСТИМОСТЬ STREAMLIT 1.58+ (width='stretch')
+✅ СОВМЕСТИМОСТЬ STREAMLIT 1.58+ (width='stretch')
+✅ МИГРАЦИЯ БД (авто-добавление новых колонок)
 ================================================================================
 """
 # ============================================================================
@@ -446,7 +442,7 @@ os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 
 # ============================================================================
-# 🆕 v100.5: СОВМЕСТИМОСТЬ STREAMLIT 1.58+
+# 🆕 v100.5.1: СОВМЕСТИМОСТЬ STREAMLIT 1.58+
 # ============================================================================
 def st_dataframe_compat(df, *args, **kwargs):
     """Совместимая обёртка для st.dataframe (width='stretch' для Streamlit 1.58+)"""
@@ -456,9 +452,213 @@ def st_dataframe_compat(df, *args, **kwargs):
     return st.dataframe(df, *args, **kwargs)
 
 # ============================================================================
+# 🆕 v100.5.1: ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
+# ============================================================================
+def detect_mojibake(text: str) -> bool:
+    """
+    🆕 v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования).
+    
+    Кракозябры выглядят как: РђСЂС‚РёРєСѓР», Р‘СЂРµРЅРґ, Р¦РµРЅР°
+    Это результат чтения UTF-8 как CP1251 с последующей записью в UTF-8.
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    
+    # Паттерн типичных кракозябр: последовательности символов РЎ-РЏ, Р°-СЏ
+    # которые выглядят как "Р" + кириллический символ
+    mojibake_patterns = [
+        r'Р[°-Џ]{2,}',           # Р + 2+ символа из диапазона кракозябр
+        r'Р[РЎ][°-Џ]{2,}',       # РР/РС + 2+ символа
+        r'[РЎР][°-Џ]{3,}',       # Р/С + 3+ символа
+        r'Р[°-Џ]Р[°-Џ]',         # Чередование Р+символ
+    ]
+    
+    for pattern in mojibake_patterns:
+        if re.search(pattern, text):
+            return True
+    
+    # Дополнительная проверка: если в тексте много "Р" в начале слов
+    words = text.split()
+    if len(words) >= 3:
+        r_words = sum(1 for w in words if w.startswith('Р') and len(w) >= 2)
+        if r_words / len(words) > 0.5:
+            return True
+    
+    return False
+
+def fix_double_utf8(text: str) -> str:
+    """
+    🆕 v100.5.1: Исправляет двойное кодирование UTF-8.
+    
+    Преобразует: РђСЂС‚РёРєСѓР» → Артикул
+                 Р‘СЂРµРЅРґ → Бренд
+                 Р¦РµРЅР° → Цена
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    
+    # Пробуем разные кодировки для декодирования
+    encodings_to_try = [
+        ('cp1251', 'utf-8'),      # Windows-1251 → UTF-8 (самый частый случай)
+        ('latin1', 'utf-8'),      # Latin-1 → UTF-8
+        ('iso-8859-1', 'utf-8'),  # ISO-8859-1 → UTF-8
+        ('cp1252', 'utf-8'),      # Windows-1252 → UTF-8
+    ]
+    
+    for source_enc, target_enc in encodings_to_try:
+        try:
+            fixed = text.encode(source_enc).decode(target_enc)
+            # Проверяем, что результат валидный и не содержит кракозябр
+            if fixed and not detect_mojibake(fixed):
+                return fixed
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+    
+    return text
+
+def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """
+    🆕 v100.5.1: Исправляет кракозябры во всём DataFrame.
+    
+    Возвращает: (исправленный DataFrame, количество исправленных ячеек)
+    """
+    fixed_count = 0
+    
+    # Исправляем названия колонок
+    new_columns = []
+    for col in df.columns:
+        col_str = str(col)
+        if detect_mojibake(col_str):
+            new_col = fix_double_utf8(col_str)
+            new_columns.append(new_col)
+            fixed_count += 1
+        else:
+            new_columns.append(col)
+    
+    df.columns = new_columns
+    
+    # Исправляем строковые значения в ячейках
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            try:
+                df[col] = df[col].apply(
+                    lambda x: fix_double_utf8(x) if isinstance(x, str) and detect_mojibake(x) else x
+                )
+                fixed_count += df[col].apply(lambda x: isinstance(x, str)).sum()
+            except Exception:
+                pass
+    
+    return df, fixed_count
+
+def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
+    """
+    🆕 v100.5.1: Умное чтение CSV с автоматическим исправлением кракозябр.
+    
+    Приоритет кодировок:
+    1. UTF-8-sig (с BOM)
+    2. UTF-8
+    3. CP1251 (Windows Cyrillic)
+    4. Другие
+    """
+    separators = [';', ',', '\t', '|']
+    
+    # Приоритетный порядок кодировок
+    encodings_priority = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251']
+    
+    best_df = None
+    best_encoding = None
+    best_sep = None
+    mojibake_count = 0
+    
+    for encoding in encodings_priority:
+        for sep in separators:
+            try:
+                file_obj.seek(0)
+                df = pd.read_csv(
+                    file_obj,
+                    encoding=encoding,
+                    sep=sep,
+                    engine='python',
+                    on_bad_lines='skip',
+                    skipinitialspace=True,
+                    quotechar='"',
+                    doublequote=True,
+                    **kwargs
+                )
+                
+                if df is None or df.empty or len(df.columns) <= 1:
+                    continue
+                
+                # Проверяем наличие кракозябр в колонках
+                current_mojibake = sum(
+                    1 for col in df.columns 
+                    if isinstance(col, str) and detect_mojibake(col)
+                )
+                
+                # Если нашли вариант без кракозябр — используем его
+                if current_mojibake == 0:
+                    logger.info(f"✅ CSV прочитан без кракозябр: кодировка={encoding}, разделитель='{sep}'")
+                    return df
+                
+                # Запоминаем лучший вариант (с минимальным количеством кракозябр)
+                if best_df is None or current_mojibake < mojibake_count:
+                    best_df = df
+                    best_encoding = encoding
+                    best_sep = sep
+                    mojibake_count = current_mojibake
+                    
+            except (pd.errors.ParserError, UnicodeDecodeError, Exception):
+                continue
+    
+    # Если нашли DataFrame с кракозябрами — исправляем их
+    if best_df is not None:
+        logger.warning(f"⚠️ CSV прочитан с кракозябрами (кодировка={best_encoding}). Исправляем...")
+        fixed_df, fixed_count = fix_dataframe_encoding(best_df)
+        logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
+        return fixed_df
+    
+    # Fallback: пробуем chardet
+    if CHARDET_AVAILABLE and chardet is not None:
+        try:
+            file_obj.seek(0)
+            raw_data = file_obj.read(100000)
+            detected = chardet.detect(raw_data)
+            
+            if detected and detected.get('encoding'):
+                file_obj.seek(0)
+                for sep in separators:
+                    try:
+                        df = pd.read_csv(
+                            file_obj,
+                            encoding=detected['encoding'],
+                            sep=sep,
+                            engine='python',
+                            on_bad_lines='skip'
+                        )
+                        
+                        if df is not None and not df.empty and len(df.columns) > 1:
+                            logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
+                            
+                            # Проверяем и исправляем кракозябры
+                            has_mojibake = any(
+                                isinstance(col, str) and detect_mojibake(col) 
+                                for col in df.columns
+                            )
+                            if has_mojibake:
+                                df, _ = fix_dataframe_encoding(df)
+                            
+                            return df
+                    except (pd.errors.ParserError, UnicodeDecodeError):
+                        continue
+        except Exception as e:
+            logger.warning(f"Ошибка chardet: {e}")
+    
+    raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
+
+# ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "100.5.0"
+APP_VERSION = "100.5.1"
 APP_NAME = "🚗 Юнит-экономика автозапчастей PRO 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
 APP_DESCRIPTION = "Enterprise расчет юнит-экономики для автозапчастей с AI, ML и High-Volume обработкой"
@@ -1890,7 +2090,7 @@ class TariffCacheEntry:
         )
 
 # ============================================================================
-# 🆕 v100.5: АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ (после UnitEconomicsResult)
+# 🆕 v100.5: АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ
 # ============================================================================
 def sensitivity_analysis(base_result: 'UnitEconomicsResult') -> pd.DataFrame:
     """Как изменится прибыль при изменении параметров"""
@@ -2492,7 +2692,7 @@ class PersistentHistoryDB:
         
         self._init_connection()
         self._create_tables()
-        self._migrate_database()  # 🆕 v100.5
+        self._migrate_database()
         
         logger.info(f"📚 PersistentHistoryDB инициализирован: {self.db_path}")
     
@@ -2613,7 +2813,7 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.warning(f"Ошибка миграции: {e}")
     
-    def save_calculation(self, result: UnitEconomicsResult, article: str = "", brand: str = "") -> bool:
+    def save_calculation(self, result: 'UnitEconomicsResult', article: str = "", brand: str = "") -> bool:
         """🆕 v100.5: Сохранение с учётом схемы БД"""
         if self.conn is None:
             return False
@@ -2629,17 +2829,13 @@ class PersistentHistoryDB:
             data['advertising_cost'] = getattr(result, 'advertising_cost', 0.0)
             data['auto_parts_specific'] = getattr(result, 'auto_parts_specific', 0.0)
             
-            # Получаем список колонок БД
             db_columns = self._get_db_columns()
-            
-            # Фильтруем только существующие колонки
             filtered_data = {k: v for k, v in data.items() if k in db_columns}
             
             if not filtered_data:
                 logger.warning("Нет подходящих колонок для сохранения")
                 return False
             
-            # Используем 'id' как PRIMARY KEY (из calculation_id)
             if 'id' not in filtered_data and 'calculation_id' in filtered_data:
                 filtered_data['id'] = filtered_data['calculation_id']
             elif 'id' not in filtered_data:
@@ -4286,7 +4482,7 @@ class MarketplaceUnitEconomics:
             self._persistent_db = None
         
         self._logger = logging.getLogger('MarketplaceUnitEconomics')
-        self._logger.info("🚗 Инициализация MarketplaceUnitEconomics v100.5")
+        self._logger.info("🚗 Инициализация MarketplaceUnitEconomics v100.5.1")
         self._logger.info(f"📊 Загружено {len(self._configs)} маркетплейсов")
         self._logger.info(f"📚 Загружено {len(self._categories)} категорий")
         
@@ -4551,7 +4747,7 @@ class MarketplaceUnitEconomics:
         discount_percent: float = 0.0,
         promo_participation: float = 0.0,
         **kwargs
-    ) -> UnitEconomicsResult:
+    ) -> 'UnitEconomicsResult':
         """🆕 v100.5: Расчет юнит-экономики с улучшенной точностью"""
         
         if price <= 0:
@@ -4753,7 +4949,7 @@ class MarketplaceUnitEconomics:
         
         return result
     
-    def _update_stats(self, result: UnitEconomicsResult):
+    def _update_stats(self, result: 'UnitEconomicsResult'):
         self._stats["total_calculations"] += 1
         self._stats["by_marketplace"][result.marketplace] += 1
         self._stats["by_category"][result.category] += 1
@@ -5283,7 +5479,7 @@ class MarketplaceUnitEconomics:
             metadata={"base_value": base_value, "growth_rate": growth_rate, "confidence_level": confidence_level}
         )
     
-    def get_history(self, limit: int = 100, filters: Optional[Dict] = None) -> List[UnitEconomicsResult]:
+    def get_history(self, limit: int = 100, filters: Optional[Dict] = None) -> List['UnitEconomicsResult']:
         history = self._history[-limit:] if limit > 0 else self._history
         
         if filters:
@@ -6760,7 +6956,7 @@ class AdvancedDimensionsValidator:
         }
 
 # ============================================================================
-# БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ
+# БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (🆕 v100.5.1 - С ИСПРАВЛЕНИЕМ КРАКОЗЯБР)
 # ============================================================================
 def show_data_upload_interface():
     """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ"""
@@ -6777,6 +6973,7 @@ def show_data_upload_interface():
 **ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
 - 📏 Длина, Ширина, Высота (числовые значения)
 - 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
+**🆕 v100.5.1:** Автоматическое исправление кракозябр (двойного UTF-8 кодирования)
 **ШАГ 3:** Нажмите кнопку ниже и выберите файл
 **ШАГ 4:** Дождитесь успешной загрузки
 """)
@@ -6794,67 +6991,12 @@ def show_data_upload_interface():
             file_name = uploaded_file.name.lower()
             
             if file_name.endswith('.csv'):
-                encodings_to_try = [
-                    'utf-8-sig', 'utf-8', 'cp1251', 'windows-1251',
-                    'cp1252', 'latin1', 'iso-8859-1', 'koi8-r',
-                    'mac_cyrillic', 'cp866'
-                ]
-                separators = [',', ';', '\t', '|', ':', '^']
-                
-                for encoding in encodings_to_try:
-                    if df is not None and not df.empty:
-                        break
-                    
-                    for sep in separators:
-                        try:
-                            uploaded_file.seek(0)
-                            df = pd.read_csv(
-                                uploaded_file,
-                                encoding=encoding,
-                                sep=sep,
-                                engine='python',
-                                on_bad_lines='skip',
-                                skipinitialspace=True,
-                                quotechar='"',
-                                doublequote=True
-                            )
-                            
-                            if df is not None and not df.empty and len(df.columns) > 1:
-                                logger.info(f"CSV прочитан: кодировка={encoding}, разделитель='{sep}'")
-                                break
-                        except (pd.errors.ParserError, UnicodeDecodeError):
-                            continue
-                
-                if df is None or df.empty:
-                    if CHARDET_AVAILABLE and chardet is not None:
-                        try:
-                            uploaded_file.seek(0)
-                            raw_data = uploaded_file.read(100000)
-                            detected = chardet.detect(raw_data)
-                            
-                            if detected and detected.get('encoding'):
-                                uploaded_file.seek(0)
-                                
-                                for sep in separators:
-                                    try:
-                                        df = pd.read_csv(
-                                            uploaded_file,
-                                            encoding=detected['encoding'],
-                                            sep=sep,
-                                            engine='python',
-                                            on_bad_lines='skip'
-                                        )
-                                        
-                                        if df is not None and not df.empty and len(df.columns) > 1:
-                                            logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
-                                            break
-                                    except (pd.errors.ParserError, UnicodeDecodeError):
-                                        continue
-                        except Exception as e:
-                            logger.warning(f"Ошибка chardet: {e}")
-                
-                if df is None or df.empty:
-                    raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
+                # 🆕 v100.5.1: Используем умное чтение CSV с исправлением кракозябр
+                try:
+                    df = smart_read_csv(uploaded_file)
+                except Exception as e:
+                    logger.error(f"Ошибка умного чтения CSV: {e}")
+                    raise ValueError(f"Не удалось прочитать CSV файл: {e}")
             
             elif file_name.endswith(('.xlsx', '.xls')):
                 excel_engines = ['openpyxl', 'xlrd']
@@ -6897,6 +7039,13 @@ def show_data_upload_interface():
             if df.empty:
                 st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
                 return
+            
+            # 🆕 v100.5.1: Дополнительная проверка и исправление кракозябр
+            mojibake_cols = [col for col in df.columns if isinstance(col, str) and detect_mojibake(col)]
+            if mojibake_cols:
+                st.warning(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
+                df, fixed_count = fix_dataframe_encoding(df)
+                st.success(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
             
             df.columns = df.columns.str.strip()
             
@@ -7094,7 +7243,7 @@ def show_data_upload_interface():
         )
 
 # ============================================================================
-# БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА (🆕 v100.5 - С НОВЫМИ ПОЛЯМИ)
+# БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА
 # ============================================================================
 def show_unit_economics_interface():
     """📊 РАЗДЕЛ 2: ЮНИТ-ЭКОНОМИКА С ПАРАЛЛЕЛЬНЫМ РАСЧЕТОМ"""
