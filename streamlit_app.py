@@ -6488,7 +6488,7 @@ class HighVolumeAutoPartsCatalog:
             logger.error(f"Error deleting by artikul {artikul_norm}: {e}")
             raise
     
-        def build_export_query(
+    def build_export_query(
         self,
         selected_columns=None,
         include_prices=True,
