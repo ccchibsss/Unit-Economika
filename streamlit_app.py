@@ -7462,6 +7462,483 @@ def show_data_upload_interface():
             key="download_template"
         )
 # ============================================================================
+# 🆕 ПРОФЕССИОНАЛЬНЫЙ EXCEL-ЭКСПОРТ С ФОРМУЛАМИ И УСЛОВНЫМ ФОРМАТИРОВАНИЕМ
+# ============================================================================
+class ProfessionalExcelExporter:
+    """
+    Профессиональный экспорт юнит-экономики в Excel.
+    - Живые формулы Excel (SUM, AVERAGE)
+    - Условное форматирование (зелёный/красный)
+    - DataBar для визуализации
+    - Русские названия столбцов
+    - Закреплённый заголовок и автофильтр
+    """
+    
+    # 🎨 Корпоративная палитра
+    COLORS = {
+        "header_bg": "0F3460",
+        "header_fg": "FFFFFF",
+        "positive": "C6EFCE",
+        "negative": "FFC7CE",
+        "warning": "FFEB9C",
+        "total_bg": "DCE6F1",
+        "border": "B4C6E7",
+    }
+    
+    def __init__(self):
+        self.thin_border = Border(
+            left=Side(style='thin', color=self.COLORS["border"]),
+            right=Side(style='thin', color=self.COLORS["border"]),
+            top=Side(style='thin', color=self.COLORS["border"]),
+            bottom=Side(style='thin', color=self.COLORS["border"])
+        )
+    
+    def export_unit_economics(self, df: pd.DataFrame, 
+                               output_path: str,
+                               metadata: Dict = None) -> bool:
+        """Полноценный отчёт с 5 листами"""
+        try:
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                self._write_dashboard_sheet(writer, df, metadata)
+                self._write_details_sheet(writer, df)
+                self._write_marketplace_comparison(writer, df)
+                self._write_category_analysis(writer, df)
+                self._write_top_bottom_sheet(writer, df)
+                self._write_parameters_sheet(writer, metadata)
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка экспорта: {e}")
+            return False
+    
+    def _write_dashboard_sheet(self, writer, df: pd.DataFrame, metadata):
+        """📊 Сводный дашборд с KPI и графиком"""
+        ws = writer.book.create_sheet("📊 Дашборд", 0)
+        
+        # Заголовок
+        ws.merge_cells('A1:H1')
+        ws['A1'] = "📊 ОТЧЁТ ПО ЮНИТ-ЭКОНОМИКЕ АВТОЗАПЧАСТЕЙ"
+        ws['A1'].font = Font(size=16, bold=True, color="FFFFFF")
+        ws['A1'].fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
+        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+        ws.row_dimensions[1].height = 35
+        
+        # Метаданные
+        ws['A2'] = f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        ws['A3'] = f"📦 Товаров: {len(df):,}".replace(",", " ")
+        ws['A4'] = f"💰 Общая прибыль: {df['profit'].sum():,.2f} ₽".replace(",", " ")
+        
+        # KPI
+        kpis = [
+            ("Общая прибыль", df['profit'].sum(), "₽", "positive"),
+            ("Средняя маржа", df['margin_percent'].mean() if 'margin_percent' in df.columns else 0, "%", "neutral"),
+            ("Средний ROI", df['roi'].mean() if 'roi' in df.columns else 0, "%", "neutral"),
+            ("Убыточных SKU", int((df['profit'] < 0).sum()), "шт", "negative"),
+        ]
+        
+        row = 6
+        for label, value, unit, style in kpis:
+            ws[f'A{row}'] = label
+            ws[f'A{row}'].font = Font(bold=True)
+            ws[f'B{row}'] = value
+            ws[f'B{row}'].number_format = '#,##0.00' if unit == "₽" else '0.00'
+            ws[f'C{row}'] = unit
+            
+            if style == "positive" and value > 0:
+                ws[f'B{row}'].fill = PatternFill("solid", fgColor=self.COLORS["positive"])
+            elif style == "negative" and value > 0:
+                ws[f'B{row}'].fill = PatternFill("solid", fgColor=self.COLORS["negative"])
+            row += 1
+        
+        # 📈 График: Прибыль по маркетплейсам
+        if 'marketplace' in df.columns:
+            mp_summary = df.groupby('marketplace')['profit'].sum().reset_index()
+            ws_chart = writer.book.create_sheet("_chart_data")
+            ws_chart.append(["Маркетплейс", "Прибыль"])
+            for _, r in mp_summary.iterrows():
+                ws_chart.append([r['marketplace'], r['profit']])
+            
+            chart = BarChart()
+            chart.title = "Прибыль по маркетплейсам"
+            chart.y_axis.title = "₽"
+            chart.x_axis.title = "Маркетплейс"
+            chart.style = 10
+            
+            data = Reference(ws_chart, min_col=2, min_row=1, max_row=len(mp_summary) + 1)
+            cats = Reference(ws_chart, min_col=1, min_row=2, max_row=len(mp_summary) + 1)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            chart.height = 12
+            chart.width = 20
+            
+            ws.add_chart(chart, "A12")
+        
+        ws.column_dimensions['A'].width = 25
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 10
+    
+    def _write_details_sheet(self, writer, df: pd.DataFrame):
+        """📋 Детализация с живыми формулами и условным форматированием"""
+        sheet_name = "📋 Детализация"
+        
+        # 🇷🇺 Маппинг колонок на русский
+        columns_map = {
+            'Артикул': 'Артикул',
+            'Бренд': 'Бренд',
+            'marketplace': 'Маркетплейс',
+            'operation_mode': 'Режим работы',
+            'category': 'Категория',
+            'price': 'Цена продажи',
+            'cost': 'Себестоимость',
+            'commission': 'Комиссия МП',
+            'commission_percent': 'Комиссия %',
+            'logistics': 'Логистика',
+            'storage_cost': 'Хранение',
+            'acquiring': 'Эквайринг',
+            'delivery': 'Доставка',
+            'last_mile': 'Последняя миля',
+            'returns': 'Возвраты',
+            'rko_fee': 'РКО',
+            'premium_fee': 'Премиум',
+            'insurance_fee': 'Страховка',
+            'packing_fee': 'Упаковка',
+            'marketing_fee': 'Маркетинг',
+            'subscription_cost': 'Подписка',
+            'hazardous_surcharge': 'Надб. опасные',
+            'fragile_surcharge': 'Надб. хрупкие',
+            'oversized_surcharge': 'Надб. крупногаб.',
+            'tax_amount': 'Налог',
+            'tax_system': 'Система налога',
+            'total_expenses': 'ИТОГО расходов',
+            'profit': 'Прибыль',
+            'margin_percent': 'Маржа %',
+            'roi': 'ROI %',
+            'breakeven_price': 'Точка безубыт.',
+            'recommended_min_price': 'Мин. цена рек.',
+            'profit_per_ruble': 'Прибыль на ₽',
+            'contribution_margin': 'Маржинальный доход',
+        }
+        
+        # Выбираем только существующие колонки
+        cols_to_export = [c for c in columns_map if c in df.columns]
+        df_export = df[cols_to_export].rename(columns=columns_map).copy()
+        
+        # Записываем данные
+        df_export.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1)
+        ws = writer.sheets[sheet_name]
+        
+        # 🎨 Форматирование заголовка
+        header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
+        header_font = Font(bold=True, color="FFFFFF", size=10)
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = self.thin_border
+        
+        ws.row_dimensions[1].height = 30
+        
+        # Категории колонок для форматирования
+        money_cols = [
+            'Цена продажи', 'Себестоимость', 'Комиссия МП', 'Логистика',
+            'Хранение', 'Эквайринг', 'Доставка', 'Последняя миля',
+            'Возвраты', 'РКО', 'Премиум', 'Страховка', 'Упаковка', 'Маркетинг',
+            'Подписка', 'Надб. опасные', 'Надб. хрупкие', 'Надб. крупногаб.',
+            'Налог', 'ИТОГО расходов', 'Прибыль', 'Точка безубыт.',
+            'Мин. цена рек.', 'Маржинальный доход'
+        ]
+        percent_cols = ['Маржа %', 'ROI %', 'Комиссия %', 'Прибыль на ₽']
+        
+        # 🔢 Форматирование чисел
+        for col_idx, col_name in enumerate(df_export.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            
+            if col_name in money_cols:
+                for row in range(2, len(df_export) + 2):
+                    ws[f'{col_letter}{row}'].number_format = '#,##0.00 ₽'
+                    ws[f'{col_letter}{row}'].border = self.thin_border
+            elif col_name in percent_cols:
+                for row in range(2, len(df_export) + 2):
+                    ws[f'{col_letter}{row}'].number_format = '0.00"%"'
+                    ws[f'{col_letter}{row}'].border = self.thin_border
+            else:
+                for row in range(2, len(df_export) + 2):
+                    ws[f'{col_letter}{row}'].border = self.thin_border
+            
+            # Ширина колонок
+            max_len = max(
+                len(str(col_name)),
+                df_export[col_name].astype(str).str.len().max() if len(df_export) > 0 else 0
+            )
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 25)
+        
+        # 🎯 Условное форматирование: прибыль (зелёный/красный)
+        if 'Прибыль' in df_export.columns:
+            profit_col_idx = df_export.columns.get_loc('Прибыль') + 1
+            profit_col_letter = get_column_letter(profit_col_idx)
+            data_range = f"{profit_col_letter}2:{profit_col_letter}{len(df_export) + 1}"
+            
+            # Зелёный для прибыли > 0
+            ws.conditional_formatting.add(data_range,
+                CellIsRule(operator='greaterThan', formula=['0'],
+                          fill=PatternFill("solid", fgColor=self.COLORS["positive"]),
+                          font=Font(color="006100", bold=True)))
+            
+            # Красный для убытка
+            ws.conditional_formatting.add(data_range,
+                CellIsRule(operator='lessThan', formula=['0'],
+                          fill=PatternFill("solid", fgColor=self.COLORS["negative"]),
+                          font=Font(color="9C0006", bold=True)))
+        
+        # 📊 DataBar для маржи
+        if 'Маржа %' in df_export.columns:
+            margin_col_idx = df_export.columns.get_loc('Маржа %') + 1
+            margin_letter = get_column_letter(margin_col_idx)
+            margin_range = f"{margin_letter}2:{margin_letter}{len(df_export) + 1}"
+            
+            ws.conditional_formatting.add(margin_range,
+                DataBarRule(start_type='min', end_type='max',
+                           color="636EFA", showValue=True))
+        
+        # 🎯 Условное форматирование: маржа (цветовая шкала)
+        if 'Маржа %' in df_export.columns:
+            margin_col_idx = df_export.columns.get_loc('Маржа %') + 1
+            margin_letter = get_column_letter(margin_col_idx)
+            margin_range = f"{margin_letter}2:{margin_letter}{len(df_export) + 1}"
+            
+            ws.conditional_formatting.add(margin_range,
+                ColorScaleRule(
+                    start_type='num', start_value=-10, start_color=self.COLORS["negative"],
+                    mid_type='num', mid_value=10, mid_color=self.COLORS["warning"],
+                    end_type='num', end_value=30, end_color=self.COLORS["positive"]
+                ))
+        
+        # 📌 Закрепление заголовка и автофильтр
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        
+        # 💰 ИТОГОВАЯ строка с ЖИВЫМИ ФОРМУЛАМИ Excel
+        total_row = len(df_export) + 3
+        ws[f'A{total_row}'] = "ИТОГО / СРЕДНЕЕ:"
+        ws[f'A{total_row}'].font = Font(bold=True, size=11)
+        ws[f'A{total_row}'].fill = PatternFill("solid", fgColor=self.COLORS["total_bg"])
+        ws[f'A{total_row}'].border = self.thin_border
+        
+        last_data_row = len(df_export) + 1
+        
+        # Живые формулы Excel (не статические значения!)
+        for col_idx, col_name in enumerate(df_export.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            cell_ref = ws[f'{col_letter}{total_row}']
+            cell_ref.fill = PatternFill("solid", fgColor=self.COLORS["total_bg"])
+            cell_ref.font = Font(bold=True)
+            cell_ref.border = self.thin_border
+            
+            if col_name in money_cols:
+                # 🆕 ЖИВАЯ ФОРМУЛА SUM
+                cell_ref.value = f"=SUM({col_letter}2:{col_letter}{last_data_row})"
+                cell_ref.number_format = '#,##0.00 ₽'
+            elif col_name in percent_cols:
+                # 🆕 ЖИВАЯ ФОРМУЛА AVERAGE
+                cell_ref.value = f"=AVERAGE({col_letter}2:{col_letter}{last_data_row})"
+                cell_ref.number_format = '0.00"%"'
+        
+        # Печать заголовка на каждой странице
+        ws.print_title_rows = '1:1'
+    
+    def _write_marketplace_comparison(self, writer, df: pd.DataFrame):
+        """🏪 Сравнение маркетплейсов с формулами"""
+        if 'marketplace' not in df.columns:
+            return
+        
+        ws = writer.book.create_sheet("🏪 Сравнение МП")
+        
+        # Группировка по маркетплейсам
+        agg = df.groupby('marketplace').agg({
+            'profit': ['sum', 'mean', 'count'],
+            'margin_percent': 'mean',
+            'price': 'mean',
+            'commission': 'mean',
+            'logistics': 'mean',
+            'tax_amount': 'mean',
+        }).reset_index()
+        agg.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль', 
+                      'Кол-во SKU', 'Средняя маржа %', 'Средняя цена',
+                      'Средняя комиссия', 'Средняя логистика', 'Средний налог']
+        
+        agg.to_excel(writer, sheet_name="🏪 Сравнение МП", index=False, startrow=1)
+        ws = writer.sheets["🏪 Сравнение МП"]
+        
+        # Форматирование
+        header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
+        header_font = Font(bold=True, color="FFFFFF", size=10)
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = self.thin_border
+        
+        ws.row_dimensions[1].height = 30
+        
+        # Форматирование чисел
+        money_cols = ['Общая прибыль', 'Средняя прибыль', 'Средняя цена', 
+                     'Средняя комиссия', 'Средняя логистика', 'Средний налог']
+        percent_cols = ['Средняя маржа %']
+        
+        for col_idx, col_name in enumerate(agg.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            
+            if col_name in money_cols:
+                for row in range(2, len(agg) + 2):
+                    ws[f'{col_letter}{row}'].number_format = '#,##0.00 ₽'
+            elif col_name in percent_cols:
+                for row in range(2, len(agg) + 2):
+                    ws[f'{col_letter}{row}'].number_format = '0.00"%"'
+            
+            max_len = max(
+                len(str(col_name)),
+                agg[col_name].astype(str).str.len().max() if len(agg) > 0 else 0
+            )
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 25)
+        
+        # Условное форматирование для общей прибыли
+        if 'Общая прибыль' in agg.columns:
+            profit_col_idx = agg.columns.get_loc('Общая прибыль') + 1
+            profit_col_letter = get_column_letter(profit_col_idx)
+            data_range = f"{profit_col_letter}2:{profit_col_letter}{len(agg) + 1}"
+            
+            ws.conditional_formatting.add(data_range,
+                CellIsRule(operator='greaterThan', formula=['0'],
+                          fill=PatternFill("solid", fgColor=self.COLORS["positive"])))
+            ws.conditional_formatting.add(data_range,
+                CellIsRule(operator='lessThan', formula=['0'],
+                          fill=PatternFill("solid", fgColor=self.COLORS["negative"])))
+        
+        ws.freeze_panes = "A2"
+    
+    def _write_category_analysis(self, writer, df: pd.DataFrame):
+        """📂 Анализ по категориям"""
+        if 'category' not in df.columns:
+            return
+        
+        ws = writer.book.create_sheet("📂 Анализ категорий")
+        
+        agg = df.groupby('category').agg({
+            'profit': ['sum', 'mean'],
+            'margin_percent': 'mean',
+            'price': 'mean',
+        }).reset_index()
+        agg.columns = ['Категория', 'Общая прибыль', 'Средняя прибыль', 
+                      'Средняя маржа %', 'Средняя цена']
+        
+        agg.to_excel(writer, sheet_name="📂 Анализ категорий", index=False, startrow=1)
+        ws = writer.sheets["📂 Анализ категорий"]
+        
+        header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
+        header_font = Font(bold=True, color="FFFFFF", size=10)
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = self.thin_border
+        
+        ws.row_dimensions[1].height = 30
+        
+        # Форматирование
+        for col_idx, col_name in enumerate(agg.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            
+            if col_name in ['Общая прибыль', 'Средняя прибыль', 'Средняя цена']:
+                for row in range(2, len(agg) + 2):
+                    ws[f'{col_letter}{row}'].number_format = '#,##0.00 ₽'
+            elif col_name == 'Средняя маржа %':
+                for row in range(2, len(agg) + 2):
+                    ws[f'{col_letter}{row}'].number_format = '0.00"%"'
+            
+            max_len = max(
+                len(str(col_name)),
+                agg[col_name].astype(str).str.len().max() if len(agg) > 0 else 0
+            )
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 25)
+        
+        ws.freeze_panes = "A2"
+    
+    def _write_top_bottom_sheet(self, writer, df: pd.DataFrame):
+        """🏆 Топ прибыльных и убыточных товаров"""
+        ws = writer.book.create_sheet("🏆 Топ товары")
+        
+        # Определяем доступные колонки
+        available_cols = ['Артикул', 'Бренд', 'marketplace', 'profit', 'margin_percent']
+        available_cols = [c for c in available_cols if c in df.columns]
+        
+        if not available_cols:
+            return
+        
+        # Топ прибыльных
+        top_profit = df.nlargest(20, 'profit')[available_cols].copy()
+        rename_map = {'marketplace': 'Маркетплейс', 'profit': 'Прибыль', 'margin_percent': 'Маржа %'}
+        top_profit = top_profit.rename(columns={k: v for k, v in rename_map.items() if k in top_profit.columns})
+        
+        ws['A1'] = "🏆 ТОП-20 ПРИБЫЛЬНЫХ ТОВАРОВ"
+        ws['A1'].font = Font(bold=True, size=12, color="006100")
+        ws['A1'].fill = PatternFill("solid", fgColor=self.COLORS["positive"])
+        ws.merge_cells('A1:E1')
+        
+        top_profit.to_excel(writer, sheet_name="🏆 Топ товары", index=False, startrow=2)
+        
+        # Топ убыточных
+        bottom_row = len(top_profit) + 5
+        ws[f'A{bottom_row}'] = "💸 ТОП-20 УБЫТОЧНЫХ ТОВАРОВ"
+        ws[f'A{bottom_row}'].font = Font(bold=True, size=12, color="9C0006")
+        ws[f'A{bottom_row}'].fill = PatternFill("solid", fgColor=self.COLORS["negative"])
+        ws.merge_cells(f'A{bottom_row}:E{bottom_row}')
+        
+        bottom_profit = df.nsmallest(20, 'profit')[available_cols].copy()
+        bottom_profit = bottom_profit.rename(columns={k: v for k, v in rename_map.items() if k in bottom_profit.columns})
+        
+        bottom_profit.to_excel(writer, sheet_name="🏆 Топ товары", 
+                              index=False, startrow=bottom_row + 1)
+        
+        ws = writer.sheets["🏆 Топ товары"]
+        ws.freeze_panes = "A3"
+    
+    def _write_parameters_sheet(self, writer, metadata: Dict):
+        """⚙️ Лист с параметрами расчёта (для аудита)"""
+        ws = writer.book.create_sheet("⚙️ Параметры")
+        
+        ws['A1'] = "ПАРАМЕТРЫ РАСЧЁТА"
+        ws['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+        ws['A1'].fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
+        ws.merge_cells('A1:B1')
+        
+        if metadata is None:
+            metadata = {}
+        
+        params = [
+            ("Дата расчёта", datetime.now().strftime('%d.%m.%Y %H:%M')),
+            ("Версия приложения", APP_VERSION),
+            ("Маркетплейсы", ", ".join(metadata.get('marketplaces', []))),
+            ("Режим работы", metadata.get('operation_mode', 'FBS')),
+            ("Дней хранения", metadata.get('days_in_storage', 30)),
+            ("Курс валют", metadata.get('currency_rate', 1.0)),
+            ("Учтена сезонность", "Да" if metadata.get('seasonal', True) else "Нет"),
+            ("Источник тарифов", metadata.get('tariff_source', 'Захардкожены')),
+        ]
+        
+        for idx, (key, value) in enumerate(params, 3):
+            ws[f'A{idx}'] = key
+            ws[f'A{idx}'].font = Font(bold=True)
+            ws[f'A{idx}'].fill = PatternFill("solid", fgColor=self.COLORS["total_bg"])
+            ws[f'A{idx}'].border = self.thin_border
+            
+            ws[f'B{idx}'] = str(value)
+            ws[f'B{idx}'].border = self.thin_border
+        
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 50
+# ============================================================================
 # БЛОК 14: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА
 # ============================================================================
 def show_unit_economics_interface():
@@ -7936,9 +8413,80 @@ def show_catalog_calculation_parallel():
         # ====================================================================
         # 🆕 v100.5.2: ЭКСПОРТ РЕЗУЛЬТАТОВ (теперь работает корректно!)
         # ====================================================================
-        st.subheader("📤 Экспорт результатов")
-        
-        export_col1, export_col2 = st.columns(2)
+        # ========================================================================
+# 📤 ЭКСПОРТ РЕЗУЛЬТАТОВ (PRO с формулами и условным форматированием)
+# ========================================================================
+st.subheader("📤 Экспорт результатов")
+
+export_col1, export_col2, export_col3 = st.columns(3)
+
+with export_col1:
+    if st.button("📥 Экспорт в Excel (PRO)", type="primary", key="ue_parallel_export_excel_pro"):
+        with st.spinner("Генерация профессионального отчёта..."):
+            output_path = TEMP_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            
+            metadata = {
+                'marketplaces': selected_marketplaces,
+                'operation_mode': operation_mode,
+                'days_in_storage': days_in_storage,
+                'seasonal': use_seasonal,
+                'tariff_source': 'Актуальные тарифы 2026',
+            }
+            
+            exporter = ProfessionalExcelExporter()
+            success = exporter.export_unit_economics(
+                results_df, str(output_path), metadata
+            )
+            
+            if success and output_path.exists():
+                with open(output_path, "rb") as f:
+                    st.download_button(
+                        label="⬇️ Скачать PRO-отчёт",
+                        data=f.read(),
+                        file_name=output_path.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="ue_parallel_download_excel_pro"
+                    )
+                st.success("✅ PRO-отчёт готов!")
+            else:
+                st.error("❌ Ошибка генерации отчёта")
+
+with export_col2:
+    if st.button("📥 Экспорт в Excel (базовый)", key="ue_parallel_export_excel"):
+        with st.spinner("Генерация Excel файла..."):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                results_df.to_excel(writer, index=False, sheet_name='Результаты')
+                
+                if 'marketplace' in results_df.columns:
+                    mp_summary = results_df.groupby('marketplace').agg({
+                        'profit': ['sum', 'mean'],
+                        'margin_percent': 'mean',
+                        'price': 'mean'
+                    }).reset_index()
+                    mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
+                                         'Средняя маржа %', 'Средняя цена']
+                    mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
+            
+            output.seek(0)
+            st.download_button(
+                label="⬇️ Скачать Excel",
+                data=output,
+                file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="ue_parallel_download_excel"
+            )
+
+with export_col3:
+    if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
+        csv = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+        st.download_button(
+            label="⬇️ Скачать CSV",
+            data=csv,
+            file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv; charset=utf-8",
+            key="ue_parallel_download_csv"
+        )
         
         with export_col1:
             if st.button("📥 Экспорт в Excel", key="ue_parallel_export_excel"):
