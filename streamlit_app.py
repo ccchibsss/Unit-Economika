@@ -7706,10 +7706,13 @@ def show_single_product_calculation():
             st_dataframe_compat(pd.DataFrame(expenses_data), key="ue_expenses_table")
 
 # ============================================================================
-# БЛОК 15: UI ФУНКЦИИ - ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ (🆕 v100.5 - С PRO ЭКСПОРТОМ)
+# БЛОК 15: UI ФУНКЦИИ - ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ (🆕 v100.5.2 - ИСПРАВЛЕН ЭКСПОРТ)
 # ============================================================================
 def show_catalog_calculation_parallel():
-    """📦 ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ ПО КАТАЛОГУ"""
+    """
+    📦 ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ ПО КАТАЛОГУ
+    Оптимизирован для 100K+ товаров
+    """
     st.subheader("📦 Параллельный расчет по каталогу")
     
     if st.session_state.get('uploaded_data') is None:
@@ -7739,7 +7742,7 @@ def show_catalog_calculation_parallel():
         selected_marketplaces = st.multiselect(
             "🏪 Маркетплейсы для расчета",
             options=available_marketplaces,
-            default=available_marketplaces[:3],
+            default=available_marketplaces[:3] if len(available_marketplaces) >= 3 else available_marketplaces,
             key="ue_parallel_marketplaces",
             help="Выберите один или несколько маркетплейсов"
         )
@@ -7747,15 +7750,6 @@ def show_catalog_calculation_parallel():
         if not selected_marketplaces:
             st.warning("⚠️ Выберите хотя бы один маркетплейс")
             return
-        
-        # 🆕 v100.5: Налоговый режим
-        tax_system = st.selectbox(
-            "💼 Налоговый режим",
-            list(TAX_SYSTEMS.keys()),
-            format_func=lambda x: TAX_SYSTEMS[x]["name"],
-            key="ue_parallel_tax_system",
-            help="Выберите систему налогообложения"
-        )
     
     with col2:
         operation_mode = st.selectbox(
@@ -7771,15 +7765,6 @@ def show_catalog_calculation_parallel():
             value=30,
             step=1,
             key="ue_parallel_days"
-        )
-        
-        # 🆕 v100.5: Интенсивность рекламы
-        ad_intensity = st.selectbox(
-            "📢 Интенсивность рекламы",
-            ["low", "medium", "high", "aggressive"],
-            format_func=lambda x: {"low": "Низкая (5%)", "medium": "Средняя (15%)", "high": "Высокая (25%)", "aggressive": "Агрессивная (35%)"}[x],
-            key="ue_parallel_ad_intensity",
-            help="Доля рекламных расходов (ДРР)"
         )
     
     with col3:
@@ -7819,20 +7804,20 @@ def show_catalog_calculation_parallel():
         article_col = st.selectbox("Артикул", options=df.columns, key="ue_parallel_article")
     
     with col2:
-        price_options = [col for col in df.columns if any(w in col.lower() for w in ['цена', 'price', 'стоимость'])]
+        price_options = [col for col in df.columns if any(w in str(col).lower() for w in ['цена', 'price', 'стоимость'])]
         if not price_options:
-            price_options = df.columns.tolist()
+            price_options = list(df.columns)
         price_col = st.selectbox("Цена продажи", options=price_options, key="ue_parallel_price")
     
     with col3:
-        cost_options = [col for col in df.columns if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная'])]
+        cost_options = [col for col in df.columns if any(w in str(col).lower() for w in ['себестоимость', 'cost', 'закупочная'])]
         if not cost_options:
-            cost_options = df.columns.tolist()
+            cost_options = list(df.columns)
         cost_col = st.selectbox("Себестоимость", options=cost_options, key="ue_parallel_cost")
     
     with col4:
-        category_options = [col for col in df.columns if any(w in col.lower() for w in ['категория', 'category', 'группа'])]
-        category_options = ['Не выбрано'] + category_options
+        category_options = [col for col in df.columns if any(w in str(col).lower() for w in ['категория', 'category', 'группа'])]
+        category_options = ['Не выбрано'] + list(category_options)
         category_col = st.selectbox("Категория (опционально)", options=category_options, key="ue_parallel_category")
     
     st.subheader("📏 Габариты")
@@ -7840,21 +7825,24 @@ def show_catalog_calculation_parallel():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        length_options = ['Не выбрано'] + [col for col in df.columns if any(w in col.lower() for w in ['длина', 'length', 'длинна', 'l'])]
+        length_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['длина', 'length', 'длинна', 'l'])]
         length_col = st.selectbox("Длина (см)", options=length_options, key="ue_parallel_length")
     
     with col2:
-        width_options = ['Не выбрано'] + [col for col in df.columns if any(w in col.lower() for w in ['ширина', 'width', 'w'])]
+        width_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['ширина', 'width', 'w'])]
         width_col = st.selectbox("Ширина (см)", options=width_options, key="ue_parallel_width")
     
     with col3:
-        height_options = ['Не выбрано'] + [col for col in df.columns if any(w in col.lower() for w in ['высота', 'height', 'h'])]
+        height_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['высота', 'height', 'h'])]
         height_col = st.selectbox("Высота (см)", options=height_options, key="ue_parallel_height")
     
     with col4:
-        weight_options = ['Не выбрано'] + [col for col in df.columns if any(w in col.lower() for w in ['вес', 'weight', 'масса', 'кг'])]
+        weight_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['вес', 'weight', 'масса', 'кг'])]
         weight_col = st.selectbox("Вес (кг)", options=weight_options, key="ue_parallel_weight")
     
+    # ========================================================================
+    # 🆕 v100.5.2: КНОПКА РАСЧЁТА (сохраняет результат в session_state)
+    # ========================================================================
     if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_parallel_calc"):
         total_items = len(df) * len(selected_marketplaces)
         
@@ -7868,12 +7856,6 @@ def show_catalog_calculation_parallel():
                 width_col_name = width_col if width_col != 'Не выбрано' else None
                 height_col_name = height_col if height_col != 'Не выбрано' else None
                 weight_col_name = weight_col if weight_col != 'Не выбрано' else None
-                
-                # 🆕 v100.5: Валидация данных
-                is_valid, validation_errors = validate_input_data(df)
-                if not is_valid:
-                    for error in validation_errors:
-                        st.warning(error)
                 
                 results_df = unit_economics.calculate_for_catalog_batch(
                     df=df,
@@ -7890,87 +7872,83 @@ def show_catalog_calculation_parallel():
                     days_in_storage=days_in_storage,
                     apply_markup=markup_percent,
                     use_parallel=use_parallel,
-                    max_workers=max_workers if use_parallel else 1,
-                    tax_system=tax_system,
-                    ad_intensity=ad_intensity
+                    max_workers=max_workers if use_parallel else 1
                 )
                 
                 if results_df.empty:
                     st.error("❌ Не удалось рассчитать юнит-экономику ни для одного товара")
                     return
                 
+                # ✅ ИСПРАВЛЕНО v100.5.2: сохраняем в session_state + метаданные
                 st.session_state.ue_parallel_results = results_df
+                st.session_state.ue_parallel_metadata = {
+                    'marketplaces': selected_marketplaces,
+                    'operation_mode': operation_mode,
+                    'days_in_storage': days_in_storage,
+                    'seasonal': use_seasonal,
+                }
                 
                 st.success(f"✅ Рассчитано {len(results_df)} записей по {len(selected_marketplaces)} маркетплейсам")
                 
-                st.subheader("📊 Сводная статистика")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    total_profit = results_df['profit'].sum()
-                    st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
-                with col2:
-                    avg_profit = results_df['profit'].mean()
-                    st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
-                with col3:
-                    avg_margin = results_df['margin_percent'].mean()
-                    st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
-                with col4:
-                    best_mp = results_df.groupby('marketplace')['profit'].sum().idxmax()
-                    st.metric("🏆 Лучший МП", best_mp)
-                
-                st.subheader("📋 Результаты расчета")
-                
-                display_cols = ['Артикул', 'marketplace', 'price', 'profit', 'margin_percent',
-                               'recommended_min_price', 'tax_amount', 'breakeven_price',
-                               'billable_weight', 'advertising_cost', 'auto_parts_specific']
-                available_display = [col for col in display_cols if col in results_df.columns]
-                
-                st_dataframe_compat(results_df[available_display].head(100))
-                
-                st.subheader("📤 Экспорт результатов")
-                
-                export_col1, export_col2, export_col3 = st.columns(3)
-                
-                with export_col1:
-                    if st.button("📥 Экспорт в Excel (PRO)", key="ue_parallel_export_excel_pro"):
-                        with st.spinner("Генерация профессионального отчёта..."):
-                            output_path = TEMP_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            except Exception as e:
+                st.error(f"❌ Ошибка при расчете: {str(e)}")
+                with st.expander("📋 Подробности ошибки", expanded=True):
+                    st.code(traceback.format_exc())
+                return
+    
+    # ========================================================================
+    # 🆕 v100.5.2: ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ И ЭКСПОРТ (ВНЕ блока расчёта!)
+    # ========================================================================
+    if 'ue_parallel_results' in st.session_state and st.session_state.ue_parallel_results is not None:
+        results_df = st.session_state.ue_parallel_results
+        metadata = st.session_state.get('ue_parallel_metadata', {})
+        
+        # Сводная статистика
+        st.subheader("📊 Сводная статистика")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            total_profit = results_df['profit'].sum()
+            st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
+        with col2:
+            avg_profit = results_df['profit'].mean()
+            st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
+        with col3:
+            avg_margin = results_df['margin_percent'].mean()
+            st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
+        with col4:
+            try:
+                best_mp = results_df.groupby('marketplace')['profit'].sum().idxmax()
+                st.metric("🏆 Лучший МП", best_mp)
+            except Exception:
+                st.metric("🏆 Лучший МП", "Н/Д")
+        
+        # Результаты расчета
+        st.subheader("📋 Результаты расчета")
+        
+        display_cols = ['Артикул', 'marketplace', 'price', 'profit', 'margin_percent',
+                       'recommended_min_price', 'tax_amount', 'breakeven_price']
+        available_display = [col for col in display_cols if col in results_df.columns]
+        
+        if available_display:
+            st.dataframe(results_df[available_display].head(100), use_container_width=True)
+        
+        # ====================================================================
+        # 🆕 v100.5.2: ЭКСПОРТ РЕЗУЛЬТАТОВ (теперь работает корректно!)
+        # ====================================================================
+        st.subheader("📤 Экспорт результатов")
+        
+        export_col1, export_col2 = st.columns(2)
+        
+        with export_col1:
+            if st.button("📥 Экспорт в Excel", key="ue_parallel_export_excel"):
+                try:
+                    with st.spinner("Генерация Excel файла..."):
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            results_df.to_excel(writer, index=False, sheet_name='Результаты')
                             
-                            metadata = {
-                                "marketplaces": selected_marketplaces,
-                                "operation_mode": operation_mode,
-                                "days_in_storage": days_in_storage,
-                                "seasonal": use_seasonal,
-                                "tariff_source": "Актуальные тарифы 2026",
-                                "tax_system": tax_system,
-                                "ad_intensity": ad_intensity,
-                            }
-                            
-                            exporter = ProfessionalExcelExporter()
-                            success = exporter.export_unit_economics(
-                                results_df, str(output_path), metadata
-                            )
-                            
-                            if success and output_path.exists():
-                                with open(output_path, "rb") as f:
-                                    st.download_button(
-                                        label="⬇️ Скачать PRO-отчёт",
-                                        data=f.read(),
-                                        file_name=output_path.name,
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key="ue_parallel_download_excel_pro"
-                                    )
-                            else:
-                                st.error("❌ Ошибка генерации отчёта")
-                
-                with export_col2:
-                    if st.button("📥 Экспорт в Excel (базовый)", key="ue_parallel_export_excel"):
-                        with st.spinner("Генерация Excel файла..."):
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                results_df.to_excel(writer, index=False, sheet_name='Результаты')
-                                
+                            if 'marketplace' in results_df.columns:
                                 mp_summary = results_df.groupby('marketplace').agg({
                                     'profit': ['sum', 'mean'],
                                     'margin_percent': 'mean',
@@ -7979,32 +7957,53 @@ def show_catalog_calculation_parallel():
                                 mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
                                                      'Средняя маржа %', 'Средняя цена']
                                 mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
-                            
-                            output.seek(0)
-                            st.download_button(
-                                label="⬇️ Скачать Excel",
-                                data=output,
-                                file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key="ue_parallel_download_excel"
-                            )
-                
-                with export_col3:
-                    if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
-                        csv = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+                        
+                        output.seek(0)
+                        
+                        st.download_button(
+                            label="⬇️ Скачать Excel",
+                            data=output,
+                            file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="ue_parallel_download_excel"
+                        )
+                        st.success("✅ Excel файл готов к скачиванию!")
+                        
+                except Exception as e:
+                    st.error(f"❌ Ошибка генерации Excel: {str(e)}")
+                    logger.error(f"Ошибка экспорта Excel: {e}")
+        
+        with export_col2:
+            if st.button("📥 Экспорт в CSV", key="ue_parallel_export_csv"):
+                try:
+                    with st.spinner("Генерация CSV файла..."):
+                        csv_data = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
+                        
                         st.download_button(
                             label="⬇️ Скачать CSV",
-                            data=csv,
+                            data=csv_data.encode('utf-8-sig'),
                             file_name=f"юнит_экономика_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                             mime="text/csv; charset=utf-8",
                             key="ue_parallel_download_csv"
                         )
-            
-            except Exception as e:
-                st.error(f"❌ Ошибка при расчете: {str(e)}")
-                with st.expander("📋 Подробности ошибки", expanded=True):
-                    st.code(traceback.format_exc())
-
+                        st.success("✅ CSV файл готов к скачиванию!")
+                        
+                except Exception as e:
+                    st.error(f"❌ Ошибка генерации CSV: {str(e)}")
+                    logger.error(f"Ошибка экспорта CSV: {e}")
+        
+        # Кнопка очистки результатов
+        st.divider()
+        if st.button("🗑️ Очистить результаты расчета", key="ue_parallel_clear"):
+            if 'ue_parallel_results' in st.session_state:
+                del st.session_state.ue_parallel_results
+            if 'ue_parallel_metadata' in st.session_state:
+                del st.session_state.ue_parallel_metadata
+            st.success("✅ Результаты очищены")
+            st.rerun()
+    
+    else:
+        st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 # ============================================================================
 # БЛОК 16: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI)
 # ============================================================================
