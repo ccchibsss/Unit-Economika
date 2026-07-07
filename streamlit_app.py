@@ -6954,9 +6954,207 @@ class AdvancedDimensionsValidator:
             "height_cm": round(height, 2),
             "weight_kg": round(weight, 2)
         }
-
 # ============================================================================
-# БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (🆕 v100.5.1 - С ИСПРАВЛЕНИЕМ КРАКОЗЯБР)
+# 🆕 v100.5.2: ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ИСПРАВЛЕНИЯ КОДИРОВКИ
+# ============================================================================
+def detect_mojibake(text: str) -> bool:
+    """
+    🆕 v100.5.2: Определяет наличие кракозябр (двойного UTF-8 кодирования).
+    Примеры: РђСЂС‚РёРєСѓР», Р‘СЂРµРЅРґ, Р¦РµРЅР°
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    
+    # Паттерны типичных кракозябр
+    mojibake_patterns = [
+        r'Р[°-Џ]{2,}',
+        r'Р[РЎ][°-Џ]{2,}',
+        r'[РЎР][°-Џ]{3,}',
+        r'Р[°-Џ]Р[°-Џ]',
+    ]
+    
+    for pattern in mojibake_patterns:
+        if re.search(pattern, text):
+            return True
+    
+    # Дополнительная проверка: частота "Р" в начале слов
+    words = text.split()
+    if len(words) >= 3:
+        r_words = sum(1 for w in words if w.startswith('Р') and len(w) >= 2)
+        if r_words / len(words) > 0.5:
+            return True
+    
+    return False
+
+
+def fix_double_utf8(text: str) -> str:
+    """
+    🆕 v100.5.2: Исправляет двойное кодирование UTF-8.
+    РђСЂС‚РёРєСѓР» → Артикул
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    
+    encodings_to_try = [
+        ('cp1251', 'utf-8'),
+        ('latin1', 'utf-8'),
+        ('iso-8859-1', 'utf-8'),
+        ('cp1252', 'utf-8'),
+    ]
+    
+    for source_enc, target_enc in encodings_to_try:
+        try:
+            fixed = text.encode(source_enc).decode(target_enc)
+            if fixed and not detect_mojibake(fixed):
+                return fixed
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+    
+    return text
+
+
+def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """
+    🆕 v100.5.2: Исправляет кракозябры во всём DataFrame.
+    Возвращает: (исправленный DataFrame, количество исправленных ячеек)
+    """
+    fixed_count = 0
+    
+    # Исправляем названия колонок
+    new_columns = []
+    for col in df.columns:
+        col_str = str(col)
+        if detect_mojibake(col_str):
+            new_col = fix_double_utf8(col_str)
+            new_columns.append(new_col)
+            fixed_count += 1
+        else:
+            new_columns.append(col)
+    
+    df.columns = new_columns
+    
+    # Исправляем строковые значения
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            try:
+                df[col] = df[col].apply(
+                    lambda x: fix_double_utf8(x) if isinstance(x, str) and detect_mojibake(x) else x
+                )
+            except Exception:
+                pass
+    
+    return df, fixed_count
+
+
+def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
+    """
+    🆕 v100.5.2: Умное чтение CSV с автоматическим исправлением кракозябр.
+    Приоритет кодировок: UTF-8-sig → UTF-8 → CP1251 → другие
+    """
+    separators = [';', ',', '\t', '|']
+    encodings_priority = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251']
+    
+    best_df = None
+    best_encoding = None
+    best_sep = None
+    mojibake_count = 0
+    
+    for encoding in encodings_priority:
+        for sep in separators:
+            try:
+                file_obj.seek(0)
+                df = pd.read_csv(
+                    file_obj,
+                    encoding=encoding,
+                    sep=sep,
+                    engine='python',
+                    on_bad_lines='skip',
+                    skipinitialspace=True,
+                    quotechar='"',
+                    doublequote=True,
+                    **kwargs
+                )
+                
+                if df is None or df.empty or len(df.columns) <= 1:
+                    continue
+                
+                # Проверяем наличие кракозябр
+                current_mojibake = sum(
+                    1 for col in df.columns 
+                    if isinstance(col, str) and detect_mojibake(col)
+                )
+                
+                # Если нашли вариант без кракозябр — используем его
+                if current_mojibake == 0:
+                    logger.info(f"✅ CSV прочитан без кракозябр: кодировка={encoding}, разделитель='{sep}'")
+                    return df
+                
+                # Запоминаем лучший вариант
+                if best_df is None or current_mojibake < mojibake_count:
+                    best_df = df
+                    best_encoding = encoding
+                    best_sep = sep
+                    mojibake_count = current_mojibake
+                    
+            except (pd.errors.ParserError, UnicodeDecodeError, Exception):
+                continue
+    
+    # Если нашли DataFrame с кракозябрами — исправляем
+    if best_df is not None:
+        logger.warning(f"⚠️ CSV прочитан с кракозябрами (кодировка={best_encoding}). Исправляем...")
+        fixed_df, fixed_count = fix_dataframe_encoding(best_df)
+        logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
+        return fixed_df
+    
+    # Fallback: chardet
+    if CHARDET_AVAILABLE and chardet is not None:
+        try:
+            file_obj.seek(0)
+            raw_data = file_obj.read(100000)
+            detected = chardet.detect(raw_data)
+            
+            if detected and detected.get('encoding'):
+                file_obj.seek(0)
+                for sep in separators:
+                    try:
+                        df = pd.read_csv(
+                            file_obj,
+                            encoding=detected['encoding'],
+                            sep=sep,
+                            engine='python',
+                            on_bad_lines='skip'
+                        )
+                        
+                        if df is not None and not df.empty and len(df.columns) > 1:
+                            logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
+                            
+                            has_mojibake = any(
+                                isinstance(col, str) and detect_mojibake(col) 
+                                for col in df.columns
+                            )
+                            if has_mojibake:
+                                df, _ = fix_dataframe_encoding(df)
+                            
+                            return df
+                    except (pd.errors.ParserError, UnicodeDecodeError):
+                        continue
+        except Exception as e:
+            logger.warning(f"Ошибка chardet: {e}")
+    
+    raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
+
+
+def st_dataframe_compat(df, *args, **kwargs):
+    """
+    🆕 v100.5.2: Совместимая обёртка для st.dataframe.
+    Для Streamlit 1.58+: width='stretch' вместо use_container_width=True
+    """
+    kwargs.pop('use_container_width', None)
+    if 'width' not in kwargs:
+        kwargs['width'] = 'stretch'
+    return st.dataframe(df, *args, **kwargs)
+# ============================================================================
+# БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (🆕 v100.5.2 - С ИСПРАВЛЕНИЕМ КРАКОЗЯБР)
 # ============================================================================
 def show_data_upload_interface():
     """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ"""
@@ -6973,9 +7171,13 @@ def show_data_upload_interface():
 **ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
 - 📏 Длина, Ширина, Высота (числовые значения)
 - 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
-**🆕 v100.5.1:** Автоматическое исправление кракозябр (двойного UTF-8 кодирования)
+**🆕 v100.5.2:** Автоматическое исправление кракозябр (двойного UTF-8 кодирования)
 **ШАГ 3:** Нажмите кнопку ниже и выберите файл
 **ШАГ 4:** Дождитесь успешной загрузки
+
+💡 **КАК ПРАВИЛЬНО СОХРАНИТЬ CSV В EXCEL:**
+1. Файл → Сохранить как → **CSV UTF-8 (разделитель — запятая)**
+2. Или используйте кнопку "Скачать шаблон" ниже (он уже в правильной кодировке)
 """)
     
     uploaded_file = st.file_uploader(
@@ -6991,7 +7193,7 @@ def show_data_upload_interface():
             file_name = uploaded_file.name.lower()
             
             if file_name.endswith('.csv'):
-                # 🆕 v100.5.1: Используем умное чтение CSV с исправлением кракозябр
+                # 🆕 v100.5.2: Используем умное чтение CSV с исправлением кракозябр
                 try:
                     df = smart_read_csv(uploaded_file)
                 except Exception as e:
@@ -7033,19 +7235,22 @@ def show_data_upload_interface():
                 st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
                 return
             
-            # ✅ ИСПРАВЛЕНО: убран дублирующий dropna
+            # ✅ ИСПРАВЛЕНО v100.5.2: убран дублирующий dropna
             df = df.dropna(how='all')
             
             if df.empty:
                 st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
                 return
             
-            # 🆕 v100.5.1: Дополнительная проверка и исправление кракозябр
+            # 🆕 v100.5.2: Дополнительная проверка и исправление кракозябр
             mojibake_cols = [col for col in df.columns if isinstance(col, str) and detect_mojibake(col)]
             if mojibake_cols:
                 st.warning(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
                 df, fixed_count = fix_dataframe_encoding(df)
                 st.success(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
+                
+                # Показываем исправленные колонки
+                st.info(f"📋 Колонки после исправления: {', '.join(str(c) for c in df.columns.tolist())}")
             
             df.columns = df.columns.str.strip()
             
@@ -7054,7 +7259,7 @@ def show_data_upload_interface():
             
             dims_cols = []
             for col in df.columns:
-                col_lower = col.lower()
+                col_lower = str(col).lower()
                 if any(w in col_lower for w in ['весогабариты', 'размеры', 'dimensions', 'габариты', 'размер']):
                     dims_cols.append(col)
             
@@ -7097,9 +7302,10 @@ def show_data_upload_interface():
                     
                     st.success(f"✅ Распарсено {len(parsed_data)} записей")
                     
+                    # ✅ ИСПРАВЛЕНО v100.5.2: используем parsed_data[i], а не parsed_data.iloc[i]
                     sample_data = []
                     for i in range(min(5, len(parsed_data))):
-                        row = parsed_data.iloc[i]
+                        row = parsed_data[i]  # ← ПРАВИЛЬНО: list, не DataFrame
                         sample_data.append({
                             'Исходная строка': df.iloc[row['index']].get(dims_col, ''),
                             'Длина': row['parsed_length'],
@@ -7127,7 +7333,7 @@ def show_data_upload_interface():
             with stats_col2:
                 price_col = None
                 for col in df.columns:
-                    if any(w in col.lower() for w in ['цена', 'price', 'стоимость']):
+                    if any(w in str(col).lower() for w in ['цена', 'price', 'стоимость']):
                         price_col = col
                         break
                 
@@ -7143,7 +7349,7 @@ def show_data_upload_interface():
             with stats_col3:
                 cost_col = None
                 for col in df.columns:
-                    if any(w in col.lower() for w in ['себестоимость', 'cost', 'закупочная']):
+                    if any(w in str(col).lower() for w in ['себестоимость', 'cost', 'закупочная']):
                         cost_col = col
                         break
                 
@@ -7159,7 +7365,7 @@ def show_data_upload_interface():
             with stats_col4:
                 brand_col = None
                 for col in df.columns:
-                    if any(w in col.lower() for w in ['бренд', 'brand', 'производитель']):
+                    if any(w in str(col).lower() for w in ['бренд', 'brand', 'производитель']):
                         brand_col = col
                         break
                 
@@ -7183,7 +7389,7 @@ def show_data_upload_interface():
                         
                         name_col = None
                         for col in df.columns:
-                            col_lower = col.lower()
+                            col_lower = str(col).lower()
                             if any(w in col_lower for w in ['наименование', 'название', 'name', 'товар']):
                                 name_col = col
                                 break
@@ -7217,7 +7423,7 @@ def show_data_upload_interface():
                 st.code(traceback.format_exc())
     
     # ========================================================================
-    # 🆕 v100.5.1: ИСПРАВЛЕННАЯ ГЕНЕРАЦИЯ ШАБЛОНА С ПРАВИЛЬНЫМ BOM
+    # 🆕 v100.5.2: ИСПРАВЛЕННАЯ ГЕНЕРАЦИЯ ШАБЛОНА С ПРАВИЛЬНЫМ BOM
     # ========================================================================
     if st.button("📥 Скачать шаблон данных"):
         template_df = pd.DataFrame({
@@ -7235,7 +7441,7 @@ def show_data_upload_interface():
             "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
         })
         
-        # ✅ ИСПРАВЛЕНО: используем BytesIO + codecs для корректного BOM
+        # ✅ ИСПРАВЛЕНО v100.5.2: правильный BOM через BytesIO + codecs
         import codecs
         output = io.BytesIO()
         
