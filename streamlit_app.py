@@ -374,31 +374,6 @@ except ImportError:
     TIKTOKEN_AVAILABLE = False
 
 try:
-    import transformers
-    from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-
-try:
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-    import torch.optim as optim
-    from torch.utils.data import DataLoader, TensorDataset, Dataset
-    PYTORCH_AVAILABLE = True
-except ImportError:
-    PYTORCH_AVAILABLE = False
-
-try:
-    import tensorflow as tf
-    from tensorflow import keras
-    from tensorflow.keras import layers, models, callbacks, optimizers, losses, metrics
-    TENSORFLOW_AVAILABLE = True
-except ImportError:
-    TENSORFLOW_AVAILABLE = False
-
-try:
     import aiohttp
     import aiofiles
     ASYNC_AVAILABLE = True
