@@ -9532,7 +9532,7 @@ def show_ai_tariffs_interface():
 class SmartTariffLoader:
     """
     🧠 УМНАЯ ЗАГРУЗКА ТАРИФОВ С ВЫБОРОМ ИСТОЧНИКА
-    Поддерживает 3 режима: API, AI, Кэш, Гибридный
+    Поддерживает 4 режима: API, AI, Кэш, Гибридный
     """
     
     SOURCES = {
@@ -9576,16 +9576,12 @@ class SmartTariffLoader:
         try:
             if source == "api":
                 result = self._load_from_api(marketplace, api_key, client_id, result)
-            
             elif source == "ai":
                 result = self._load_from_ai(marketplace, result, force_refresh)
-            
             elif source == "cache":
                 result = self._load_from_cache(marketplace, result)
-            
             elif source == "hybrid":
                 result = self._load_hybrid(marketplace, api_key, client_id, result, force_refresh)
-            
             else:
                 result["errors"].append(f"Неизвестный источник: {source}")
             
@@ -9771,109 +9767,9 @@ class SmartTariffLoader:
                 })
         
         return pd.DataFrame(results)
-def main():
-    """Главная функция приложения"""
-    
-    # ✅ ТОЛЬКО ОДИН РАЗ!
-    st.set_page_config(
-        page_title=APP_NAME,
-        page_icon="🚗",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    st.title(APP_NAME)
-    st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-    
-    st.sidebar.title("🧭 Навигация")
-    
-    section = st.sidebar.radio(
-        "Выберите раздел:",
-        [
-            "📁 Загрузка данных",
-            "📊 Юнит-экономика",
-            "🗂️ Каталог для группировки",
-            "🤖 AI Тарифы",
-            "🌐 API Тарифы маркетплейсов",
-            "🧠 Умная загрузка тарифов"  # ✅ НОВЫЙ РАЗДЕЛ
-        ],
-        key="main_navigation"
-    )
-    
-    if section == "📁 Загрузка данных":
-        show_data_upload_interface()
-    elif section == "📊 Юнит-экономика":
-        show_unit_economics_interface()
-    elif section == "🗂️ Каталог для группировки":
-        show_catalog_grouping_interface()
-    elif section == "🤖 AI Тарифы":
-        show_ai_tariffs_interface()
-    elif section == "🌐 API Тарифы маркетплейсов":
-        show_api_tariffs_interface()
-    elif section == "🧠 Умная загрузка тарифов":
-        show_smart_tariff_interface()  # ✅ ВЫЗОВ
 # ============================================================================
 # 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
-
-# ✅ Импорты в ГЛОБАЛЬНОЙ области видимости
-import streamlit as st
-import pandas as pd
-from typing import Dict, List, Any, Optional
-import logging
-from datetime import datetime
-
-# ✅ Настройка логгера
-logger = logging.getLogger('SmartTariffUI')
-
-# ✅ Проверка наличия st_dataframe_compat
-def st_dataframe_compat(df, *args, **kwargs):
-    """Совместимая обёртка для st.dataframe"""
-    kwargs.pop('use_container_width', None)
-    if 'width' not in kwargs:
-        kwargs['width'] = 'stretch'
-    return st.dataframe(df, *args, **kwargs)
-
-# ✅ Проверка наличия SmartTariffLoader
-try:
-    from streamlit_app import SmartTariffLoader
-except (ImportError, NameError):
-    class SmartTariffLoader:
-        SOURCES = {
-            "api": "🔌 API Маркетплейса",
-            "ai": "🤖 AI (документация)", 
-            "cache": "💾 Загруженные ранее",
-            "hybrid": "🔄 Гибридный (AI + API)"
-        }
-        
-        def __init__(self):
-            self.logger = logging.getLogger('SmartTariffLoader')
-            self.api_connector = None
-            self.ai_updater = None
-            self.tariff_cache = None
-        
-        def get_available_sources(self, marketplace):
-            return ["hybrid", "api", "ai", "cache"]
-        
-        def load_tariffs(self, marketplace, source="hybrid", api_key=None, client_id=None, force_refresh=False):
-            return {
-                "marketplace": marketplace,
-                "source": source,
-                "timestamp": datetime.now().isoformat(),
-                "data": {},
-                "source_used": "fallback",
-                "confidence": 0.5,
-                "warnings": ["⚠️ Используется упрощённая загрузка"],
-                "errors": ["SmartTariffLoader не настроен"]
-            }
-
-# ✅ Проверка наличия get_marketplace_unit_economics
-try:
-    from streamlit_app import get_marketplace_unit_economics
-except (ImportError, NameError):
-    def get_marketplace_unit_economics():
-        logger.warning("⚠️ get_marketplace_unit_economics не найдена")
-        return None
 
 def show_smart_tariff_interface():
     """
@@ -10089,6 +9985,7 @@ def show_smart_tariff_interface():
 # ============================================================================
 def main():
     """Главная функция приложения"""
+    
     st.set_page_config(
         page_title=APP_NAME,
         page_icon="🚗",
