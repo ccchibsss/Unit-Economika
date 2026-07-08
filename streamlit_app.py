@@ -5414,7 +5414,7 @@ class MarketplaceUnitEconomics:
         return pd.DataFrame([r.to_dict() for r in results])
     
         @timer_decorator
-    def optimize_price(
+     def optimize_price(
         self,
         cost: float,
         marketplace: str,
