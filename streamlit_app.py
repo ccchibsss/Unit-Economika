@@ -7412,7 +7412,7 @@ def show_data_upload_interface():
             key="download_template"
         )
 # ============================================================================
-# 🆕 БЛОК 14: СУПЕР-PRO ЭКСПОРТЕР ЮНИТ-ЭКОНОМИКИ v2.0
+# 🆕 БЛОК 14: СУПЕР-PRO ЭКСПОРТЕР ЮНИТ-ЭКОНОМИКИ v2.0 (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
 # 🆕 v100.10: МАКСИМАЛЬНО ИНФОРМАТИВНЫЙ ШАБЛОН
 # ✅ 10+ листов с полной аналитикой
@@ -7422,6 +7422,7 @@ def show_data_upload_interface():
 # ✅ Прогноз прибыли на 12 месяцев
 # ✅ Анализ чувствительности
 # ✅ Рекомендации по оптимизации
+# ✅ ИСПРАВЛЕНИЯ: правильное количество колонок в агрегациях
 # ============================================================================
 
 class SuperProExcelExporter:
@@ -8133,6 +8134,7 @@ class SuperProExcelExporter:
         
         return ws
     
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД _write_marketplace_comparison
     def _write_marketplace_comparison(self, workbook, df: pd.DataFrame):
         """🏪 Сравнение маркетплейсов с автоматическими выводами"""
         ws = workbook.add_worksheet("🏪 Сравнение МП")
@@ -8150,6 +8152,7 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         
         if 'marketplace' in df.columns:
+            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация
             mp_stats = df.groupby('marketplace').agg({
                 'price': 'sum',
                 'total_expenses': 'sum',
@@ -8157,6 +8160,8 @@ class SuperProExcelExporter:
                 'margin_percent': 'mean',
                 'roi': 'mean',
             }).reset_index()
+            
+            # ✅ ИСПРАВЛЕНИЕ: правильное количество колонок (7)
             mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %', 'ROI %']
             
             total_profit = mp_stats['Прибыль'].sum()
@@ -8164,7 +8169,7 @@ class SuperProExcelExporter:
             for i, row in mp_stats.iterrows():
                 excel_row = 3 + i
                 ws.write(excel_row, 0, row['МП'], self.formats['bold'])
-                ws.write(excel_row, 1, 
+                ws.write_formula(excel_row, 1,
                     f"=COUNTIF('📊 Расчёт'!$B:$B,A{excel_row+1})",
                     self.formats['default'])
                 ws.write(excel_row, 2, row['Выручка'], self.formats['money'])
@@ -8177,7 +8182,7 @@ class SuperProExcelExporter:
                 
                 # Доля рынка
                 share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
-                ws.write(excel_row, 8, share, self.formats['formula_percent'])
+                ws.write(excel_row, 8, share / 100, self.formats['formula_percent'])
                 
                 # Эффективность (прибыль на рубль выручки)
                 ws.write_formula(excel_row, 9,
@@ -8194,6 +8199,7 @@ class SuperProExcelExporter:
         
         return ws
     
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД _write_category_analysis
     def _write_category_analysis(self, workbook, df: pd.DataFrame):
         """📂 Анализ по категориям"""
         ws = workbook.add_worksheet("📂 Категории")
@@ -8208,19 +8214,22 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         
         if 'category' in df.columns:
+            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация
             cat_stats = df.groupby('category').agg({
                 'price': 'sum',
                 'profit': ['sum', 'mean'],
                 'margin_percent': 'mean',
             }).reset_index()
-            cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. маржа %']
+            
+            # ✅ ИСПРАВЛЕНИЕ: правильное количество колонок (5)
+            cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %']
             
             total_profit = cat_stats['Прибыль'].sum()
             
             for i, row in cat_stats.iterrows():
                 excel_row = 3 + i
                 ws.write(excel_row, 0, row['Категория'], self.formats['bold'])
-                ws.write(excel_row, 1,
+                ws.write_formula(excel_row, 1,
                     f"=COUNTIF('📊 Расчёт'!$D:$D,A{excel_row+1})",
                     self.formats['default'])
                 ws.write(excel_row, 2, row['Выручка'], self.formats['money'])
@@ -8237,7 +8246,7 @@ class SuperProExcelExporter:
                     self.formats['money'])
                 
                 share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
-                ws.write(excel_row, 7, share, self.formats['formula_percent'])
+                ws.write(excel_row, 7, share / 100, self.formats['formula_percent'])
         
         ws.set_column('A:H', 16)
         ws.freeze_panes(3, 0)
