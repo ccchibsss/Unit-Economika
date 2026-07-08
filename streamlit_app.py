@@ -7412,24 +7412,27 @@ def show_data_upload_interface():
             key="download_template"
         )
 # ============================================================================
-# 🆕 БЛОК 14: КЛАСС FormulaExcelExporter - ЧЕРЕЗ ВПР (VLOOKUP)
+# 🆕 БЛОК 14: КЛАСС FormulaExcelExporter - С ВПР И СТОЛБЦОМ "КЛЮЧ"
 # ============================================================================
-# 🆕 v100.9: ПОЛНОСТЬЮ ПЕРЕПИСАН
-# ✅ Использует ВПР вместо INDEX/MATCH
-# ✅ Вспомогательный столбец для поиска по 2 критериям (МП + Режим)
+# 🆕 v100.9: ИСПРАВЛЕНО
+# ✅ Добавлен столбец "Ключ" (МП|Режим) в таблицу параметров
+# ✅ ВПР ищет по ключу вместо INDEX/MATCH
 # ✅ Убраны все иконки из условного форматирования
 # ✅ Только цветовое выделение
 # ============================================================================
 class FormulaExcelExporter:
     """
     🚀 Экспорт с живыми формулами Excel через xlsxwriter.
-    🆕 v100.9: ЧЕРЕЗ ВПР (VLOOKUP)
+    🆕 v100.9: СТОЛБЕЦ "КЛЮЧ" ДЛЯ ВПР
     
     СТРУКТУРА ФАЙЛА:
-    Лист "⚙️ Параметры" — таблица с вспомогательным столбцом Ключ
+    Лист "⚙️ Параметры" — 3 таблицы:
+    1. Базовые тарифы по МП+Режим (с ключом для ВПР)
+    2. Комиссии по категориям
+    3. Сезонные коэффициенты
     Лист "📥 Входные"    — Артикул, Цена, Себестоимость, МП, Режим
-    📈 Лист "📊 Расчёт"   — формулы с ВПР
-    🏪 Лист "🏪 По МП"    — сводка СУММЕСЛИ
+    📈 Лист "📊 Расчёт"   — формулы с ВПР по ключу
+    🏪 Лист "🏪 По МП"    — сводка SUMIF
     🏆 Лист "🏆 Топ"      — топ прибыльных/убыточных
     📊 Лист "📊 Дашборд"  — ключевые метрики
     """
@@ -7450,12 +7453,18 @@ class FormulaExcelExporter:
     }
     
     OPERATION_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP"]
+    SEASONS = ["winter", "spring", "summer", "autumn"]
+    SEASON_NAMES = {"winter": "Зима", "spring": "Весна", "summer": "Лето", "autumn": "Осень"}
     
     def __init__(self, unit_economics=None):
         self.formats = {}
         self.unit_economics = unit_economics
-        self._params_table_start = None
-        self._params_table_end = None
+        self._base_rates_start_row = None
+        self._base_rates_end_row = None
+        self._category_rates_start_row = None
+        self._category_rates_end_row = None
+        self._seasonal_start_row = None
+        self._seasonal_end_row = None
         self._global_tax_row = None
         self._global_min_profit_row = None
     
@@ -7602,13 +7611,13 @@ class FormulaExcelExporter:
     
     def _write_parameters_sheet(self, workbook, metadata: Dict):
         """
-        🆕 v100.9: Лист параметров с ВПР
+        🆕 v100.9: Лист параметров со столбцом "Ключ"
         Структура: Ключ | МП | Режим | Комиссия | Логистика | ...
         """
         ws = workbook.add_worksheet("⚙️ Параметры")
         
         # Заголовок
-        ws.merge_range('A1:M1', "⚙️ ПАРАМЕТРЫ РАСЧЁТА (через ВПР)", 
+        ws.merge_range('A1:M1', "⚙️ ПАРАМЕТРЫ РАСЧЁТА (с ключом для ВПР)", 
                       self.formats['header_title'])
         ws.set_row(0, 30)
         
@@ -7649,11 +7658,11 @@ class FormulaExcelExporter:
             row += 1
         
         # ====================================================================
-        # СЕКЦИЯ 2: ТАБЛИЦА ТАРИФОВ (С ВСПОМОГАТЕЛЬНЫМ СТОЛБЦОМ)
+        # СЕКЦИЯ 2: БАЗОВЫЕ ТАРИФЫ (СО СТОЛБЦОМ "КЛЮЧ")
         # ====================================================================
         row += 2
         ws.merge_range(row, 0, row, 12,
-                      "📊 ТАРИФЫ ПО МП И РЕЖИМАМ (с ключом для ВПР)",
+                      "📊 БАЗОВЫЕ ТАРИФЫ ПО МП И РЕЖИМАМ (с ключом для ВПР)",
                       self.formats['section_title'])
         row += 1
         
@@ -7662,7 +7671,7 @@ class FormulaExcelExporter:
                       self.formats['warning'])
         row += 1
         
-        # Заголовки таблицы
+        # Заголовки таблицы (ДОБАВЛЕН СТОЛБЕЦ "КЛЮЧ")
         headers = [
             'Ключ', 'Маркетплейс', 'Режим', 'Комиссия', 
             'Логистика база', 'Логистика за кг', 'Логистика за л',
@@ -7673,7 +7682,7 @@ class FormulaExcelExporter:
         for col_idx, header in enumerate(headers):
             ws.write(row, col_idx, header, self.formats['mp_header'])
         
-        self._params_table_start = row + 1  # Excel нумерация с 1
+        self._base_rates_start_row = row + 1  # Excel нумерация с 1
         row += 1
         
         # Заполняем реальными тарифами
@@ -7688,10 +7697,10 @@ class FormulaExcelExporter:
                     mode_mult = config.mode_multipliers.get(mode, 1.0)
                     effective_rate = base_rate * mode_mult
                     
-                    ws.write(row, 0, key, self.formats['param_cell'])
-                    ws.write(row, 1, mp_name, self.formats['param_cell'])
-                    ws.write(row, 2, mode, self.formats['param_cell'])
-                    ws.write(row, 3, effective_rate, self.formats['input_percent'])
+                    ws.write(row, 0, key, self.formats['param_cell'])      # Ключ
+                    ws.write(row, 1, mp_name, self.formats['param_cell'])  # МП
+                    ws.write(row, 2, mode, self.formats['param_cell'])     # Режим
+                    ws.write(row, 3, effective_rate, self.formats['input_percent'])  # Комиссия
                     ws.write(row, 4, config.logistics_base, self.formats['input_cell'])
                     ws.write(row, 5, config.logistics_per_kg, self.formats['input_cell'])
                     ws.write(row, 6, config.logistics_per_liter, self.formats['input_cell'])
@@ -7711,7 +7720,67 @@ class FormulaExcelExporter:
             ws.write(row, 3, 0.15, self.formats['input_percent'])
             row += 1
         
-        self._params_table_end = row
+        self._base_rates_end_row = row
+        
+        # ====================================================================
+        # СЕКЦИЯ 3: КОМИССИИ ПО КАТЕГОРИЯМ
+        # ====================================================================
+        row += 2
+        ws.merge_range(row, 0, row, 4,
+                      "📂 КОМИССИИ ПО КАТЕГОРИЯМ ТОВАРОВ",
+                      self.formats['section_title'])
+        row += 1
+        
+        cat_headers = ['Маркетплейс', 'Категория', 'Комиссия категории']
+        for col_idx, header in enumerate(cat_headers):
+            ws.write(row, col_idx, header, self.formats['mp_header'])
+        
+        self._category_rates_start_row = row + 1
+        row += 1
+        
+        popular_categories = [
+            "фильтры", "масла", "колодки", "аккумуляторы", "шины",
+            "фары", "амортизаторы", "ремни", "подшипники", "датчики"
+        ]
+        
+        if configs:
+            for mp_name, config in configs.items():
+                for cat in popular_categories:
+                    cat_rate = config.category_rates.get(cat, config.commission_rate)
+                    ws.write(row, 0, mp_name, self.formats['param_cell'])
+                    ws.write(row, 1, cat, self.formats['default'])
+                    ws.write(row, 2, cat_rate, self.formats['input_percent'])
+                    row += 1
+        
+        self._category_rates_end_row = row
+        
+        # ====================================================================
+        # СЕКЦИЯ 4: СЕЗОННЫЕ КОЭФФИЦИЕНТЫ
+        # ====================================================================
+        row += 2
+        ws.merge_range(row, 0, row, 3,
+                      "🌤 СЕЗОННЫЕ КОЭФФИЦИЕНТЫ",
+                      self.formats['section_title'])
+        row += 1
+        
+        season_headers = ['Маркетплейс', 'Сезон', 'Название', 'Коэффициент']
+        for col_idx, header in enumerate(season_headers):
+            ws.write(row, col_idx, header, self.formats['mp_header'])
+        
+        self._seasonal_start_row = row + 1
+        row += 1
+        
+        if configs:
+            for mp_name, config in configs.items():
+                for season_key in self.SEASONS:
+                    mult = config.seasonal_multipliers.get(season_key, 1.0)
+                    ws.write(row, 0, mp_name, self.formats['param_cell'])
+                    ws.write(row, 1, season_key, self.formats['default'])
+                    ws.write(row, 2, self.SEASON_NAMES.get(season_key, season_key), self.formats['default'])
+                    ws.write(row, 3, mult, self.formats['input_cell_int'])
+                    row += 1
+        
+        self._seasonal_end_row = row
         
         # ====================================================================
         # МЕТАДАННЫЕ
@@ -7791,7 +7860,7 @@ class FormulaExcelExporter:
     
     def _write_calculation_sheet(self, workbook, df: pd.DataFrame):
         """
-        🆕 v100.9: Лист расчётов с ВПР (VLOOKUP)
+        🆕 v100.9: Лист расчётов с ВПР по столбцу "Ключ"
         Формула: =ВПР(МП&"|"&Режим; Параметры!$A:$M; номер_колонки; 0)
         """
         ws = workbook.add_worksheet("📊 Расчёт")
@@ -7822,8 +7891,8 @@ class FormulaExcelExporter:
         min_profit = f"'⚙️ Параметры'!$B${self._global_min_profit_row}"
         p_days = "'⚙️ Параметры'!$B$7"  # Дней хранения
         
-        # Диапазон таблицы параметров (A:M)
-        params_range = f"'⚙️ Параметры'!$A${self._params_table_start}:$M${self._params_table_end}"
+        # Диапазон таблицы параметров (A:M) — столбец A это Ключ!
+        params_range = f"'⚙️ Параметры'!$A${self._base_rates_start_row}:$M${self._base_rates_end_row}"
         
         total_rows = len(df)
         for i in range(total_rows):
@@ -7994,7 +8063,7 @@ class FormulaExcelExporter:
         return ws
     
     def _write_marketplace_summary(self, workbook, df: pd.DataFrame):
-        """🏪 Сводка по МП с СУММЕСЛИ"""
+        """🏪 Сводка по МП с SUMIF"""
         ws = workbook.add_worksheet("🏪 По МП")
         
         ws.merge_range('A1:H1', "🏪 СВОДКА ПО МАРКЕТПЛЕЙСАМ",
