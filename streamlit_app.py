@@ -7412,28 +7412,26 @@ def show_data_upload_interface():
             key="download_template"
         )
 # ============================================================================
-# 🆕 БЛОК 14: КЛАСС FormulaExcelExporter - УНИКАЛЬНЫЕ ПАРАМЕТРЫ ДЛЯ КАЖДОГО МП
+# 🆕 БЛОК 14: КЛАСС FormulaExcelExporter - ЧЕРЕЗ ВПР (VLOOKUP)
 # ============================================================================
-# 🆕 v100.8: ПОЛНОСТЬЮ ПЕРЕПИСАН
-# ✅ Уникальные тарифы для каждой пары (Маркетплейс + Режим работы)
-# ✅ Двухкритериальный поиск через INDEX/MATCH
-# ✅ Учёт комиссий по категориям и сезонности
-# ✅ Максимально точные расчёты как в Python-коде
+# 🆕 v100.9: ПОЛНОСТЬЮ ПЕРЕПИСАН
+# ✅ Использует ВПР вместо INDEX/MATCH
+# ✅ Вспомогательный столбец для поиска по 2 критериям (МП + Режим)
+# ✅ Убраны все иконки из условного форматирования
+# ✅ Только цветовое выделение
 # ============================================================================
 class FormulaExcelExporter:
     """
     🚀 Экспорт с живыми формулами Excel через xlsxwriter.
-    🆕 v100.8: УНИКАЛЬНЫЕ ПАРАМЕТРЫ ДЛЯ КАЖДОГО МП+РЕЖИМА
+    🆕 v100.9: ЧЕРЕЗ ВПР (VLOOKUP)
+    
     СТРУКТУРА ФАЙЛА:
-     Лист "⚙️ Параметры" — 3 таблицы:
-       1. Базовые тарифы по МП+Режим (основные)
-       2. Комиссии по категориям (для точного расчёта)
-       3. Сезонные коэффициенты (зима/весна/лето/осень)
-     Лист "📥 Входные"    — Артикул, Цена, Себестоимость, МП, Режим
-    📈 Лист " Расчёт"     — формулы с двухкритериальным поиском
-    🏪 Лист "🏪 По МП"      — сводка SUMIF
-    🏆 Лист "🏆 Топ"        — топ прибыльных/убыточных
-    📊 Лист " Дашборд"    — ключевые метрики
+    Лист "⚙️ Параметры" — таблица с вспомогательным столбцом Ключ
+    Лист "📥 Входные"    — Артикул, Цена, Себестоимость, МП, Режим
+    📈 Лист "📊 Расчёт"   — формулы с ВПР
+    🏪 Лист "🏪 По МП"    — сводка СУММЕСЛИ
+    🏆 Лист "🏆 Топ"      — топ прибыльных/убыточных
+    📊 Лист "📊 Дашборд"  — ключевые метрики
     """
     
     COLORS = {
@@ -7451,29 +7449,13 @@ class FormulaExcelExporter:
         "section_bg": "5B9BD5",
     }
     
-    # Режимы работы для генерации строк таблицы
     OPERATION_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP"]
     
-    # Сезоны для таблицы сезонности
-    SEASONS = ["winter", "spring", "summer", "autumn"]
-    SEASON_NAMES = {"winter": "Зима", "spring": "Весна", "summer": "Лето", "autumn": "Осень"}
-    
     def __init__(self, unit_economics=None):
-        """
-        🆕 v100.8: Принимает unit_economics для доступа к реальным тарифам
-        
-        Args:
-            unit_economics: MarketplaceUnitEconomics instance (опционально)
-        """
         self.formats = {}
         self.unit_economics = unit_economics
-        # Координаты таблиц параметров (для формул)
-        self._base_rates_start_row = None
-        self._base_rates_end_row = None
-        self._category_rates_start_row = None
-        self._category_rates_end_row = None
-        self._seasonal_start_row = None
-        self._seasonal_end_row = None
+        self._params_table_start = None
+        self._params_table_end = None
         self._global_tax_row = None
         self._global_min_profit_row = None
     
@@ -7481,7 +7463,6 @@ class FormulaExcelExporter:
         """Получение конфигураций маркетплейсов"""
         if self.unit_economics and hasattr(self.unit_economics, '_configs'):
             return self.unit_economics._configs
-        # Fallback: пустой словарь
         return {}
     
     def _init_formats(self, workbook):
@@ -7611,7 +7592,6 @@ class FormulaExcelExporter:
             ws_dash = self._write_dashboard_sheet(workbook, df)
             
             workbook.close()
-            
             logger.info(f"✅ PRO-файл сохранён: {output_path}")
             return True
             
@@ -7622,21 +7602,19 @@ class FormulaExcelExporter:
     
     def _write_parameters_sheet(self, workbook, metadata: Dict):
         """
-        🆕 v100.8: Лист параметров с 3 таблицами:
-        1. Базовые тарифы по МП+Режим (уникальные для каждой пары)
-        2. Комиссии по категориям
-        3. Сезонные коэффициенты
+        🆕 v100.9: Лист параметров с ВПР
+        Структура: Ключ | МП | Режим | Комиссия | Логистика | ...
         """
         ws = workbook.add_worksheet("⚙️ Параметры")
         
         # Заголовок
-        ws.merge_range('A1:L1', "⚙️ ПАРАМЕТРЫ РАСЧЁТА (уникальные для каждого МП и режима)", 
+        ws.merge_range('A1:M1', "⚙️ ПАРАМЕТРЫ РАСЧЁТА (через ВПР)", 
                       self.formats['header_title'])
         ws.set_row(0, 30)
         
-        ws.merge_range('A2:L2', 
-                      " Измените значения ниже — все расчёты пересчитаются автоматически! "
-                      "Формулы в '📊 Расчёт' используют двухкритериальный поиск (МП + Режим).",
+        ws.merge_range('A2:M2', 
+                      "💡 Измените значения — все расчёты пересчитаются! "
+                      "ВПР ищет по ключу: Маркетплейс|Режим",
                       self.formats['info'])
         
         if metadata is None:
@@ -7646,13 +7624,14 @@ class FormulaExcelExporter:
         # СЕКЦИЯ 1: ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ
         # ====================================================================
         row = 4
-        ws.merge_range(row, 0, row, 11, "🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ", self.formats['section_title'])
+        ws.merge_range(row, 0, row, 12, "🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ", 
+                      self.formats['section_title'])
         row += 1
         
         global_params = [
             ("Налоговая ставка", 0.06, "Налог от цены продажи"),
             ("Мин. прибыль (%)", 0.10, "Минимальная целевая прибыль"),
-            ("Дней хранения (по умолчанию)", 30, "Среднее кол-во дней хранения"),
+            ("Дней хранения (по умолчанию)", 30, "Среднее кол-во дней"),
         ]
         
         for name, value, desc in global_params:
@@ -7663,7 +7642,6 @@ class FormulaExcelExporter:
                 ws.write(row, 1, value, self.formats['input_cell_int'])
             ws.write(row, 2, desc, self.formats['default'])
             
-            # Сохраняем строки для формул
             if "Налоговая" in name:
                 self._global_tax_row = row + 1
             elif "Мин. прибыль" in name:
@@ -7671,129 +7649,69 @@ class FormulaExcelExporter:
             row += 1
         
         # ====================================================================
-        # СЕКЦИЯ 2: БАЗОВЫЕ ТАРИФЫ ПО МП+РЕЖИМ (ГЛАВНАЯ ТАБЛИЦА)
+        # СЕКЦИЯ 2: ТАБЛИЦА ТАРИФОВ (С ВСПОМОГАТЕЛЬНЫМ СТОЛБЦОМ)
         # ====================================================================
         row += 2
-        ws.merge_range(row, 0, row, 11, 
-                      "📊 БАЗОВЫЕ ТАРИФЫ ПО МАРКЕТПЛЕЙСАМ И РЕЖИМАМ (уникальные для каждой пары)",
+        ws.merge_range(row, 0, row, 12,
+                      "📊 ТАРИФЫ ПО МП И РЕЖИМАМ (с ключом для ВПР)",
                       self.formats['section_title'])
         row += 1
         
-        ws.merge_range(row, 0, row, 11,
-                      "⚠️ Формула в '📊 Расчёт' ищет по паре (Маркетплейс + Режим). "
-                      "Можно менять значения — пересчёт автоматический.",
+        ws.merge_range(row, 0, row, 12,
+                      "⚠️ Ключ = Маркетплейс + '|' + Режим (например: Ozon|FBS)",
                       self.formats['warning'])
         row += 1
         
-        # Заголовки таблицы базовых тарифов
-        base_headers = [
-            'Маркетплейс', 'Режим', 'Комиссия', 'Логистика база (₽)', 
-            'Логистика за кг (₽)', 'Логистика за литр (₽)',
+        # Заголовки таблицы
+        headers = [
+            'Ключ', 'Маркетплейс', 'Режим', 'Комиссия', 
+            'Логистика база', 'Логистика за кг', 'Логистика за л',
             'Хранение ₽/л/день', 'Эквайринг', 'Возвраты',
-            'Посл. миля (₽)', 'Подписка (₽/мес)', 'Источник'
+            'Посл. миля', 'Подписка', 'Источник'
         ]
         
-        for col_idx, header in enumerate(base_headers):
+        for col_idx, header in enumerate(headers):
             ws.write(row, col_idx, header, self.formats['mp_header'])
         
-        self._base_rates_start_row = row + 1  # Excel нумерация с 1
+        self._params_table_start = row + 1  # Excel нумерация с 1
         row += 1
         
-        # Заполняем реальными тарифами из configs
+        # Заполняем реальными тарифами
         configs = self._get_configs()
-        
         if configs:
             for mp_name, config in configs.items():
                 for mode in self.OPERATION_MODES:
-                    # Применяем множитель режима к базовой комиссии
+                    # Создаём ключ: Ozon|FBS
+                    key = f"{mp_name}|{mode}"
+                    
                     base_rate = config.commission_rate
                     mode_mult = config.mode_multipliers.get(mode, 1.0)
                     effective_rate = base_rate * mode_mult
                     
-                    ws.write(row, 0, mp_name, self.formats['param_cell'])
-                    ws.write(row, 1, mode, self.formats['param_cell'])
-                    ws.write(row, 2, effective_rate, self.formats['input_percent'])
-                    ws.write(row, 3, config.logistics_base, self.formats['input_cell'])
-                    ws.write(row, 4, config.logistics_per_kg, self.formats['input_cell'])
-                    ws.write(row, 5, config.logistics_per_liter, self.formats['input_cell'])
-                    ws.write(row, 6, config.storage_per_day, self.formats['input_cell'])
-                    ws.write(row, 7, config.acquiring_fee, self.formats['input_percent'])
-                    ws.write(row, 8, config.return_fee, self.formats['input_percent'])
-                    ws.write(row, 9, config.last_mile_fee, self.formats['input_cell'])
-                    ws.write(row, 10, config.subscription_fee, self.formats['input_cell'])
-                    ws.write(row, 11, config.tariff_source.value, self.formats['default'])
+                    ws.write(row, 0, key, self.formats['param_cell'])
+                    ws.write(row, 1, mp_name, self.formats['param_cell'])
+                    ws.write(row, 2, mode, self.formats['param_cell'])
+                    ws.write(row, 3, effective_rate, self.formats['input_percent'])
+                    ws.write(row, 4, config.logistics_base, self.formats['input_cell'])
+                    ws.write(row, 5, config.logistics_per_kg, self.formats['input_cell'])
+                    ws.write(row, 6, config.logistics_per_liter, self.formats['input_cell'])
+                    ws.write(row, 7, config.storage_per_day, self.formats['input_cell'])
+                    ws.write(row, 8, config.acquiring_fee, self.formats['input_percent'])
+                    ws.write(row, 9, config.return_fee, self.formats['input_percent'])
+                    ws.write(row, 10, config.last_mile_fee, self.formats['input_cell'])
+                    ws.write(row, 11, config.subscription_fee, self.formats['input_cell'])
+                    ws.write(row, 12, config.tariff_source.value, self.formats['default'])
+                    
                     row += 1
         else:
             # Fallback: одна строка
-            ws.write(row, 0, "Ozon", self.formats['param_cell'])
-            ws.write(row, 1, "FBS", self.formats['param_cell'])
-            ws.write(row, 2, 0.15, self.formats['input_percent'])
+            ws.write(row, 0, "Ozon|FBS", self.formats['param_cell'])
+            ws.write(row, 1, "Ozon", self.formats['param_cell'])
+            ws.write(row, 2, "FBS", self.formats['param_cell'])
+            ws.write(row, 3, 0.15, self.formats['input_percent'])
             row += 1
         
-        self._base_rates_end_row = row  # следующая строка после данных
-        
-        # ====================================================================
-        # СЕКЦИЯ 3: КОМИССИИ ПО КАТЕГОРИЯМ
-        # ====================================================================
-        row += 2
-        ws.merge_range(row, 0, row, 4,
-                      "📂 КОМИССИИ ПО КАТЕГОРИЯМ ТОВАРОВ (корректировка базовой комиссии)",
-                      self.formats['section_title'])
-        row += 1
-        
-        cat_headers = ['Маркетплейс', 'Категория', 'Комиссия категории']
-        for col_idx, header in enumerate(cat_headers):
-            ws.write(row, col_idx, header, self.formats['mp_header'])
-        
-        self._category_rates_start_row = row + 1
-        row += 1
-        
-        # Популярные категории автозапчастей
-        popular_categories = [
-            "фильтры", "масла", "колодки", "аккумуляторы", "шины",
-            "фары", "амортизаторы", "ремни", "подшипники", "датчики",
-            "двигатель", "трансмиссия", "подвеска", "тормозная_система",
-            "электрика", "охлаждение", "выпуск", "оптика"
-        ]
-        
-        if configs:
-            for mp_name, config in configs.items():
-                for cat in popular_categories:
-                    cat_rate = config.category_rates.get(cat, config.commission_rate)
-                    ws.write(row, 0, mp_name, self.formats['param_cell'])
-                    ws.write(row, 1, cat, self.formats['default'])
-                    ws.write(row, 2, cat_rate, self.formats['input_percent'])
-                    row += 1
-        
-        self._category_rates_end_row = row
-        
-        # ====================================================================
-        # СЕКЦИЯ 4: СЕЗОННЫЕ КОЭФФИЦИЕНТЫ
-        # ====================================================================
-        row += 2
-        ws.merge_range(row, 0, row, 3,
-                      "🌤 СЕЗОННЫЕ КОЭФФИЦИЕНТЫ (применяются к логистике и хранению)",
-                      self.formats['section_title'])
-        row += 1
-        
-        season_headers = ['Маркетплейс', 'Сезон', 'Название', 'Коэффициент']
-        for col_idx, header in enumerate(season_headers):
-            ws.write(row, col_idx, header, self.formats['mp_header'])
-        
-        self._seasonal_start_row = row + 1
-        row += 1
-        
-        if configs:
-            for mp_name, config in configs.items():
-                for season_key in self.SEASONS:
-                    mult = config.seasonal_multipliers.get(season_key, 1.0)
-                    ws.write(row, 0, mp_name, self.formats['param_cell'])
-                    ws.write(row, 1, season_key, self.formats['default'])
-                    ws.write(row, 2, self.SEASON_NAMES.get(season_key, season_key), self.formats['default'])
-                    ws.write(row, 3, mult, self.formats['input_cell_int'])
-                    row += 1
-        
-        self._seasonal_end_row = row
+        self._params_table_end = row
         
         # ====================================================================
         # МЕТАДАННЫЕ
@@ -7805,110 +7723,86 @@ class FormulaExcelExporter:
         ws.write(row, 0, "📦 Товаров:", self.formats['bold'])
         ws.write(row, 1, metadata.get('total_items', 'Н/Д'), self.formats['default'])
         row += 1
-        ws.write(row, 0, " Маркетплейсы:", self.formats['bold'])
+        ws.write(row, 0, "🏪 Маркетплейсы:", self.formats['bold'])
         ws.write(row, 1, ", ".join(metadata.get('marketplaces', [])), self.formats['default'])
-        row += 1
-        ws.write(row, 0, "📊 Источник тарифов:", self.formats['bold'])
-        ws.write(row, 1, metadata.get('tariff_source', 'Из configs МП'), self.formats['default'])
         
         # Ширина колонок
-        ws.set_column('A:A', 20)
-        ws.set_column('B:B', 15)
-        ws.set_column('C:C', 15)
-        ws.set_column('D:L', 18)
+        ws.set_column('A:A', 20)  # Ключ
+        ws.set_column('B:C', 15)  # МП, Режим
+        ws.set_column('D:M', 16)  # Остальные
         
         return ws
     
     def _write_input_sheet(self, workbook, df: pd.DataFrame):
-        """📊 Лист входных данных — редактируемые"""
-        ws = workbook.add_worksheet(" Входные")
+        """📊 Лист входных данных"""
+        ws = workbook.add_worksheet("📥 Входные")
         
-        ws.merge_range('A1:L1', 
-                      "📥 ВХОДНЫЕ ДАННЫЕ (редактируемые — меняйте значения, расчёты обновятся)",
+        ws.merge_range('A1:M1', 
+                      "📥 ВХОДНЫЕ ДАННЫЕ (редактируемые)",
                       self.formats['header_title'])
         ws.set_row(0, 28)
         
-        ws.merge_range('A2:L2',
-                      "💡 Меняйте цены, себестоимость, вес, категорию — лист '📊 Расчёт' пересчитается автоматически",
+        ws.merge_range('A2:M2',
+                      "💡 Меняйте цены, себестоимость — лист '📊 Расчёт' пересчитается",
                       self.formats['info'])
         
         headers = [
             'Артикул', 'Бренд', 'Маркетплейс', 'Режим работы',
             'Цена продажи', 'Себестоимость', 'Вес (кг)',
             'Длина (см)', 'Ширина (см)', 'Высота (см)',
-            'Категория', 'Сезон'
+            'Категория'
         ]
         
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
         ws.set_row(2, 25)
         
-        # Определяем текущий сезон
-        current_month = datetime.now().month
-        if current_month in [12, 1, 2]:
-            current_season = "winter"
-        elif current_month in [3, 4, 5]:
-            current_season = "spring"
-        elif current_month in [6, 7, 8]:
-            current_season = "summer"
-        else:
-            current_season = "autumn"
-        
         total_rows = len(df)
-        for i, (_, row) in enumerate(df.iterrows()):
+        for i, (_, row_data) in enumerate(df.iterrows()):
             excel_row = 3 + i
             
-            ws.write(excel_row, 0, str(row.get('Артикул', '')), self.formats['default'])
-            ws.write(excel_row, 1, str(row.get('Бренд', '')), self.formats['default'])
-            ws.write(excel_row, 2, str(row.get('marketplace', 'Ozon')), self.formats['default'])
-            ws.write(excel_row, 3, str(row.get('operation_mode', 'FBS')), self.formats['default'])
+            ws.write(excel_row, 0, str(row_data.get('Артикул', '')), self.formats['default'])
+            ws.write(excel_row, 1, str(row_data.get('Бренд', '')), self.formats['default'])
+            ws.write(excel_row, 2, str(row_data.get('marketplace', 'Ozon')), self.formats['default'])
+            ws.write(excel_row, 3, str(row_data.get('operation_mode', 'FBS')), self.formats['default'])
+            ws.write(excel_row, 4, float(row_data.get('price', 0)), self.formats['input_cell'])
+            ws.write(excel_row, 5, float(row_data.get('cost', 0)), self.formats['input_cell'])
+            ws.write(excel_row, 6, float(row_data.get('weight', 0)), self.formats['input_cell_int'])
+            ws.write(excel_row, 7, float(row_data.get('length', 0)), self.formats['input_cell_int'])
+            ws.write(excel_row, 8, float(row_data.get('width', 0)), self.formats['input_cell_int'])
+            ws.write(excel_row, 9, float(row_data.get('height', 0)), self.formats['input_cell_int'])
             
-            ws.write(excel_row, 4, float(row.get('price', 0)), self.formats['input_cell'])
-            ws.write(excel_row, 5, float(row.get('cost', 0)), self.formats['input_cell'])
-            ws.write(excel_row, 6, float(row.get('weight', 0)), self.formats['input_cell_int'])
-            ws.write(excel_row, 7, float(row.get('length', 0)), self.formats['input_cell_int'])
-            ws.write(excel_row, 8, float(row.get('width', 0)), self.formats['input_cell_int'])
-            ws.write(excel_row, 9, float(row.get('height', 0)), self.formats['input_cell_int'])
-            
-            # Категория (нормализуем)
-            category = str(row.get('category', ''))
+            category = str(row_data.get('category', ''))
             if category:
                 category = category.lower().replace(' ', '_')
             ws.write(excel_row, 10, category, self.formats['default'])
-            
-            ws.write(excel_row, 11, current_season, self.formats['default'])
         
-        ws.set_column('A:A', 18)
-        ws.set_column('B:B', 15)
-        ws.set_column('C:C', 15)
-        ws.set_column('D:D', 15)
+        ws.set_column('A:B', 18)
+        ws.set_column('C:D', 15)
         ws.set_column('E:F', 15)
         ws.set_column('G:J', 12)
         ws.set_column('K:K', 18)
-        ws.set_column('L:L', 12)
         
         ws.freeze_panes(3, 0)
         if total_rows > 0:
-            ws.autofilter(2, 0, 2 + total_rows, 11)
+            ws.autofilter(2, 0, 2 + total_rows, 10)
         
         return ws
     
     def _write_calculation_sheet(self, workbook, df: pd.DataFrame):
         """
-        🆕 v100.8: Лист расчётов с ДВУХКРИТЕРИАЛЬНЫМ поиском (МП + Режим)
-        
-        Формула: =INDEX(диапазон, MATCH(МП&Режим, МП_диапазон&Режим_диапазон, 0), номер_колонки)
+        🆕 v100.9: Лист расчётов с ВПР (VLOOKUP)
+        Формула: =ВПР(МП&"|"&Режим; Параметры!$A:$M; номер_колонки; 0)
         """
-        ws = workbook.add_worksheet(" Расчёт")
+        ws = workbook.add_worksheet("📊 Расчёт")
         
         ws.merge_range('A1:S1',
-                      "📊 РАСЧЁТ ЮНИТ-ЭКОНОМИКИ (формулы с двухкритериальным поиском)",
+                      "📊 РАСЧЁТ ЮНИТ-ЭКОНОМИКИ (через ВПР)",
                       self.formats['header_title'])
         ws.set_row(0, 28)
         
         ws.merge_range('A2:S2',
-                      "⚠️ Все значения рассчитываются автоматически. "
-                      "Формулы ищут тарифы по паре (Маркетплейс + Режим работы) в таблице '⚙️ Параметры'.",
+                      "⚠️ Все значения рассчитываются автоматически через ВПР",
                       self.formats['warning'])
         
         calc_headers = [
@@ -7926,31 +7820,29 @@ class FormulaExcelExporter:
         # Ссылки на глобальные параметры
         p_tax = f"'⚙️ Параметры'!$B${self._global_tax_row}"
         min_profit = f"'⚙️ Параметры'!$B${self._global_min_profit_row}"
-        p_days = f"'⚙️ Параметры'!$B${self._global_tax_row + 2}"  # Дней хранения
+        p_days = "'⚙️ Параметры'!$B$7"  # Дней хранения
         
-        # Диапазоны для двухкритериального поиска
-        # Базовые тарифы: колонки A-L, строки start_row:end_row
-        base_range = f"'⚙️ Параметры'!$A${self._base_rates_start_row}:$L${self._base_rates_end_row}"
-        # Колонка с ключом МП (A) и Режимом (B)
-        mp_col = f"'⚙️ Параметры'!$A${self._base_rates_start_row}:$A${self._base_rates_end_row}"
-        mode_col = f"'⚙️ Параметры'!$B${self._base_rates_start_row}:$B${self._base_rates_end_row}"
+        # Диапазон таблицы параметров (A:M)
+        params_range = f"'⚙️ Параметры'!$A${self._params_table_start}:$M${self._params_table_end}"
         
         total_rows = len(df)
-        
         for i in range(total_rows):
             excel_row = 3 + i
-            input_row = 4 + i  # Строка в листе "Входные"
+            input_row = 4 + i
             
             # Ссылки на входные данные
             in_price = f"'📥 Входные'!E{input_row}"
             in_cost = f"'📥 Входные'!F{input_row}"
             in_weight = f"'📥 Входные'!G{input_row}"
-            in_length = f"' Входные'!H{input_row}"
+            in_length = f"'📥 Входные'!H{input_row}"
             in_width = f"'📥 Входные'!I{input_row}"
             in_height = f"'📥 Входные'!J{input_row}"
             in_art = f"'📥 Входные'!A{input_row}"
             in_mp = f"'📥 Входные'!C{input_row}"
             in_mode = f"'📥 Входные'!D{input_row}"
+            
+            # Ключ для ВПР: МП|Режим
+            lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
             
             # A: Артикул
             ws.write_formula(excel_row, 0, f"={in_art}", self.formats['default'])
@@ -7967,44 +7859,45 @@ class FormulaExcelExporter:
             # E: Себестоимость
             ws.write_formula(excel_row, 4, f"={in_cost}", self.formats['formula_cell'])
             
-            # 🆕 F: Комиссия МП = INDEX/MATCH по МП+Режим, колонка 3 (Комиссия)
+            # F: Комиссия МП (колонка 4 в таблице параметров)
             ws.write_formula(excel_row, 5,
-                f"=INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),3)*{in_price}",
+                f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",
                 self.formats['formula_cell'])
             
-            #  G: Логистика = База + Вес*За_кг (с сезонным коэффициентом)
-            # База (колонка 4) + Вес * За_кг (колонка 5)
+            # G: Логистика (колонка 5 + вес*колонка 6)
             ws.write_formula(excel_row, 6,
-                f"=(INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),4)+"
-                f"{in_weight}*INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),5))",
+                f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+"
+                f"{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)",
                 self.formats['formula_cell'])
             
-            # 🆕 H: Хранение = (Д*Ш*В/1000) * Хранение/день * Дни
+            # H: Хранение (колонка 8)
             ws.write_formula(excel_row, 7,
                 f"=({in_length}*{in_width}*{in_height}/1000)*"
-                f"INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),7)*{p_days}",
+                f"VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",
                 self.formats['formula_cell'])
             
-            # 🆕 I: Эквайринг = Цена * Эквайринг%
+            # I: Эквайринг (колонка 9)
             ws.write_formula(excel_row, 8,
-                f"=INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),8)*{in_price}",
+                f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",
                 self.formats['formula_cell'])
             
-            # 🆕 J: Последняя миля
+            # J: Последняя миля (колонка 11)
             ws.write_formula(excel_row, 9,
-                f"=INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),10)",
+                f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",
                 self.formats['formula_cell'])
             
-            # 🆕 K: Возвраты = Цена * Возвраты% * 1.3
+            # K: Возвраты (колонка 10 * 1.3)
             ws.write_formula(excel_row, 10,
-                f"=INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),9)*{in_price}*1.3",
+                f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",
                 self.formats['formula_cell'])
             
-            # L: Налог = Цена * Налог%
-            ws.write_formula(excel_row, 11, f"={in_price}*{p_tax}", self.formats['formula_cell'])
+            # L: Налог
+            ws.write_formula(excel_row, 11, f"={in_price}*{p_tax}", 
+                           self.formats['formula_cell'])
             
-            # M: Реклама = 15% от цены (упрощённо)
-            ws.write_formula(excel_row, 12, f"={in_price}*0.15", self.formats['formula_cell'])
+            # M: Реклама (15% от цены)
+            ws.write_formula(excel_row, 12, f"={in_price}*0.15", 
+                           self.formats['formula_cell'])
             
             # N: ИТОГО расходов
             ws.write_formula(excel_row, 13,
@@ -8026,60 +7919,71 @@ class FormulaExcelExporter:
                 f"=IF({in_cost}>0,O{excel_row+1}/{in_cost},0)",
                 self.formats['formula_percent'])
             
-            # R: Безубыточность (упрощённо)
+            # R: Безубыточность
             ws.write_formula(excel_row, 17,
                 f"=N{excel_row+1}/(1-"
-                f"INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),3)-"
-                f"INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),8)-{p_tax})",
+                f"VLOOKUP({lookup_key},{params_range},4,FALSE)-"
+                f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",
                 self.formats['formula_cell'])
             
             # S: Мин. цена
             ws.write_formula(excel_row, 18,
                 f"=N{excel_row+1}/(1-"
-                f"INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),3)-"
-                f"INDEX({base_range},MATCH({in_mp}&{in_mode},{mp_col}&{mode_col},0),8)-{p_tax}-{min_profit})",
+                f"VLOOKUP({lookup_key},{params_range},4,FALSE)-"
+                f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax}-{min_profit})",
                 self.formats['formula_cell'])
         
-        # Условное форматирование: прибыль
+        # Условное форматирование: ТОЛЬКО ЦВЕТА, БЕЗ ИКОНОК!
         if total_rows > 0:
             last_row = 3 + total_rows
             profit_range = f"O4:O{last_row}"
             
+            # ✅ ТОЛЬКО ЦВЕТОВОЕ ФОРМАТИРОВАНИЕ (БЕЗ ИКОНОК)
             ws.conditional_format(profit_range, {
-                'type': 'cell', 'criteria': '>', 'value': 0,
-                'format': self.formats['positive']
+                'type': 'cell',
+                'criteria': '>',
+                'value': 0,
+                'format': self.formats['positive']  # Только зелёный цвет
             })
             ws.conditional_format(profit_range, {
-                'type': 'cell', 'criteria': '<', 'value': 0,
-                'format': self.formats['negative']
+                'type': 'cell',
+                'criteria': '<',
+                'value': 0,
+                'format': self.formats['negative']  # Только красный цвет
             })
             
+            # Градиент для маржи (БЕЗ ИКОНОК)
             margin_range = f"P4:P{last_row}"
             ws.conditional_format(margin_range, {
                 'type': '3_color_scale',
                 'min_color': self.COLORS["negative"],
                 'mid_color': self.COLORS["warning"],
                 'max_color': self.COLORS["positive"]
+                # ✅ Никаких icon_set параметров!
             })
         
         # ИТОГОВАЯ строка
         total_row = 3 + total_rows + 2
-        ws.merge_range(total_row, 0, total_row, 1, "ИТОГО / СРЕДНЕЕ:", self.formats['bold_money'])
+        ws.merge_range(total_row, 0, total_row, 1, 
+                      "ИТОГО / СРЕДНЕЕ:", self.formats['bold_money'])
         
         last_data_row = 3 + total_rows
         for col_idx, col_letter in enumerate(['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']):
             ws.write_formula(total_row, col_idx,
-                           f"=SUM({col_letter}4:{col_letter}{last_data_row})",
-                           self.formats['bold_money'])
+                f"=SUM({col_letter}4:{col_letter}{last_data_row})",
+                self.formats['bold_money'])
         
         for col_idx, col_letter in enumerate(['P', 'Q'], start=15):
             ws.write_formula(total_row, col_idx,
-                           f"=AVERAGE({col_letter}4:{col_letter}{last_data_row})",
-                           self.formats['bold_percent'])
+                f"=AVERAGE({col_letter}4:{col_letter}{last_data_row})",
+                self.formats['bold_percent'])
         
-        widths = {'A': 18, 'B': 15, 'C': 12, 'D': 13, 'E': 13, 'F': 13,
-                 'G': 13, 'H': 13, 'I': 13, 'J': 13, 'K': 13, 'L': 13,
-                 'M': 13, 'N': 15, 'O': 15, 'P': 11, 'Q': 11, 'R': 15, 'S': 15}
+        # Ширина колонок
+        widths = {
+            'A': 18, 'B': 15, 'C': 12, 'D': 13, 'E': 13, 'F': 13,
+            'G': 13, 'H': 13, 'I': 13, 'J': 13, 'K': 13, 'L': 13,
+            'M': 13, 'N': 15, 'O': 15, 'P': 11, 'Q': 11, 'R': 15, 'S': 15
+        }
         for col, width in widths.items():
             ws.set_column(f'{col}:{col}', width)
         
@@ -8090,10 +7994,10 @@ class FormulaExcelExporter:
         return ws
     
     def _write_marketplace_summary(self, workbook, df: pd.DataFrame):
-        """🏪 Сводка по МП с SUMIF"""
+        """🏪 Сводка по МП с СУММЕСЛИ"""
         ws = workbook.add_worksheet("🏪 По МП")
         
-        ws.merge_range('A1:H1', "🏪 СВОДКА ПО МАРКЕТПЛЕЙСАМ (формулы SUMIF)",
+        ws.merge_range('A1:H1', "🏪 СВОДКА ПО МАРКЕТПЛЕЙСАМ",
                       self.formats['header_title'])
         
         headers = ['Маркетплейс', 'Кол-во SKU', 'Общая прибыль', 'Средняя прибыль',
@@ -8107,23 +8011,28 @@ class FormulaExcelExporter:
         for i, mp in enumerate(marketplaces):
             row = 3 + i
             ws.write(row, 0, mp, self.formats['bold'])
-            
-            ws.write_formula(row, 1, f"=COUNTIF('📊 Расчёт'!$B:$B,A{row+1})", self.formats['default'])
-            ws.write_formula(row, 2, f"=SUMIF(' Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$O:$O)", self.formats['money'])
-            ws.write_formula(row, 3, f"=IF(B{row+1}>0,C{row+1}/B{row+1},0)", self.formats['money'])
-            ws.write_formula(row, 4, f"=AVERAGEIF('📊 Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$P:$P)", self.formats['formula_percent'])
-            ws.write_formula(row, 5, f"=SUMIF(' Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$D:$D)", self.formats['money'])
-            ws.write_formula(row, 6, f"=SUMIF('📊 Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$N:$N)", self.formats['money'])
-            ws.write_formula(row, 7, f"=IF(G{row+1}>0,C{row+1}/(G{row+1}-F{row+1}),0)", self.formats['formula_percent'])
+            ws.write_formula(row, 1, f"=COUNTIF('📊 Расчёт'!$B:$B,A{row+1})", 
+                           self.formats['default'])
+            ws.write_formula(row, 2, f"=SUMIF('📊 Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$O:$O)", 
+                           self.formats['money'])
+            ws.write_formula(row, 3, f"=IF(B{row+1}>0,C{row+1}/B{row+1},0)", 
+                           self.formats['money'])
+            ws.write_formula(row, 4, f"=AVERAGEIF('📊 Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$P:$P)", 
+                           self.formats['formula_percent'])
+            ws.write_formula(row, 5, f"=SUMIF('📊 Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$D:$D)", 
+                           self.formats['money'])
+            ws.write_formula(row, 6, f"=SUMIF('📊 Расчёт'!$B:$B,A{row+1},'📊 Расчёт'!$N:$N)", 
+                           self.formats['money'])
+            ws.write_formula(row, 7, f"=IF(G{row+1}>0,C{row+1}/(G{row+1}-F{row+1}),0)", 
+                           self.formats['formula_percent'])
         
         if marketplaces:
             total_row = 3 + len(marketplaces) + 1
             ws.write(total_row, 0, "ИТОГО:", self.formats['bold_money'])
-            
             for col_idx, col_letter in enumerate(['B', 'C', 'F', 'G']):
                 ws.write_formula(total_row, col_idx,
-                               f"=SUM({col_letter}4:{col_letter}{3+len(marketplaces)})",
-                               self.formats['bold_money'])
+                    f"=SUM({col_letter}4:{col_letter}{3+len(marketplaces)})",
+                    self.formats['bold_money'])
         
         ws.set_column('A:A', 18)
         ws.set_column('B:H', 18)
@@ -8145,30 +8054,33 @@ class FormulaExcelExporter:
         
         if 'profit' in df.columns:
             top_df = df.nlargest(20, 'profit')
-            for i, (_, row) in enumerate(top_df.iterrows()):
+            for i, (_, row_data) in enumerate(top_df.iterrows()):
                 excel_row = 2 + i
                 ws.write(excel_row, 0, i + 1, self.formats['default'])
-                ws.write(excel_row, 1, row.get('Артикул', ''), self.formats['default'])
-                ws.write(excel_row, 2, row.get('marketplace', ''), self.formats['default'])
-                ws.write(excel_row, 3, row.get('profit', 0), self.formats['money'])
-                ws.write(excel_row, 4, row.get('margin_percent', 0) / 100, self.formats['formula_percent'])
-            
-            bottom_start = 2 + 20 + 2
-            ws.merge_range(bottom_start, 0, bottom_start, 4, "💸 ТОП-20 УБЫТОЧНЫХ ТОВАРОВ",
-                          self.formats['negative'])
-            ws.set_row(bottom_start, 25)
-            
-            for col_idx, header in enumerate(headers):
-                ws.write(bottom_start + 1, col_idx, header, self.formats['bold'])
-            
-            bottom_df = df.nsmallest(20, 'profit')
-            for i, (_, row) in enumerate(bottom_df.iterrows()):
-                excel_row = bottom_start + 2 + i
-                ws.write(excel_row, 0, i + 1, self.formats['default'])
-                ws.write(excel_row, 1, row.get('Артикул', ''), self.formats['default'])
-                ws.write(excel_row, 2, row.get('marketplace', ''), self.formats['default'])
-                ws.write(excel_row, 3, row.get('profit', 0), self.formats['money'])
-                ws.write(excel_row, 4, row.get('margin_percent', 0) / 100, self.formats['formula_percent'])
+                ws.write(excel_row, 1, row_data.get('Артикул', ''), self.formats['default'])
+                ws.write(excel_row, 2, row_data.get('marketplace', ''), self.formats['default'])
+                ws.write(excel_row, 3, row_data.get('profit', 0), self.formats['money'])
+                ws.write(excel_row, 4, row_data.get('margin_percent', 0) / 100, 
+                        self.formats['formula_percent'])
+        
+        bottom_start = 2 + 20 + 2
+        ws.merge_range(bottom_start, 0, bottom_start, 4, 
+                      "💸 ТОП-20 УБЫТОЧНЫХ ТОВАРОВ",
+                      self.formats['negative'])
+        ws.set_row(bottom_start, 25)
+        
+        for col_idx, header in enumerate(headers):
+            ws.write(bottom_start + 1, col_idx, header, self.formats['bold'])
+        
+        bottom_df = df.nsmallest(20, 'profit')
+        for i, (_, row_data) in enumerate(bottom_df.iterrows()):
+            excel_row = bottom_start + 2 + i
+            ws.write(excel_row, 0, i + 1, self.formats['default'])
+            ws.write(excel_row, 1, row_data.get('Артикул', ''), self.formats['default'])
+            ws.write(excel_row, 2, row_data.get('marketplace', ''), self.formats['default'])
+            ws.write(excel_row, 3, row_data.get('profit', 0), self.formats['money'])
+            ws.write(excel_row, 4, row_data.get('margin_percent', 0) / 100, 
+                    self.formats['formula_percent'])
         
         ws.set_column('A:A', 5)
         ws.set_column('B:B', 20)
@@ -8182,14 +8094,15 @@ class FormulaExcelExporter:
         """📊 Дашборд с KPI"""
         ws = workbook.add_worksheet("📊 Дашборд")
         
-        ws.merge_range('A1:D1', "📊 СВОДНЫЙ ДАШБОРД", self.formats['header_title'])
+        ws.merge_range('A1:D1', "📊 СВОДНЫЙ ДАШБОРД", 
+                      self.formats['header_title'])
         ws.set_row(0, 35)
         
         total_rows = len(df)
         total_row = 3 + total_rows + 2
         
         kpis = [
-            (" Всего товаров", total_rows, "kpi_neutral_int", "neutral"),
+            ("📦 Всего товаров", total_rows, "kpi_neutral_int", "neutral"),
             ("💰 Общая прибыль", f"='📊 Расчёт'!O{total_row}", "kpi_positive_money", "positive"),
             ("📈 Средняя маржа", f"='📊 Расчёт'!P{total_row}", "kpi_neutral_percent", "neutral"),
             ("📊 Средний ROI", f"='📊 Расчёт'!Q{total_row}", "kpi_neutral_percent", "neutral"),
@@ -8200,12 +8113,10 @@ class FormulaExcelExporter:
         row = 2
         for label, value, fmt_key, style in kpis:
             ws.write(row, 0, label, self.formats['kpi_label'])
-            
             if isinstance(value, str) and value.startswith('='):
                 ws.write_formula(row, 1, value, self.formats[fmt_key])
             else:
                 ws.write(row, 1, value, self.formats[fmt_key])
-            
             row += 1
         
         ws.set_column('A:A', 25)
