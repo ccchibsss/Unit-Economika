@@ -5153,7 +5153,7 @@ class MarketplaceUnitEconomics:
         
         return pd.DataFrame(all_results)
     
-        def _calculate_chunk_threadsafe(
+    def _calculate_chunk_threadsafe(
         self,
         chunk_df: pd.DataFrame,
         marketplace: str,
