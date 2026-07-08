@@ -8149,7 +8149,6 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         
         if 'marketplace' in df.columns:
-            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация
             mp_stats = df.groupby('marketplace').agg({
                 'price': 'sum',
                 'total_expenses': 'sum',
@@ -8158,7 +8157,6 @@ class SuperProExcelExporter:
                 'roi': 'mean',
             }).reset_index()
             
-            # ✅ ИСПРАВЛЕНИЕ: правильное количество колонок (7)
             mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %', 'ROI %']
             
             total_profit = mp_stats['Прибыль'].sum()
@@ -8177,16 +8175,13 @@ class SuperProExcelExporter:
                 ws.write(excel_row, 6, row['Ср. маржа %'], self.formats['formula_percent'])
                 ws.write(excel_row, 7, row['ROI %'], self.formats['formula_percent'])
                 
-                # Доля рынка
                 share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
                 ws.write(excel_row, 8, share / 100, self.formats['formula_percent'])
                 
-                # Эффективность (прибыль на рубль выручки)
                 ws.write_formula(excel_row, 9,
                     f"=IF(C{excel_row+1}>0,E{excel_row+1}/C{excel_row+1},0)",
                     self.formats['formula_percent'])
                 
-                # Рейтинг (автоматический)
                 ws.write_formula(excel_row, 10,
                     f"=RANK(E{excel_row+1},$E$4:$E${3+len(mp_stats)})",
                     self.formats['default'])
@@ -8197,7 +8192,7 @@ class SuperProExcelExporter:
         return ws
     
     def _write_category_analysis(self, workbook, df: pd.DataFrame):
-        """📂 Анализ по категориям"""
+        """📂 Анализ по категориям - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         ws = workbook.add_worksheet("📂 Категории")
         
         ws.merge_range('A1:H1', "📂 АНАЛИЗ ПО КАТЕГОРИЯМ",
@@ -8210,15 +8205,15 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         
         if 'category' in df.columns:
-            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация
+            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация с 4 колонками
             cat_stats = df.groupby('category').agg({
                 'price': 'sum',
-                'profit': ['sum', 'mean'],
+                'profit': 'sum',
                 'margin_percent': 'mean',
             }).reset_index()
             
-            # ✅ ИСПРАВЛЕНИЕ: правильное количество колонок (5)
-            cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %']
+            # ✅ ИСПРАВЛЕНИЕ: ровно 4 колонки
+            cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. маржа %']
             
             total_profit = cat_stats['Прибыль'].sum()
             
@@ -8233,7 +8228,6 @@ class SuperProExcelExporter:
                         self.formats['positive'] if row['Прибыль'] > 0 else self.formats['negative'])
                 ws.write(excel_row, 4, row['Ср. маржа %'], self.formats['formula_percent'])
                 
-                # Топ товар в категории (формула)
                 ws.write_formula(excel_row, 5,
                     f"=INDEX('📊 Расчёт'!$A:$A,MATCH(MAX(IF('📊 Расчёт'!$D:$D=A{excel_row+1},'📊 Расчёт'!$T:$T)),'📊 Расчёт'!$T:$T,0))",
                     self.formats['default'])
@@ -8262,13 +8256,11 @@ class SuperProExcelExporter:
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
         
-        # Базовые параметры
         total_profit = df['profit'].sum() if 'profit' in df.columns else 0
         base_monthly = total_profit / 12 if total_profit > 0 else 1000
-        growth_rate = 0.05  # 5% годовой рост
-        volatility = 0.15   # 15% волатильность
+        growth_rate = 0.05
+        volatility = 0.15
         
-        # Сезонные коэффициенты
         seasonal = [0.85, 0.85, 0.95, 1.05, 1.10, 1.15,
                    1.20, 1.15, 1.10, 1.05, 0.95, 0.90]
         
@@ -8294,16 +8286,12 @@ class SuperProExcelExporter:
                 prev_base = base_monthly * seasonal[i-1] * (1 + growth_rate) ** ((i-1)/12)
                 growth = (base / prev_base - 1) if prev_base > 0 else 0
                 ws.write(excel_row, 5, growth, self.formats['formula_percent'])
-                
-                # Тренд: ↑, ↓, →
-                ws.write(excel_row, 6, 
-                        "↑" if growth > 0.02 else "↓" if growth < -0.02 else "→",
+                ws.write(excel_row, 6, "↑" if growth > 0.02 else "↓" if growth < -0.02 else "→",
                         self.formats['default'])
             else:
                 ws.write(excel_row, 5, 0, self.formats['formula_percent'])
                 ws.write(excel_row, 6, "→", self.formats['default'])
         
-        # График прогноза
         chart = workbook.add_chart({'type': 'line'})
         chart.add_series({
             'name': 'Оптимистичный',
@@ -8329,7 +8317,6 @@ class SuperProExcelExporter:
         chart.set_size({'width': 720, 'height': 400})
         
         ws.insert_chart(16, 0, chart)
-        
         ws.set_column('A:G', 16)
         
         return ws
@@ -8345,12 +8332,9 @@ class SuperProExcelExporter:
                       "Как изменяется прибыль при изменении ключевых параметров",
                       self.formats['info'])
         
-        # Базовые параметры
         avg_price = df['price'].mean() if 'price' in df.columns else 1000
         avg_cost = df['cost'].mean() if 'cost' in df.columns else 500
-        avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 20
         
-        # Матрица чувствительности
         row = 4
         ws.write(row, 0, "Параметр", self.formats['header'])
         ws.write(row, 1, "Текущее", self.formats['header'])
@@ -8391,7 +8375,6 @@ class SuperProExcelExporter:
         ws.merge_range('A1:F1', "🏆 ТОП-10 ПРИБЫЛЬНЫХ И УБЫТОЧНЫХ",
                       self.formats['header_title'])
         
-        # Топ прибыльных
         ws.write(2, 0, "ТОП-10 ПРИБЫЛЬНЫХ", self.formats['section_title'])
         
         headers = ['№', 'Артикул', 'МП', 'Прибыль', 'Маржа %', 'Рекомендация']
@@ -8409,7 +8392,6 @@ class SuperProExcelExporter:
                 ws.write(excel_row, 4, row.get('margin_percent', 0), self.formats['formula_percent'])
                 ws.write(excel_row, 5, "✅ Лидер", self.formats['info'])
         
-        # Топ убыточных
         bottom_start = 4 + 10 + 3
         ws.write(bottom_start, 0, "ТОП-10 УБЫТОЧНЫХ", self.formats['section_title'])
         
@@ -8444,7 +8426,6 @@ class SuperProExcelExporter:
         
         row = 4
         
-        # Рекомендация 1: Лучший маркетплейс
         if 'marketplace' in df.columns and 'profit' in df.columns:
             best_mp = df.groupby('marketplace')['profit'].sum().idxmax()
             ws.write(row, 0, "🏪 Лучший маркетплейс", self.formats['bold'])
@@ -8453,7 +8434,6 @@ class SuperProExcelExporter:
                           self.formats['info'])
             row += 2
         
-        # Рекомендация 2: Оптимальный режим
         if 'operation_mode' in df.columns and 'profit' in df.columns:
             best_mode = df.groupby('operation_mode')['profit'].sum().idxmax()
             ws.write(row, 0, "📦 Оптимальный режим", self.formats['bold'])
@@ -8462,7 +8442,6 @@ class SuperProExcelExporter:
                           self.formats['info'])
             row += 2
         
-        # Рекомендация 3: Ценовая оптимизация
         avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
         if avg_margin < 15:
             ws.write(row, 0, "💰 Ценовая политика", self.formats['bold'])
@@ -8471,7 +8450,6 @@ class SuperProExcelExporter:
                           self.formats['warning_cell'])
             row += 2
         
-        # Рекомендация 4: Убыточные товары
         if 'profit' in df.columns:
             unprofitable = (df['profit'] < 0).sum()
             if unprofitable > 0:
@@ -8481,7 +8459,6 @@ class SuperProExcelExporter:
                               self.formats['warning_cell'])
                 row += 2
         
-        # Рекомендация 5: Оптимизация расходов
         if 'total_expenses' in df.columns and 'price' in df.columns:
             expense_ratio = (df['total_expenses'].sum() / df['price'].sum() * 100) if df['price'].sum() > 0 else 0
             if expense_ratio > 70:
