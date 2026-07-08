@@ -7469,10 +7469,27 @@ class FormulaExcelExporter:
         self._global_min_profit_row = None
     
     def _get_configs(self):
-        """Получение конфигураций маркетплейсов"""
+        """
+        🆕 v100.9: Гарантированное получение конфигураций маркетплейсов.
+        Если в unit_economics нет _configs, загружаем их из кэша или создаём заново.
+        """
+        # 1. Пытаемся взять из переданного объекта
         if self.unit_economics and hasattr(self.unit_economics, '_configs'):
-            return self.unit_economics._configs
-        return {}
+            configs = self.unit_economics._configs
+            if configs:
+                return configs
+        
+        # 2. Если нет — загружаем из кэша или создаём заново
+        try:
+            # Пытаемся получить через st.cache_resource
+            unit_econ = get_marketplace_unit_economics()
+            if unit_econ and hasattr(unit_econ, '_configs'):
+                return unit_econ._configs
+        except Exception:
+            pass
+        
+        # 3. Финальный fallback — создаём конфигурации напрямую
+        return get_marketplace_configs_2026()
     
     def _init_formats(self, workbook):
         """Создание всех форматов ячеек"""
@@ -7609,10 +7626,14 @@ class FormulaExcelExporter:
             logger.error(traceback.format_exc())
             return False
     
+    # ========================================================================
+    # ⚙️ ИСПРАВЛЕННЫЙ МЕТОД _write_parameters_sheet
+    # ========================================================================
     def _write_parameters_sheet(self, workbook, metadata: Dict):
         """
         🆕 v100.9: Лист параметров со столбцом "Ключ"
         Структура: Ключ | МП | Режим | Комиссия | Логистика | ...
+        ✅ ИСПРАВЛЕНИЕ: тарифы гарантированно подгружаются через _get_configs()
         """
         ws = workbook.add_worksheet("⚙️ Параметры")
         
@@ -7685,10 +7706,13 @@ class FormulaExcelExporter:
         self._base_rates_start_row = row + 1  # Excel нумерация с 1
         row += 1
         
-        # Заполняем реальными тарифами
+        # ✅ ИСПРАВЛЕНИЕ: ГАРАНТИРОВАННОЕ ПОЛУЧЕНИЕ ТАРИФОВ
         configs = self._get_configs()
+        
         if configs:
-            for mp_name, config in configs.items():
+            # Сортируем маркетплейсы для читаемости
+            for mp_name in sorted(configs.keys()):
+                config = configs[mp_name]
                 for mode in self.OPERATION_MODES:
                     # Создаём ключ: Ozon|FBS
                     key = f"{mp_name}|{mode}"
@@ -7697,6 +7721,7 @@ class FormulaExcelExporter:
                     mode_mult = config.mode_multipliers.get(mode, 1.0)
                     effective_rate = base_rate * mode_mult
                     
+                    # Записываем данные — КЛЮЧ В ПЕРВОЙ КОЛОНКЕ
                     ws.write(row, 0, key, self.formats['param_cell'])      # Ключ
                     ws.write(row, 1, mp_name, self.formats['param_cell'])  # МП
                     ws.write(row, 2, mode, self.formats['param_cell'])     # Режим
@@ -7713,12 +7738,37 @@ class FormulaExcelExporter:
                     
                     row += 1
         else:
-            # Fallback: одна строка
-            ws.write(row, 0, "Ozon|FBS", self.formats['param_cell'])
-            ws.write(row, 1, "Ozon", self.formats['param_cell'])
-            ws.write(row, 2, "FBS", self.formats['param_cell'])
-            ws.write(row, 3, 0.15, self.formats['input_percent'])
-            row += 1
+            # Fallback: если конфигурации всё ещё не загружены
+            st.warning("⚠️ Тарифы не загружены. Используются значения по умолчанию.")
+            default_config = MarketplaceConfig(
+                name="Ozon",
+                commission_rate=0.15,
+                min_commission=30.0,
+                logistics_base=50.0,
+                logistics_per_kg=15.0,
+                logistics_per_liter=5.0,
+                storage_per_day=0.3,
+                return_fee=0.02,
+                acquiring_fee=0.015,
+                last_mile_fee=50.0,
+                subscription_fee=0.0
+            )
+            for mode in self.OPERATION_MODES:
+                key = f"Ozon|{mode}"
+                ws.write(row, 0, key, self.formats['param_cell'])
+                ws.write(row, 1, "Ozon", self.formats['param_cell'])
+                ws.write(row, 2, mode, self.formats['param_cell'])
+                ws.write(row, 3, 0.15, self.formats['input_percent'])
+                ws.write(row, 4, 50.0, self.formats['input_cell'])
+                ws.write(row, 5, 15.0, self.formats['input_cell'])
+                ws.write(row, 6, 5.0, self.formats['input_cell'])
+                ws.write(row, 7, 0.3, self.formats['input_cell'])
+                ws.write(row, 8, 0.015, self.formats['input_percent'])
+                ws.write(row, 9, 0.02, self.formats['input_percent'])
+                ws.write(row, 10, 50.0, self.formats['input_cell'])
+                ws.write(row, 11, 0.0, self.formats['input_cell'])
+                ws.write(row, 12, "HARDCODED", self.formats['default'])
+                row += 1
         
         self._base_rates_end_row = row
         
@@ -7744,7 +7794,8 @@ class FormulaExcelExporter:
         ]
         
         if configs:
-            for mp_name, config in configs.items():
+            for mp_name in sorted(configs.keys()):
+                config = configs[mp_name]
                 for cat in popular_categories:
                     cat_rate = config.category_rates.get(cat, config.commission_rate)
                     ws.write(row, 0, mp_name, self.formats['param_cell'])
@@ -7771,7 +7822,8 @@ class FormulaExcelExporter:
         row += 1
         
         if configs:
-            for mp_name, config in configs.items():
+            for mp_name in sorted(configs.keys()):
+                config = configs[mp_name]
                 for season_key in self.SEASONS:
                     mult = config.seasonal_multipliers.get(season_key, 1.0)
                     ws.write(row, 0, mp_name, self.formats['param_cell'])
@@ -7801,7 +7853,10 @@ class FormulaExcelExporter:
         ws.set_column('D:M', 16)  # Остальные
         
         return ws
-    
+
+    # ========================================================================
+    # ОСТАЛЬНЫЕ МЕТОДЫ (БЕЗ ИЗМЕНЕНИЙ)
+    # ========================================================================
     def _write_input_sheet(self, workbook, df: pd.DataFrame):
         """📊 Лист входных данных"""
         ws = workbook.add_worksheet("📥 Входные")
