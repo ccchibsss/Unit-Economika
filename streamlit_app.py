@@ -7649,7 +7649,6 @@ class SuperProExcelExporter:
         """📊 СУПЕР-ДАШБОРД с расширенными KPI"""
         ws = workbook.add_worksheet("📊 Дашборд")
         
-        # Заголовок
         ws.merge_range('A1:G1', "🚀 СУПЕР-ДАШБОРД ЮНИТ-ЭКОНОМИКИ", 
                       self.formats['header_title'])
         ws.set_row(0, 40)
@@ -7659,7 +7658,6 @@ class SuperProExcelExporter:
                       self.formats['info'])
         ws.set_row(1, 25)
         
-        # Расчет общих показателей
         total_profit = df['profit'].sum() if 'profit' in df.columns else 0
         avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
         avg_roi = df['roi'].mean() if 'roi' in df.columns else 0
@@ -7667,7 +7665,6 @@ class SuperProExcelExporter:
         total_expenses = df['total_expenses'].sum() if 'total_expenses' in df.columns else 0
         unprofitable = (df['profit'] < 0).sum() if 'profit' in df.columns else 0
         
-        # KPI блок
         kpis = [
             ("📦 Всего SKU", f"{len(df):,}", "kpi_neutral_int"),
             ("💰 Общая прибыль", f"{total_profit:,.0f} ₽", 
@@ -7687,7 +7684,6 @@ class SuperProExcelExporter:
             if i % 4 == 3:
                 row += 1
         
-        # График распределения прибыли по маркетплейсам
         if 'marketplace' in df.columns and 'profit' in df.columns:
             mp_profit = df.groupby('marketplace')['profit'].sum().sort_values(ascending=False)
             
@@ -7696,13 +7692,11 @@ class SuperProExcelExporter:
                 ws.write(chart_row, 0, "🏪 Прибыль по маркетплейсам", 
                         self.formats['chart_title'])
                 
-                # Данные для графика
                 data_start_row = chart_row + 1
                 for i, (mp, profit) in enumerate(mp_profit.items()):
                     ws.write(data_start_row + i, 0, mp, self.formats['default'])
                     ws.write(data_start_row + i, 1, profit, self.formats['money'])
                 
-                # Создаем столбчатую диаграмму
                 chart = workbook.add_chart({'type': 'column'})
                 chart.add_series({
                     'name': 'Прибыль по МП',
@@ -7718,7 +7712,6 @@ class SuperProExcelExporter:
                 
                 ws.insert_chart(chart_row, 2, chart)
         
-        # Установка ширины колонок
         ws.set_column('A:A', 25)
         ws.set_column('B:B', 25)
         ws.set_column('C:C', 25)
@@ -7730,7 +7723,6 @@ class SuperProExcelExporter:
         """⚙️ СУПЕР-ПАРАМЕТРЫ с расширенными настройками"""
         ws = workbook.add_worksheet("⚙️ Параметры")
         
-        # Заголовок
         ws.merge_range('A1:P1', "⚙️ РАСШИРЕННЫЕ ПАРАМЕТРЫ РАСЧЁТА", 
                       self.formats['header_title'])
         ws.set_row(0, 30)
@@ -7742,9 +7734,6 @@ class SuperProExcelExporter:
         if metadata is None:
             metadata = {}
         
-        # ====================================================================
-        # СЕКЦИЯ 1: ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ
-        # ====================================================================
         row = 4
         ws.merge_range(row, 0, row, 15, "🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ", 
                       self.formats['section_title'])
@@ -7775,16 +7764,12 @@ class SuperProExcelExporter:
                 self._global_min_profit_row = row + 1
             row += 1
         
-        # ====================================================================
-        # СЕКЦИЯ 2: БАЗОВЫЕ ТАРИФЫ С КЛЮЧАМИ
-        # ====================================================================
         row += 2
         ws.merge_range(row, 0, row, 15, 
                       "📊 БАЗОВЫЕ ТАРИФЫ (ключ = МП|Режим)",
                       self.formats['section_title'])
         row += 1
         
-        # Заголовки
         headers = [
             'Ключ', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг',
             'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты',
@@ -7828,7 +7813,6 @@ class SuperProExcelExporter:
                     ws.write(row, 15, config.tariff_source.value, self.formats['default'])
                     row += 1
         else:
-            # Fallback
             ws.write(row, 0, "Ozon|FBS", self.formats['param_cell'])
             ws.write(row, 1, "Ozon", self.formats['param_cell'])
             ws.write(row, 2, "FBS", self.formats['param_cell'])
@@ -7837,7 +7821,6 @@ class SuperProExcelExporter:
         
         self._base_rates_end_row = row
         
-        # Ширина колонок
         ws.set_column('A:A', 18)
         ws.set_column('B:C', 14)
         ws.set_column('D:O', 14)
@@ -7869,7 +7852,6 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         ws.set_row(2, 30)
         
-        # Заполняем данными
         for i, (_, row_data) in enumerate(df.iterrows()):
             excel_row = 3 + i
             
@@ -7890,13 +7872,11 @@ class SuperProExcelExporter:
             ws.write(excel_row, 9, float(row_data.get('width', 0)), self.formats['input_cell_int'])
             ws.write(excel_row, 10, float(row_data.get('height', 0)), self.formats['input_cell_int'])
             
-            # Объём = Д*Ш*В/1000
             volume = (float(row_data.get('length', 0)) * 
                      float(row_data.get('width', 0)) * 
                      float(row_data.get('height', 0))) / 1000
             ws.write(excel_row, 11, volume, self.formats['formula_cell'])
             
-            # Оплачиваемый вес = max(вес, объём/5000)
             ws.write_formula(excel_row, 12,
                 f"=MAX(G{excel_row+1}, L{excel_row+1}/5000)",
                 self.formats['formula_cell'])
@@ -7928,7 +7908,6 @@ class SuperProExcelExporter:
                       "⚠️ Все расчёты автоматические — не редактируйте формулы",
                       self.formats['warning'])
         
-        # Заголовки
         headers = [
             'Артикул', 'МП', 'Режим', 'Категория',
             'Цена', 'Себест-ть', 'Вес', 'Объём',
@@ -7943,21 +7922,18 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         ws.set_row(2, 35)
         
-        # Ссылки на параметры
         p_tax = f"'⚙️ Параметры'!$B${self._global_tax_row}"
         min_profit = f"'⚙️ Параметры'!$B${self._global_min_profit_row}"
-        p_ad = "'⚙️ Параметры'!$B$9"  # ДРР
-        p_days = "'⚙️ Параметры'!$B$7"  # Дней хранения
-        p_currency = "'⚙️ Параметры'!$B$10"  # Курс USD
+        p_ad = "'⚙️ Параметры'!$B$9"
+        p_days = "'⚙️ Параметры'!$B$7"
+        p_currency = "'⚙️ Параметры'!$B$10"
         
-        # Диапазон параметров
         params_range = f"'⚙️ Параметры'!$A${self._base_rates_start_row}:$P${self._base_rates_end_row}"
         
         for i in range(self._total_rows):
             excel_row = 3 + i
             input_row = 4 + i
             
-            # Ссылки на входные данные
             in_art = f"'📥 Входные'!A{input_row}"
             in_mp = f"'📥 Входные'!C{input_row}"
             in_mode = f"'📥 Входные'!D{input_row}"
@@ -7969,114 +7945,82 @@ class SuperProExcelExporter:
             
             lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
             
-            # A: Артикул
             ws.write_formula(excel_row, 0, f"={in_art}", self.formats['default'])
-            
-            # B: МП
             ws.write_formula(excel_row, 1, f"={in_mp}", self.formats['default'])
-            
-            # C: Режим
             ws.write_formula(excel_row, 2, f"={in_mode}", self.formats['default'])
-            
-            # D: Категория
             ws.write_formula(excel_row, 3, f"={in_cat}", self.formats['default'])
-            
-            # E: Цена
             ws.write_formula(excel_row, 4, f"={in_price}", self.formats['formula_cell'])
-            
-            # F: Себестоимость
             ws.write_formula(excel_row, 5, f"={in_cost}", self.formats['formula_cell'])
-            
-            # G: Вес
             ws.write_formula(excel_row, 6, f"={in_weight}", self.formats['formula_cell'])
-            
-            # H: Объём
             ws.write_formula(excel_row, 7, f"={in_volume}", self.formats['formula_cell'])
             
-            # I: Комиссия (колонка 4)
             ws.write_formula(excel_row, 8,
                 f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",
                 self.formats['formula_cell'])
             
-            # J: Логистика (колонка 5 + вес*колонка 6 + объём*колонка 7)
             ws.write_formula(excel_row, 9,
                 f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+"
                 f"{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+"
                 f"{in_volume}*VLOOKUP({lookup_key},{params_range},7,FALSE)",
                 self.formats['formula_cell'])
             
-            # K: Хранение (объём * колонка 8 * дни)
             ws.write_formula(excel_row, 10,
                 f"={in_volume}*VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",
                 self.formats['formula_cell'])
             
-            # L: Эквайринг (колонка 9)
             ws.write_formula(excel_row, 11,
                 f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",
                 self.formats['formula_cell'])
             
-            # M: Последняя миля (колонка 11)
             ws.write_formula(excel_row, 12,
                 f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",
                 self.formats['formula_cell'])
             
-            # N: Возвраты (колонка 10 * 1.3)
             ws.write_formula(excel_row, 13,
                 f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",
                 self.formats['formula_cell'])
             
-            # O: Реклама (ДРР от цены)
             ws.write_formula(excel_row, 14,
                 f"={in_price}*{p_ad}",
                 self.formats['formula_cell'])
             
-            # P: Налог
             ws.write_formula(excel_row, 15,
                 f"={in_price}*{p_tax}",
                 self.formats['formula_cell'])
             
-            # Q: Страховка (колонка 13)
             ws.write_formula(excel_row, 16,
                 f"=VLOOKUP({lookup_key},{params_range},13,FALSE)*{in_price}",
                 self.formats['formula_cell'])
             
-            # R: Упаковка (колонка 14)
             ws.write_formula(excel_row, 17,
                 f"=VLOOKUP({lookup_key},{params_range},14,FALSE)",
                 self.formats['formula_cell'])
             
-            # S: ИТОГО расходов
             ws.write_formula(excel_row, 18,
                 f"={in_cost}+SUM(I{excel_row+1}:R{excel_row+1})",
                 self.formats['formula_cell'])
             
-            # T: ПРИБЫЛЬ
             ws.write_formula(excel_row, 19,
                 f"={in_price}-S{excel_row+1}",
                 self.formats['formula_cell'])
             
-            # U: Маржа %
             ws.write_formula(excel_row, 20,
                 f"=IF({in_price}>0,T{excel_row+1}/{in_price},0)",
                 self.formats['formula_percent'])
             
-            # V: ROI %
             ws.write_formula(excel_row, 21,
                 f"=IF({in_cost}>0,T{excel_row+1}/{in_cost},0)",
                 self.formats['formula_percent'])
             
-            # W: Безубыточность
             ws.write_formula(excel_row, 22,
                 f"=S{excel_row+1}/(1-"
                 f"VLOOKUP({lookup_key},{params_range},4,FALSE)-"
                 f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",
                 self.formats['formula_cell'])
         
-        # Условное форматирование
         if self._total_rows > 0:
             last_row = 3 + self._total_rows
             
-            # Цветовая шкала для прибыли
             profit_range = f"T4:T{last_row}"
             ws.conditional_format(profit_range, {
                 'type': 'cell',
@@ -8091,7 +8035,6 @@ class SuperProExcelExporter:
                 'format': self.formats['negative']
             })
             
-            # Цветовая шкала для маржи
             margin_range = f"U4:U{last_row}"
             ws.conditional_format(margin_range, {
                 'type': '3_color_scale',
@@ -8100,7 +8043,6 @@ class SuperProExcelExporter:
                 'max_color': self.COLORS["positive"]
             })
         
-        # ИТОГО
         total_row = 3 + self._total_rows + 2
         ws.merge_range(total_row, 0, total_row, 2,
                       "ИТОГО / СРЕДНЕЕ:", self.formats['bold_money'])
@@ -8116,7 +8058,6 @@ class SuperProExcelExporter:
                 f"=AVERAGE({col_letter}4:{col_letter}{last_data_row})",
                 self.formats['bold_percent'])
         
-        # Ширина колонок
         widths = {
             'A': 15, 'B': 14, 'C': 10, 'D': 14, 'E': 12, 'F': 12,
             'G': 10, 'H': 10, 'I': 12, 'J': 12, 'K': 12, 'L': 12,
@@ -8132,6 +8073,7 @@ class SuperProExcelExporter:
         
         return ws
     
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД _write_marketplace_comparison
     def _write_marketplace_comparison(self, workbook, df: pd.DataFrame):
         """🏪 Сравнение маркетплейсов с автоматическими выводами"""
         ws = workbook.add_worksheet("🏪 Сравнение МП")
@@ -8191,6 +8133,7 @@ class SuperProExcelExporter:
         
         return ws
     
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД _write_category_analysis
     def _write_category_analysis(self, workbook, df: pd.DataFrame):
         """📂 Анализ по категориям - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         ws = workbook.add_worksheet("📂 Категории")
@@ -8205,7 +8148,7 @@ class SuperProExcelExporter:
             ws.write(2, col_idx, header, self.formats['header'])
         
         if 'category' in df.columns:
-            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация с 4 колонками
+            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация с 3 колонками
             cat_stats = df.groupby('category').agg({
                 'price': 'sum',
                 'profit': 'sum',
