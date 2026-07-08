@@ -10129,7 +10129,7 @@ def main():
             "🗂️ Каталог для группировки",
             "🤖 AI Тарифы",
             "🌐 API Тарифы маркетплейсов",
-            "🧠 Умная загрузка тарифов"  # ✅ НОВЫЙ РАЗДЕЛ
+            "🧠 Умная загрузка тарифов"
         ],
         key="main_navigation"
     )
@@ -10145,7 +10145,7 @@ def main():
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
     elif section == "🧠 Умная загрузка тарифов":
-        show_smart_tariff_interface()  # ✅ ВЫЗОВ
+        show_smart_tariff_interface()
 
 # ✅ ТОЧКА ВХОДА
 if __name__ == "__main__":
