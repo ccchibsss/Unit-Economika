@@ -9775,294 +9775,48 @@ class SmartTariffLoader:
                 })
         
         return pd.DataFrame(results)
-# ============================================================================
-# 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-# ============================================================================
+def main():
+    """Главная функция приложения"""
+    
+    # ✅ ТОЛЬКО ОДИН РАЗ!
+    st.set_page_config(
+        page_title=APP_NAME,
+        page_icon="🚗",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    st.title(APP_NAME)
+    st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
+    
+    st.sidebar.title("🧭 Навигация")
+    
+    section = st.sidebar.radio(
+        "Выберите раздел:",
+        [
+            "📁 Загрузка данных",
+            "📊 Юнит-экономика",
+            "🗂️ Каталог для группировки",
+            "🤖 AI Тарифы",
+            "🌐 API Тарифы маркетплейсов",
+            "🧠 Умная загрузка тарифов"  # ✅ НОВЫЙ РАЗДЕЛ
+        ],
+        key="main_navigation"
+    )
+    
+    if section == "📁 Загрузка данных":
+        show_data_upload_interface()
+    elif section == "📊 Юнит-экономика":
+        show_unit_economics_interface()
+    elif section == "🗂️ Каталог для группировки":
+        show_catalog_grouping_interface()
+    elif section == "🤖 AI Тарифы":
+        show_ai_tariffs_interface()
+    elif section == "🌐 API Тарифы маркетплейсов":
+        show_api_tariffs_interface()
+    elif section == "🧠 Умная загрузка тарифов":
+        show_smart_tariff_interface()  # ✅ ВЫЗОВ
 
-# ✅ Импорты в ГЛОБАЛЬНОЙ области видимости
-import streamlit as st
-import pandas as pd
-from typing import Dict, List, Any, Optional
-import logging
-
-# ✅ Настройка логгера
-logger = logging.getLogger('SmartTariffUI')
-
-# ✅ Проверка наличия st_dataframe_compat
-try:
-    # Пытаемся использовать существующую функцию из Блока 0
-    from streamlit_app import st_dataframe_compat
-except (ImportError, NameError):
-    # Создаём fallback функцию, если её нет
-    def st_dataframe_compat(df, *args, **kwargs):
-        """Совместимая обёртка для st.dataframe"""
-        kwargs.pop('use_container_width', None)
-        if 'width' not in kwargs:
-            kwargs['width'] = 'stretch'
-        return st.dataframe(df, *args, **kwargs)
-
-# ✅ Проверка наличия SmartTariffLoader
-try:
-    from streamlit_app import SmartTariffLoader
-except (ImportError, NameError):
-    # Определяем класс, если его нет
-    class SmartTariffLoader:
-        SOURCES = {
-            "api": "🔌 API Маркетплейса",
-            "ai": "🤖 AI (документация)", 
-            "cache": "💾 Загруженные ранее",
-            "hybrid": "🔄 Гибридный (AI + API)"
-        }
-        
-        def __init__(self):
-            self.logger = logging.getLogger('SmartTariffLoader')
-            self.api_connector = None
-            self.ai_updater = None
-            self.tariff_cache = None
-            self.logger.warning("⚠️ SmartTariffLoader используется в упрощённом режиме")
-        
-        def get_available_sources(self, marketplace):
-            return ["hybrid", "api", "ai", "cache"]
-        
-        def load_tariffs(self, marketplace, source="hybrid", api_key=None, client_id=None, force_refresh=False):
-            return {
-                "marketplace": marketplace,
-                "source": source,
-                "timestamp": datetime.now().isoformat(),
-                "data": {},
-                "source_used": "fallback",
-                "confidence": 0.5,
-                "warnings": ["⚠️ Используется упрощённая загрузка"],
-                "errors": ["SmartTariffLoader не настроен"]
-            }
-
-# ✅ Проверка наличия get_marketplace_unit_economics
-try:
-    from streamlit_app import get_marketplace_unit_economics
-except (ImportError, NameError):
-    def get_marketplace_unit_economics():
-        logger.warning("⚠️ get_marketplace_unit_economics не найдена")
-        return None
-
-def show_smart_tariff_interface():
-    """
-    🧠 ИНТЕРФЕЙС УМНОЙ ЗАГРУЗКИ ТАРИФОВ
-    Выбор источника: API, AI, Кэш, Гибридный
-    """
-    
-    # ✅ st уже импортирован в глобальной области
-    st.header("🧠 Умная загрузка тарифов")
-    
-    st.info("""
-    📋 **ВЫБЕРИТЕ ИСТОЧНИК ТАРИФОВ:**
-    
-    🔌 **API Маркетплейса** — прямое подключение к API (самый точный)
-    🤖 **AI (документация)** — автоматический парсинг документации
-    💾 **Загруженные ранее** — использование кэшированных тарифов
-    🔄 **Гибридный** — AI + API (рекомендуемый)
-    
-    💡 **Рекомендация:** Используйте гибридный режим для максимальной надёжности
-    """)
-    
-    # ✅ Инициализация с обработкой ошибок
-    try:
-        tariff_loader = SmartTariffLoader()
-        st.success("✅ SmartTariffLoader инициализирован")
-    except Exception as e:
-        st.error(f"❌ Ошибка инициализации SmartTariffLoader: {e}")
-        tariff_loader = None
-        return
-    
-    try:
-        unit_economics = get_marketplace_unit_economics()
-        if unit_economics is None:
-            st.warning("⚠️ UnitEconomics не инициализирован")
-            return
-    except Exception as e:
-        st.error(f"❌ Ошибка инициализации UnitEconomics: {e}")
-        return
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        marketplace = st.selectbox(
-            "🏪 Выберите маркетплейс",
-            ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"],
-            key="smart_tariff_mp"
-        )
-    
-    with col2:
-        source = st.selectbox(
-            "📡 Источник тарифов",
-            [
-                "hybrid",
-                "api", 
-                "ai",
-                "cache"
-            ],
-            format_func=lambda x: SmartTariffLoader.SOURCES.get(x, x) if hasattr(SmartTariffLoader, 'SOURCES') else x,
-            key="smart_tariff_source"
-        )
-    
-    # ✅ Показываем доступные источники
-    if tariff_loader and hasattr(tariff_loader, 'get_available_sources'):
-        try:
-            available = tariff_loader.get_available_sources(marketplace)
-            source_labels = [SmartTariffLoader.SOURCES.get(s, s) for s in available] if hasattr(SmartTariffLoader, 'SOURCES') else available
-            st.info(f"🔍 Доступные источники для {marketplace}: {', '.join(source_labels)}")
-        except Exception as e:
-            st.warning(f"⚠️ Ошибка получения доступных источников: {e}")
-    else:
-        st.info("ℹ️ Доступны все источники")
-    
-    # ✅ API ключи (если выбран API режим)
-    if source in ["api", "hybrid"]:
-        st.subheader("🔑 API ключи")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            api_key = st.text_input(
-                "API Key",
-                type="password",
-                placeholder="Введите API ключ",
-                key="smart_tariff_api_key",
-                help="Для Ozon: Api-Key, для WB: Api-Key"
-            )
-        with col2:
-            client_id = st.text_input(
-                "Client ID (только для Ozon)",
-                type="password",
-                placeholder="Введите Client ID",
-                key="smart_tariff_client_id"
-            )
-    else:
-        api_key = None
-        client_id = None
-    
-    # ✅ Кнопка сравнения источников
-    if st.button("📊 Сравнить источники", key="smart_tariff_compare"):
-        if tariff_loader and hasattr(tariff_loader, 'compare_sources'):
-            with st.spinner("Сравнение источников..."):
-                try:
-                    compare_df = tariff_loader.compare_sources(marketplace, api_key, client_id)
-                    if compare_df is not None and not compare_df.empty:
-                        st.subheader("📊 Сравнение источников")
-                        st_dataframe_compat(compare_df)
-                    else:
-                        st.warning("⚠️ Нет данных для сравнения")
-                except Exception as e:
-                    st.error(f"❌ Ошибка сравнения: {e}")
-        else:
-            st.warning("⚠️ Метод compare_sources не найден")
-    
-    # ✅ Кнопка загрузки
-    if st.button("🚀 Загрузить тарифы", type="primary", key="smart_tariff_load"):
-        if not tariff_loader or not hasattr(tariff_loader, 'load_tariffs'):
-            st.error("❌ Метод load_tariffs не найден")
-            return
-        
-        with st.spinner(f"Загрузка тарифов из источника: {SmartTariffLoader.SOURCES.get(source, source) if hasattr(SmartTariffLoader, 'SOURCES') else source}..."):
-            try:
-                result = tariff_loader.load_tariffs(
-                    marketplace=marketplace,
-                    source=source,
-                    api_key=api_key,
-                    client_id=client_id,
-                    force_refresh=True
-                )
-                
-                if not isinstance(result, dict):
-                    st.error("❌ Неверный формат результата")
-                    return
-                
-                if result.get("errors"):
-                    st.error(f"❌ Ошибки загрузки:")
-                    for err in result["errors"]:
-                        st.error(f"  - {err}")
-                
-                if result.get("warnings"):
-                    st.info(f"ℹ️ Информация:")
-                    for warn in result["warnings"]:
-                        st.info(f"  - {warn}")
-                
-                if result.get("data"):
-                    st.success(f"✅ Тарифы успешно загружены из источника: {result.get('source_used', 'Неизвестно')}")
-                    
-                    confidence = result.get('confidence', 0)
-                    st.info(f"🎯 Доверие к данным: {confidence*100:.0f}%")
-                    
-                    # Показываем загруженные тарифы
-                    with st.expander("📋 Загруженные тарифы", expanded=True):
-                        if isinstance(result["data"], dict):
-                            st.json(result["data"])
-                        else:
-                            st.write(result["data"])
-                    
-                    # Применяем тарифы
-                    if st.button("💾 Применить тарифы к расчётам", key="smart_tariff_apply"):
-                        if "rates" in result["data"]:
-                            if unit_economics and hasattr(unit_economics, '_apply_ai_tariffs'):
-                                try:
-                                    unit_economics._apply_ai_tariffs(marketplace, result["data"]["rates"])
-                                    st.success(f"✅ Тарифы для {marketplace} применены!")
-                                except Exception as e:
-                                    st.error(f"❌ Ошибка применения: {e}")
-                            else:
-                                st.warning("⚠️ Метод _apply_ai_tariffs не найден")
-                        else:
-                            st.warning("⚠️ Тарифы не содержат данных для применения")
-                else:
-                    st.error("❌ Не удалось загрузить тарифы")
-            except Exception as e:
-                st.error(f"❌ Ошибка загрузки: {e}")
-                logger.exception("Ошибка в load_tariffs")
-    
-    # ✅ Отображение текущих тарифов
-    st.subheader("📊 Текущие тарифы")
-    
-    if unit_economics and hasattr(unit_economics, '_configs'):
-        configs = unit_economics._configs
-        if marketplace in configs:
-            try:
-                config = configs[marketplace]
-                tariff_data = {
-                    "Параметр": [
-                        "Комиссия", "Мин. комиссия", "Логистика база",
-                        "Логистика за кг", "Логистика за л", "Хранение",
-                        "Эквайринг", "Возвраты", "Последняя миля",
-                        "Подписка", "Источник", "Обновлено"
-                    ],
-                    "Значение": [
-                        f"{config.commission_rate*100:.1f}%",
-                        f"{config.min_commission:.2f} ₽",
-                        f"{config.logistics_base:.2f} ₽",
-                        f"{config.logistics_per_kg:.2f} ₽",
-                        f"{config.logistics_per_liter:.2f} ₽",
-                        f"{config.storage_per_day:.2f} ₽/л/день",
-                        f"{config.acquiring_fee*100:.1f}%",
-                        f"{config.return_fee*100:.1f}%",
-                        f"{config.last_mile_fee:.2f} ₽",
-                        f"{config.subscription_fee:.2f} ₽",
-                        config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source),
-                        config.last_updated.strftime('%d.%m.%Y %H:%M') if hasattr(config.last_updated, 'strftime') else str(config.last_updated)
-                    ]
-                }
-                st_dataframe_compat(pd.DataFrame(tariff_data))
-            except Exception as e:
-                st.warning(f"⚠️ Ошибка отображения тарифов: {e}")
-        else:
-            st.info(f"ℹ️ Тарифы для {marketplace} не найдены")
-    else:
-        st.warning("⚠️ Конфигурации маркетплейсов не найдены")
-
-# ✅ Точка входа для тестирования
+# ✅ ТОЧКА ВХОДА - ТОЛЬКО main()
 if __name__ == "__main__":
-    try:
-        main()
-    except NameError:
-        st.set_page_config(
-            page_title="Умная загрузка тарифов",
-            page_icon="🧠",
-            layout="wide"
-        )
-        show_smart_tariff_interface()
+    main()
