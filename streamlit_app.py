@@ -24,9 +24,37 @@
 ✅ МИГРАЦИЯ БД (авто-добавление новых колонок)
 ================================================================================
 """
+"""
+================================================================================
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v100.5 - ENTERPRISE EDITION
+================================================================================
+📌 ВЕРСИЯ: 100.5.1 (ENTERPRISE)
+📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ, АВТОТОВАРЫ И АГРЕГАТЫ
+📌 ТЕХНОЛОГИИ: STREAMLIT, POLARS, DUCKDB, SCIKIT-LEARN, OPENPYXL, PLOTLY
+📌 УЛУЧШЕНИЯ v100.5.1:
+✅ ИСПРАВЛЕНЫ КРАКОЗЯБРЫ (двойное UTF-8 кодирование)
+✅ АВТООПРЕДЕЛЕНИЕ И ИСПРАВЛЕНИЕ КОДИРОВКИ КОЛОНОК
+✅ ПРАВИЛЬНЫЙ ПОРЯДОК ЧТЕНИЯ CSV (UTF-8 приоритет)
+✅ ОБЪЁМНЫЙ ВЕС ДЛЯ ТОЧНОЙ ЛОГИСТИКИ
+✅ ПРОГРЕССИВНАЯ СТОИМОСТЬ ХРАНЕНИЯ
+✅ РЕАЛЬНЫЕ ВОЗВРАТЫ С ОБРАТНОЙ ЛОГИСТИКОЙ
+✅ СПЕЦИФИЧЕСКИЕ РАСХОДЫ АВТОЗАПЧАСТЕЙ
+✅ УЧЁТ СКИДОК И АКЦИЙ В КОМИССИЯХ
+✅ РЕКЛАМНЫЕ РАСХОДЫ (ДРР)
+✅ РАЗНЫЕ НАЛОГОВЫЕ РЕЖИМЫ (УСН 6%, УСН 15%, ОСН, ПСН, НПД)
+✅ ПРОФЕССИОНАЛЬНЫЙ EXCEL-ЭКСПОРТ С ДАШБОРДОМ И ГРАФИКАМИ
+✅ ТОЧНЫЕ РАСЧЁТЫ ЧЕРЕЗ DECIMAL
+✅ БЕНЧМАРКИ РЫНКА И АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ
+✅ ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ ДЛЯ 100K+ ТОВАРОВ
+✅ СОВМЕСТИМОСТЬ STREAMLIT 1.58+ (width='stretch')
+✅ МИГРАЦИЯ БД (авто-добавление новых колонок)
+================================================================================
+"""
 # ============================================================================
-# БЛОК 0: ВСЕ НЕБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ
+# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ
 # ============================================================================
+
+# === Стандартная библиотека Python ===
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -87,6 +115,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import smtplib
+
+# === Типизация и утилиты ===
 from typing import Dict, List, Any, Optional, Tuple, Union, Set, Callable, Iterable, Iterator, Generator
 from dataclasses import dataclass, field, asdict, astuple, replace
 from functools import lru_cache, wraps, reduce, partial
@@ -105,18 +135,22 @@ from decimal import Decimal, ROUND_HALF_UP
 # ============================================================================
 # ОПЦИОНАЛЬНЫЕ ИМПОРТЫ С ОБРАБОТКОЙ ОШИБОК
 # ============================================================================
+
+# === PIL/Pillow (изображения) ===
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
 
+# === pytz (часовые пояса) ===
 try:
     import pytz
     PYTZ_AVAILABLE = True
 except ImportError:
     PYTZ_AVAILABLE = False
 
+# === dateutil (парсинг дат) ===
 try:
     import dateutil
     from dateutil.parser import parse
@@ -125,12 +159,14 @@ try:
 except ImportError:
     DATEUTIL_AVAILABLE = False
 
+# === holidays (праздники) ===
 try:
     import holidays
     HOLIDAYS_AVAILABLE = True
 except ImportError:
     HOLIDAYS_AVAILABLE = False
 
+# === phonenumbers (телефоны) ===
 try:
     import phonenumbers
     from phonenumbers import PhoneNumberType, PhoneNumber
@@ -139,6 +175,7 @@ try:
 except ImportError:
     PHONENUMBERS_AVAILABLE = False
 
+# === validators (валидация) ===
 try:
     import validators
     from validators import url, email as validate_email, domain, ip_address
@@ -146,18 +183,21 @@ try:
 except ImportError:
     VALIDATORS_AVAILABLE = False
 
+# === pycountry (страны) ===
 try:
     import pycountry
     PYCOUNTRY_AVAILABLE = True
 except ImportError:
     PYCOUNTRY_AVAILABLE = False
 
+# === tzlocal (локальная таймзона) ===
 try:
     import tzlocal
     TZLOCAL_AVAILABLE = True
 except ImportError:
     TZLOCAL_AVAILABLE = False
 
+# === Polars (быстрые DataFrame) ===
 try:
     import polars as pl
     import polars.selectors as cs
@@ -168,6 +208,7 @@ except ImportError:
     POLARS_AVAILABLE = False
     pl = None
 
+# === DuckDB (аналитическая БД) ===
 try:
     import duckdb
     DUCKDB_AVAILABLE = True
@@ -175,16 +216,18 @@ except ImportError:
     DUCKDB_AVAILABLE = False
     duckdb = None
 
-# DASK УДАЛЕН ИЗ-ЗА КОНФЛИКТА С PANDAS 2.3.3
+# DASK удалён из-за конфликта с pandas 2.3.3
 DASK_AVAILABLE = False
 DASK_DF_AVAILABLE = False
 
+# === Ray (распределённые вычисления) ===
 try:
     import ray
     RAY_AVAILABLE = True
 except ImportError:
     RAY_AVAILABLE = False
 
+# === Modin (параллельный pandas) ===
 try:
     import modin.pandas as mpd
     import modin.config as mcfg
@@ -192,6 +235,7 @@ try:
 except ImportError:
     MODIN_AVAILABLE = False
 
+# === PyArrow (колоночные данные) ===
 try:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -204,6 +248,7 @@ try:
 except ImportError:
     PYARROW_AVAILABLE = False
 
+# === Pandera (валидация DataFrame) ===
 try:
     import pandera as pandera_schema
     from pandera import Column, DataFrameSchema, Check, Index
@@ -211,6 +256,7 @@ try:
 except ImportError:
     PANDERA_AVAILABLE = False
 
+# === scikit-learn (ML) ===
 try:
     import sklearn
     from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, HashingVectorizer
@@ -241,6 +287,7 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
 
+# === Plotly (интерактивные графики) ===
 try:
     import plotly.graph_objects as go
     import plotly.express as px
@@ -255,6 +302,7 @@ except ImportError:
     px = None
     make_subplots = None
 
+# === Matplotlib + Seaborn (статические графики) ===
 try:
     import matplotlib
     import matplotlib.pyplot as plt
@@ -273,12 +321,14 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
+# === Altair (декларативные графики) ===
 try:
     import altair as alt
     ALTAIR_AVAILABLE = True
 except ImportError:
     ALTAIR_AVAILABLE = False
 
+# === Bokeh (интерактивные дашборды) ===
 try:
     import bokeh
     from bokeh.plotting import figure, output_notebook, show
@@ -288,6 +338,7 @@ try:
 except ImportError:
     BOKEH_AVAILABLE = False
 
+# === openpyxl (Excel) ===
 try:
     from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, GradientFill, NamedStyle
@@ -313,6 +364,7 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
+# === ReportLab (PDF) ===
 try:
     from reportlab.lib.pagesizes import letter, A4, A3, A5, landscape, portrait
     from reportlab.pdfgen import canvas
@@ -335,18 +387,21 @@ try:
 except ImportError:
     PDF_EXPORT = False
 
+# === xlsxwriter (быстрый Excel) ===
 try:
     import xlsxwriter
     XLSXWRITER_AVAILABLE = True
 except ImportError:
     XLSXWRITER_AVAILABLE = False
 
+# === tabulate (красивые таблицы) ===
 try:
     import tabulate
     TABULATE_AVAILABLE = True
 except ImportError:
     TABULATE_AVAILABLE = False
 
+# === chardet (определение кодировки) ===
 try:
     import chardet
     CHARDET_AVAILABLE = True
@@ -354,6 +409,7 @@ except ImportError:
     CHARDET_AVAILABLE = False
     chardet = None
 
+# === OpenAI API ===
 try:
     import openai
     OPENAI_AVAILABLE = True
@@ -361,18 +417,21 @@ except ImportError:
     OPENAI_AVAILABLE = False
     openai = None
 
+# === Anthropic API ===
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
+# === tiktoken (токенизация) ===
 try:
     import tiktoken
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
 
+# === aiohttp + aiofiles (асинхронность) ===
 try:
     import aiohttp
     import aiofiles
@@ -380,18 +439,21 @@ try:
 except ImportError:
     ASYNC_AVAILABLE = False
 
+# === httpx (современный HTTP) ===
 try:
     import httpx
     HTTPX_AVAILABLE = True
 except ImportError:
     HTTPX_AVAILABLE = False
 
+# === websockets ===
 try:
     import websockets
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
+# === psutil (мониторинг системы) ===
 try:
     import psutil
     PSUTIL_AVAILABLE = True
@@ -399,6 +461,7 @@ except ImportError:
     PSUTIL_AVAILABLE = False
     psutil = None
 
+# === Babel (локализация чисел/валют) ===
 try:
     from babel.numbers import format_currency as babel_format_currency
     from babel.numbers import format_percent as babel_format_percent
@@ -432,13 +495,11 @@ def st_dataframe_compat(df, *args, **kwargs):
 def detect_mojibake(text: str) -> bool:
     """
     🆕 v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования).
-    
     Кракозябры выглядят как: РђСЂС‚РёРєСѓР», Р‘СЂРµРЅРґ, Р¦РµРЅР°
     Это результат чтения UTF-8 как CP1251 с последующей записью в UTF-8.
     """
     if not isinstance(text, str) or not text:
         return False
-    
     # Паттерн типичных кракозябр: последовательности символов РЎ-РЏ, Р°-СЏ
     # которые выглядят как "Р" + кириллический символ
     mojibake_patterns = [
@@ -447,31 +508,26 @@ def detect_mojibake(text: str) -> bool:
         r'[РЎР][°-Џ]{3,}',       # Р/С + 3+ символа
         r'Р[°-Џ]Р[°-Џ]',         # Чередование Р+символ
     ]
-    
     for pattern in mojibake_patterns:
         if re.search(pattern, text):
             return True
-    
     # Дополнительная проверка: если в тексте много "Р" в начале слов
     words = text.split()
     if len(words) >= 3:
         r_words = sum(1 for w in words if w.startswith('Р') and len(w) >= 2)
         if r_words / len(words) > 0.5:
             return True
-    
     return False
 
 def fix_double_utf8(text: str) -> str:
     """
     🆕 v100.5.1: Исправляет двойное кодирование UTF-8.
-    
     Преобразует: РђСЂС‚РёРєСѓР» → Артикул
-                 Р‘СЂРµРЅРґ → Бренд
-                 Р¦РµРЅР° → Цена
+    Р‘СЂРµРЅРґ → Бренд
+    Р¦РµРЅР° → Цена
     """
     if not isinstance(text, str) or not text:
         return text
-    
     # Пробуем разные кодировки для декодирования
     encodings_to_try = [
         ('cp1251', 'utf-8'),      # Windows-1251 → UTF-8 (самый частый случай)
@@ -479,7 +535,6 @@ def fix_double_utf8(text: str) -> str:
         ('iso-8859-1', 'utf-8'),  # ISO-8859-1 → UTF-8
         ('cp1252', 'utf-8'),      # Windows-1252 → UTF-8
     ]
-    
     for source_enc, target_enc in encodings_to_try:
         try:
             fixed = text.encode(source_enc).decode(target_enc)
@@ -488,8 +543,8 @@ def fix_double_utf8(text: str) -> str:
                 return fixed
         except (UnicodeDecodeError, UnicodeEncodeError):
             continue
-    
     return text
+
 def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     """
     🆕 v100.5.1 → v100.9: Исправляет кракозябры во всём DataFrame.
@@ -510,7 +565,6 @@ def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
         else:
             new_columns.append(col)
     df.columns = new_columns
-
     # Исправляем строковые значения в ячейках
     for col in df.columns:
         if df[col].dtype == 'object':
@@ -520,7 +574,6 @@ def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
                     if isinstance(x, str) and detect_mojibake(x):
                         return fix_double_utf8(x)
                     return x
-
                 # Считаем сколько ячеек действительно содержат mojibake
                 mask = df[col].apply(lambda x: isinstance(x, str) and detect_mojibake(x))
                 fixed_count += int(mask.sum())
@@ -532,7 +585,6 @@ def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
 def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
     """
     🆕 v100.5.1: Умное чтение CSV с автоматическим исправлением кракозябр.
-    
     Приоритет кодировок:
     1. UTF-8-sig (с BOM)
     2. UTF-8
@@ -540,15 +592,12 @@ def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
     4. Другие
     """
     separators = [';', ',', '\t', '|']
-    
     # Приоритетный порядок кодировок
     encodings_priority = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251']
-    
     best_df = None
     best_encoding = None
     best_sep = None
     mojibake_count = 0
-    
     for encoding in encodings_priority:
         for sep in separators:
             try:
@@ -564,45 +613,37 @@ def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
                     doublequote=True,
                     **kwargs
                 )
-                
                 if df is None or df.empty or len(df.columns) <= 1:
                     continue
-                
                 # Проверяем наличие кракозябр в колонках
                 current_mojibake = sum(
-                    1 for col in df.columns 
+                    1 for col in df.columns
                     if isinstance(col, str) and detect_mojibake(col)
                 )
-                
                 # Если нашли вариант без кракозябр — используем его
                 if current_mojibake == 0:
                     logger.info(f"✅ CSV прочитан без кракозябр: кодировка={encoding}, разделитель='{sep}'")
                     return df
-                
                 # Запоминаем лучший вариант (с минимальным количеством кракозябр)
                 if best_df is None or current_mojibake < mojibake_count:
                     best_df = df
                     best_encoding = encoding
                     best_sep = sep
                     mojibake_count = current_mojibake
-                    
             except (pd.errors.ParserError, UnicodeDecodeError, Exception):
                 continue
-    
     # Если нашли DataFrame с кракозябрами — исправляем их
     if best_df is not None:
         logger.warning(f"⚠️ CSV прочитан с кракозябрами (кодировка={best_encoding}). Исправляем...")
         fixed_df, fixed_count = fix_dataframe_encoding(best_df)
         logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
         return fixed_df
-    
     # Fallback: пробуем chardet
     if CHARDET_AVAILABLE and chardet is not None:
         try:
             file_obj.seek(0)
             raw_data = file_obj.read(100000)
             detected = chardet.detect(raw_data)
-            
             if detected and detected.get('encoding'):
                 file_obj.seek(0)
                 for sep in separators:
@@ -614,24 +655,20 @@ def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
                             engine='python',
                             on_bad_lines='skip'
                         )
-                        
                         if df is not None and not df.empty and len(df.columns) > 1:
                             logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
-                            
                             # Проверяем и исправляем кракозябры
                             has_mojibake = any(
-                                isinstance(col, str) and detect_mojibake(col) 
+                                isinstance(col, str) and detect_mojibake(col)
                                 for col in df.columns
                             )
                             if has_mojibake:
                                 df, _ = fix_dataframe_encoding(df)
-                            
                             return df
                     except (pd.errors.ParserError, UnicodeDecodeError):
                         continue
         except Exception as e:
             logger.warning(f"Ошибка chardet: {e}")
-    
     raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
 
 # ============================================================================
@@ -671,6 +708,7 @@ DEFAULT_MARKUP_GLOBAL = 0.25
 DEFAULT_DISCOUNT_MAX = 0.30
 DEFAULT_MAX_WORKERS = 8
 DEFAULT_CHUNK_SIZE = 10000
+
 SUPPORTED_CURRENCIES = ["RUB", "USD", "EUR", "CNY", "KZT", "UAH", "BYN", "AMD", "TRY"]
 SUPPORTED_LANGUAGES = ["ru", "en", "uk", "kz", "by", "am", "tr"]
 SUPPORTED_MARKETPLACES = ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет", "Avito", "Drom"]
@@ -796,14 +834,13 @@ MARKET_BENCHMARKS_2026 = {
 def money_round(value: float, decimals: int = 2) -> float:
     """Корректное округление денег (банковское)"""
     return float(Decimal(str(value)).quantize(
-        Decimal(f"0.{'0' * decimals}"), 
+        Decimal(f"0.{'0' * decimals}"),
         rounding=ROUND_HALF_UP
     ))
 
 def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> float:
     """Расчёт налога с учётом режима"""
     cfg = TAX_SYSTEMS.get(tax_system, TAX_SYSTEMS["УСН_6"])
-    
     if cfg["base"] == "revenue":
         return money_round(price * cfg["rate"])
     elif cfg["base"] == "profit":
@@ -820,14 +857,13 @@ def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> fl
 # ============================================================================
 # 🆕 v100.5: УТИЛИТЫ ДЛЯ ОБЪЁМНОГО ВЕСА
 # ============================================================================
-def calculate_billable_weight(weight_kg: float, 
-                               length_cm: float, width_cm: float, 
-                               height_cm: float, 
-                               volumetric_coeff: float = 5000.0) -> float:
+def calculate_billable_weight(weight_kg: float,
+                              length_cm: float, width_cm: float,
+                              height_cm: float,
+                              volumetric_coeff: float = 5000.0) -> float:
     """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
     if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
         return weight_kg
-    
     volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
     billable = max(weight_kg, volumetric_weight)
     billable = math.ceil(billable * 2) / 2
@@ -836,8 +872,8 @@ def calculate_billable_weight(weight_kg: float,
 # ============================================================================
 # 🆕 v100.5: ПРОГРЕССИВНОЕ ХРАНЕНИЕ
 # ============================================================================
-def calculate_storage_cost_progressive(volume_l: float, days: int, 
-                                        base_rate: float, marketplace: str) -> float:
+def calculate_storage_cost_progressive(volume_l: float, days: int,
+                                       base_rate: float, marketplace: str) -> float:
     """Прогрессивная стоимость хранения"""
     if marketplace in ["Ozon", "Wildberries"]:
         if days <= 60:
@@ -850,7 +886,6 @@ def calculate_storage_cost_progressive(volume_l: float, days: int,
             multiplier = 8.0
         else:
             multiplier = 16.0
-        
         weighted_rate = base_rate * multiplier
         return money_round(volume_l * weighted_rate * days)
     else:
@@ -860,8 +895,8 @@ def calculate_storage_cost_progressive(volume_l: float, days: int,
 # 🆕 v100.5: РЕАЛЬНЫЕ ВОЗВРАТЫ
 # ============================================================================
 def calculate_returns_cost(price: float, return_rate: float,
-                            reverse_logistics: float = 150.0,
-                            inspection_cost: float = 50.0) -> float:
+                           reverse_logistics: float = 150.0,
+                           inspection_cost: float = 50.0) -> float:
     """Полная стоимость возвратов"""
     expected_returns = price * return_rate
     reverse_logistics_cost = reverse_logistics * return_rate
@@ -883,8 +918,8 @@ class AutoPartsSpecificCosts:
     util_tax: float = 0.0
     customs_duty: float = 0.0
     currency_risk: float = 0.03
-    
-    def calculate(self, price: float, is_import: bool = False, 
+
+    def calculate(self, price: float, is_import: bool = False,
                   requires_marking: bool = True) -> float:
         total = 0.0
         if requires_marking:
@@ -902,9 +937,9 @@ class AutoPartsSpecificCosts:
 # ============================================================================
 # 🆕 v100.5: РЕКЛАМНЫЕ РАСХОДЫ (ДРР)
 # ============================================================================
-def calculate_advertising_cost(price: float, 
-                                category: str, 
-                                ad_intensity: str = "medium") -> float:
+def calculate_advertising_cost(price: float,
+                               category: str,
+                               ad_intensity: str = "medium") -> float:
     """Рекламные расходы (ДРР — доля рекламных расходов)"""
     drr_rates = {
         "low": 0.05,
@@ -912,13 +947,11 @@ def calculate_advertising_cost(price: float,
         "high": 0.25,
         "aggressive": 0.35
     }
-    
     competitive_categories = ["масла", "фильтры", "колодки", "аккумуляторы"]
     if category in competitive_categories:
         intensity = "high" if ad_intensity == "medium" else ad_intensity
     else:
         intensity = ad_intensity
-    
     return money_round(price * drr_rates.get(intensity, 0.15))
 
 # ============================================================================
@@ -927,21 +960,17 @@ def calculate_advertising_cost(price: float,
 def validate_input_data(df: pd.DataFrame) -> Tuple[bool, List[str]]:
     """Проверка качества данных перед расчётом"""
     errors = []
-    
     if 'Цена' in df.columns:
         negative_prices = (df['Цена'] <= 0).sum()
         if negative_prices > 0:
             errors.append(f"⚠️ {negative_prices} товаров с ценой ≤ 0")
-        
         suspicious = (df['Цена'] < 50).sum()
         if suspicious > 0:
             errors.append(f"⚠️ {suspicious} товаров дешевле 50₽ — проверьте")
-    
     if 'Длина' in df.columns:
         missing_dims = df['Длина'].isna().sum()
         if missing_dims > len(df) * 0.3:
             errors.append(f"⚠️ У {missing_dims} товаров нет габаритов — логистика будет неточной")
-    
     return len(errors) == 0, errors
 
 # ============================================================================
@@ -953,10 +982,8 @@ def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
     """
     if not dim_str or not isinstance(dim_str, str):
         return 0.0, 0.0, 0.0
-    
     dim_str = dim_str.lower().strip()
     separators = ['x', '*', 'х', '×', ' ', ',']
-    
     for sep in separators:
         if sep in dim_str:
             parts = [p.strip() for p in dim_str.split(sep) if p.strip()]
@@ -972,22 +999,18 @@ def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
                             nums = re.findall(r'(\d+\.?\d*)', p)
                             if nums:
                                 dimensions.append(float(nums[0]))
-                    
                     if len(dimensions) == 3:
                         dimensions.sort(reverse=True)
                         return tuple(dimensions)
                 except (ValueError, TypeError):
                     pass
-    
     return 0.0, 0.0, 0.0
 
 def parse_dimensions_vectorized(dims_series) -> "pl.DataFrame":
     """Векторизованный парсинг размеров для Polars DataFrame."""
     if not POLARS_AVAILABLE:
         return pl.DataFrame()
-    
     dims = dims_series.str.extract_all(r"(\d+\.?\d*)")
-    
     def sort_dimensions(nums):
         if nums and len(nums) >= 3:
             try:
@@ -1000,9 +1023,7 @@ def parse_dimensions_vectorized(dims_series) -> "pl.DataFrame":
             except (ValueError, TypeError):
                 pass
         return [0.0, 0.0, 0.0]
-    
     result = dims.map_elements(sort_dimensions, return_dtype=pl.List(pl.Float64))
-    
     return pl.DataFrame({
         "length": result.list.get(0),
         "width": result.list.get(1),
@@ -1019,7 +1040,6 @@ def get_api_key_safe(service_name: str) -> Optional[str]:
             return st.secrets[service_name]
     except Exception:
         pass
-    
     env_key = f"{service_name.upper()}_API_KEY"
     return os.environ.get(env_key)
 
@@ -1039,7 +1059,6 @@ class AutoPartsException(Exception):
         self.timestamp = datetime.now()
         self.context = kwargs
         super().__init__(message, *args)
-    
     def __str__(self):
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.message}"
 
@@ -1150,9 +1169,7 @@ def get_logger():
     """Логгер через st.cache_resource"""
     logger = logging.getLogger('UnitEconomyPro')
     logger.setLevel(getattr(logging, LOG_LEVEL))
-    
     formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
-    
     try:
         fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
         fh.setLevel(logging.DEBUG)
@@ -1160,12 +1177,10 @@ def get_logger():
         logger.addHandler(fh)
     except OSError as e:
         print(f"Ошибка создания файлового логгера: {e}")
-    
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-    
     return logger
 
 logger = get_logger()
@@ -1194,31 +1209,25 @@ def cache_decorator(ttl: int = CACHE_TTL, maxsize: int = 1000) -> Callable:
         cache = {}
         timestamps = {}
         access_count = defaultdict(int)
-        
         @wraps(func)
         def wrapper(*args, **kwargs):
             if not USE_CACHING:
                 return func(*args, **kwargs)
-            
             key = generate_cache_key(*args, **kwargs)
-            
             if len(cache) > maxsize:
                 least_used = sorted(access_count.items(), key=lambda x: x[1])[:len(cache) - maxsize]
                 for k, _ in least_used:
                     cache.pop(k, None)
                     timestamps.pop(k, None)
                     access_count.pop(k, None)
-            
             if key in cache and time.time() - timestamps.get(key, 0) < ttl:
                 access_count[key] += 1
                 return cache[key]
-            
             result = func(*args, **kwargs)
             cache[key] = result
             timestamps[key] = time.time()
             access_count[key] = 0
             return result
-        
         return wrapper
     return decorator
 
@@ -1228,7 +1237,6 @@ def retry_decorator(max_retries: int = 3, delay: float = 1.0, backoff: float = 2
         def wrapper(*args, **kwargs):
             current_delay = delay
             last_exception = None
-            
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
@@ -1239,11 +1247,9 @@ def retry_decorator(max_retries: int = 3, delay: float = 1.0, backoff: float = 2
                     logger.warning(f"⚠️ Попытка {attempt + 1}/{max_retries} для {func.__name__} не удалась: {e}")
                     time.sleep(current_delay)
                     current_delay *= backoff
-            
             if last_exception:
                 raise last_exception
             return None
-        
         return wrapper
     return decorator
 
@@ -1256,13 +1262,11 @@ def validate_inputs(*types: Union[type, tuple], **kwargs_types: Union[type, tupl
                     expected_type = types[i]
                     if not isinstance(arg, expected_type):
                         raise ValidationError(f"Аргумент {i} должен быть типа {expected_type.__name__}", field=str(i), value=arg)
-            
             for param_name, param_value in kwargs.items():
                 if param_name in kwargs_types:
                     expected_type = kwargs_types[param_name]
                     if not isinstance(param_value, expected_type):
                         raise ValidationError(f"Аргумент '{param_name}' должен быть типа {expected_type.__name__}", field=param_name, value=param_value)
-            
             return func(*args, **kwargs)
         return wrapper
     return decorator
@@ -1275,9 +1279,7 @@ def log_execution(func: Callable) -> Callable:
             args_str.extend(str(a)[:100] for a in args[:5])
         if kwargs:
             args_str.extend(f"{k}={str(v)[:100]}" for k, v in list(kwargs.items())[:5])
-        
         logger.info(f"▶️ Выполнение {func.__name__}({', '.join(args_str)})")
-        
         start_time = time.perf_counter()
         try:
             result = func(*args, **kwargs)
@@ -1451,7 +1453,6 @@ def generate_cache_key(*args, **kwargs) -> str:
             key_parts.append(arg.isoformat())
         else:
             key_parts.append(str(arg))
-    
     for k, v in sorted(kwargs.items()):
         if isinstance(v, (dict, OrderedDict)):
             key_parts.append(f"{k}:{json.dumps(v, sort_keys=True, ensure_ascii=False)}")
@@ -1464,7 +1465,6 @@ def generate_cache_key(*args, **kwargs) -> str:
                 key_parts.append(f"{k}:{len(v)}")
         else:
             key_parts.append(f"{k}:{v}")
-    
     key = "|".join(key_parts)
     return hashlib.md5(key.encode('utf-8')).hexdigest()
 
@@ -1494,16 +1494,14 @@ def get_file_encoding(file_path: Union[str, Path]) -> str:
                 return encoding
         except (IOError, OSError) as e:
             logger.warning(f"Ошибка определения кодировки: {e}")
-    
     encodings = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251', 'cp1252', 'latin1']
     for enc in encodings:
         try:
             with open(file_path, 'r', encoding=enc) as f:
                 f.read()
-                return enc
+            return enc
         except UnicodeDecodeError:
             continue
-    
     return 'utf-8'
 
 def normalize_text(text: str) -> str:
@@ -1536,17 +1534,13 @@ def calculate_recommended_min_price(
 ) -> float:
     if cost <= 0:
         return 0.0
-    
     fixed_costs = cost + logistics + storage_cost + last_mile
     variable_rate = commission_rate + acquiring_rate + return_rate + tax_rate + min_profit_percent
     denominator = 1 - variable_rate
-    
     if denominator <= 0:
         return 0.0
-    
     recommended_price = fixed_costs / denominator
     return max(0, money_round(recommended_price))
-
 # ============================================================================
 # БЛОК 1: ENUM И ТИПЫ
 # ============================================================================
