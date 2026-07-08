@@ -7624,19 +7624,17 @@ class SuperProExcelExporter:
             self._init_formats(workbook)
             
             # Создаем все листы
-            sheets = [
-                self._write_dashboard_super(workbook, df, metadata),
-                self._write_parameters_super(workbook, metadata),
-                self._write_input_data(workbook, df),
-                self._write_calculation_engine(workbook, df),
-                self._write_marketplace_comparison(workbook, df),
-                self._write_category_analysis(workbook, df),
-                self._write_profit_forecast(workbook, df),
-                self._write_sensitivity_analysis(workbook, df),
-                self._write_top_analytics(workbook, df),
-                self._write_recommendations(workbook, df),
-                self._write_export_summary(workbook, df, metadata),
-            ]
+            self._write_dashboard_super(workbook, df, metadata)
+            self._write_parameters_super(workbook, metadata)
+            self._write_input_data(workbook, df)
+            self._write_calculation_engine(workbook, df)
+            self._write_marketplace_comparison(workbook, df)
+            self._write_category_analysis(workbook, df)
+            self._write_profit_forecast(workbook, df)
+            self._write_sensitivity_analysis(workbook, df)
+            self._write_top_analytics(workbook, df)
+            self._write_recommendations(workbook, df)
+            self._write_export_summary(workbook, df, metadata)
             
             workbook.close()
             logger.info(f"✅ СУПЕР-PRO файл сохранён: {output_path}")
@@ -8134,7 +8132,6 @@ class SuperProExcelExporter:
         
         return ws
     
-    # ✅ ИСПРАВЛЕННЫЙ МЕТОД _write_marketplace_comparison
     def _write_marketplace_comparison(self, workbook, df: pd.DataFrame):
         """🏪 Сравнение маркетплейсов с автоматическими выводами"""
         ws = workbook.add_worksheet("🏪 Сравнение МП")
@@ -8199,7 +8196,6 @@ class SuperProExcelExporter:
         
         return ws
     
-    # ✅ ИСПРАВЛЕННЫЙ МЕТОД _write_category_analysis
     def _write_category_analysis(self, workbook, df: pd.DataFrame):
         """📂 Анализ по категориям"""
         ws = workbook.add_worksheet("📂 Категории")
@@ -10116,8 +10112,6 @@ def show_smart_tariff_interface():
 # ============================================================================
 def main():
     """Главная функция приложения"""
-    
-    # ✅ ТОЛЬКО ОДИН РАЗ!
     st.set_page_config(
         page_title=APP_NAME,
         page_icon="🚗",
