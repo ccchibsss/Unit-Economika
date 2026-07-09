@@ -9884,437 +9884,524 @@ class CategoryDimensionsDB:
             "min_weight": min(weights),
             "max_weight": max(weights)
         }
-
-
 # ============================================================================
-# 🆕 БЛОК 22: UI ДЛЯ УПРАВЛЕНИЯ КАТЕГОРИЯМИ С ВЕСОГАБАРИТАМИ
+#  БЛОК 22: UI ДЛЯ КАТЕГОРИЙ С ВЕСОГАБАРИТАМИ (v100.20)
 # ============================================================================
-
 def show_category_dimensions_interface():
-    """
-    📊 Интерфейс управления категориями с весогабаритами
-    """
-    st.header("📊 Категории с весогабаритами")
-    st.info("""
-    📋 **О РАЗДЕЛЕ:**
-    Этот раздел позволяет загружать и управлять категориями товаров с их стандартными весогабаритами.
-    
-    **Возможности:**
-    - ✅ Загрузка категорий из Excel файла
-    - ✅ Добавление категорий вручную
-    - ✅ Экспорт категорий в Excel
-    - ✅ Использование для валидации габаритов
-    - ✅ Автоматическое определение категории по названию
-    """)
-    
-    # Инициализация базы данных
-    if 'category_dimensions_db' not in st.session_state:
-        st.session_state.category_dimensions_db = CategoryDimensionsDB()
-    
-    db = st.session_state.category_dimensions_db
-    
-    # Меню
-    menu = st.sidebar.radio(
-        "🧭 Меню",
-        ["📥 Загрузка из Excel", "➕ Добавить вручную", "📋 Список категорий", " Экспорт", "📊 Статистика"],
-        key="category_menu"
-    )
-    
-    if menu == "📥 Загрузка из Excel":
-        show_category_upload(db)
-    elif menu == "➕ Добавить вручную":
-        show_category_add_manual(db)
-    elif menu == "📋 Список категорий":
-        show_category_list(db)
-    elif menu == "📤 Экспорт":
-        show_category_export(db)
-    elif menu == "📊 Статистика":
-        show_category_stats(db)
+    """📏 Категории с весогабаритами"""
+    try:
+        st.header("📏 Шаг 4: Категории с весогабаритами")
+        st.info("""
+ **О РАЗДЕЛЕ:**
+Управление категориями товаров с их стандартными весогабаритами.
+Система автоматически определяет габариты по категории товара.
 
-
-def show_category_upload(db: CategoryDimensionsDB):
-    """Загрузка категорий из Excel"""
-    st.subheader("📥 Загрузка категорий из Excel")
-    
-    st.info("""
-    📋 **ТРЕБОВАНИЯ К ФАЙЛУ:**
-    
-    **Обязательные колонки:**
-    - Категория (название категории)
-    - Длина (числовое значение)
-    - Ширина (числовое значение)
-    - Высота (числовое значение)
-    - Вес (числовое значение)
-    
-    **Опциональные колонки:**
-    - Единица длины (см, мм, м) - по умолчанию см
-    - Единица веса (кг, г, т) - по умолчанию кг
-    
-    **Пример файла:**
-    | Категория | Длина | Ширина | Высота | Вес |
-    |-----------|-------|--------|--------|-----|
-    | Фильтры   | 15    | 15     | 15     | 0.5 |
-    | Колодки   | 15    | 10     | 5      | 2.0 |
-    """)
-    
-    uploaded_file = st.file_uploader(
-        "📤 Загрузите Excel файл с категориями",
-        type=['xlsx', 'xls'],
-        key="category_upload_file"
-    )
-    
-    if uploaded_file is not None:
-        # Сохраняем временный файл
-        temp_path = TEMP_DIR / f"categories_{int(time.time())}.xlsx"
-        TEMP_DIR.mkdir(exist_ok=True)
+💡 **Возможности:**
+- 📊 Просмотр всех категорий автозапчастей
+- 📏 Стандартные диапазоны размеров для каждой категории
+- ⚖️ Типичные объёмы и веса
+- ️ Маркировка опасных и хрупких товаров
+""")
         
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        # Получаем категории
+        try:
+            categories = get_auto_parts_categories_full()
+        except Exception as e:
+            st.error(f"❌ Ошибка получения категорий: {e}")
+            categories = {}
         
-        st.info(f"📄 Файл загружен: {uploaded_file.name}")
+        if not categories:
+            st.warning("⚠️ Категории не найдены")
+            return
         
-        if st.button("🚀 Импортировать категории", type="primary", key="import_categories"):
-            with st.spinner("Импорт категорий..."):
-                result = db.import_from_excel(str(temp_path))
+        # Статистика
+        st.subheader("📊 Общая статистика")
+        
+        stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+        
+        with stats_col1:
+            st.metric("📦 Всего категорий", len(categories))
+        
+        with stats_col2:
+            hazardous_count = sum(1 for cat in categories.values() if cat.hazardous)
+            st.metric("️ Опасных", hazardous_count)
+        
+        with stats_col3:
+            fragile_count = sum(1 for cat in categories.values() if cat.fragile)
+            st.metric("🔔 Хрупких", fragile_count)
+        
+        with stats_col4:
+            high_risk_count = sum(1 for cat in categories.values() 
+                                 if hasattr(cat, 'risk_level') and cat.risk_level == RiskLevel.HIGH)
+            st.metric("🔴 Высокий риск", high_risk_count)
+        
+        st.divider()
+        
+        # Фильтр по типу
+        filter_col1, filter_col2 = st.columns([3, 1])
+        
+        with filter_col1:
+            search_query = st.text_input(
+                "🔍 Поиск категории",
+                placeholder="Введите название...",
+                key="category_search"
+            )
+        
+        with filter_col2:
+            filter_type = st.selectbox(
+                " Фильтр",
+                ["Все", "Опасные", "Хрупкие", "Высокий риск"],
+                key="category_filter"
+            )
+        
+        # Формируем список категорий
+        category_list = []
+        for key, cat in categories.items():
+            # Применяем фильтры
+            if search_query and search_query.lower() not in cat.name.lower() and search_query.lower() not in key.lower():
+                continue
             
-            if result["success"]:
-                st.success(f"✅ Импортировано {result['imported']} категорий")
+            if filter_type == "Опасные" and not cat.hazardous:
+                continue
+            if filter_type == "Хрупкие" and not cat.fragile:
+                continue
+            if filter_type == "Высокий риск" and (not hasattr(cat, 'risk_level') or cat.risk_level != RiskLevel.HIGH):
+                continue
+            
+            category_list.append({
+                "Ключ": key,
+                "Название": cat.name,
+                "Длина (см)": f"{cat.min_length:.0f}-{cat.max_length:.0f}",
+                "Ширина (см)": f"{cat.min_width:.0f}-{cat.max_width:.0f}",
+                "Высота (см)": f"{cat.min_height:.0f}-{cat.max_height:.0f}",
+                "Вес (кг)": f"{cat.min_weight:.2f}-{cat.max_weight:.2f}",
+                "Объём (л)": f"{cat.typical_volume:.2f}",
+                "Опасный": "⚠️" if cat.hazardous else "",
+                "Хрупкий": "🔔" if cat.fragile else "",
+            })
+        
+        st.info(f"📋 Найдено категорий: {len(category_list)}")
+        
+        if category_list:
+            category_df = pd.DataFrame(category_list)
+            st_dataframe_compat(category_df, hide_index=True)
+        else:
+            st.warning("️ По вашему запросу ничего не найдено")
+        
+        # Детальная информация о категории
+        st.divider()
+        st.subheader("🔍 Детальная информация")
+        
+        selected_category = st.selectbox(
+            "Выберите категорию для просмотра",
+            options=list(categories.keys()),
+            format_func=lambda x: f"{categories[x].name} ({x})",
+            key="category_detail_select"
+        )
+        
+        if selected_category:
+            cat = categories[selected_category]
+            
+            detail_col1, detail_col2 = st.columns(2)
+            
+            with detail_col1:
+                st.markdown(f"### 📦 {cat.name}")
+                st.write(f"**Описание:** {cat.description}")
+                st.write(f"**Ключ:** `{selected_category}`")
                 
-                if result["warnings"]:
-                    st.warning(f"⚠️ Предупреждений: {len(result['warnings'])}")
-                    with st.expander("📋 Показать предупреждения"):
-                        for warning in result["warnings"][:10]:
-                            st.warning(warning)
+                if hasattr(cat, 'risk_level'):
+                    risk_color = {
+                        RiskLevel.LOW: "🟢",
+                        RiskLevel.MEDIUM: "🟡",
+                        RiskLevel.HIGH: "🔴",
+                        RiskLevel.CRITICAL: "⚫"
+                    }.get(cat.risk_level, "⚪")
+                    st.write(f"**Уровень риска:** {risk_color} {cat.risk_level.value}")
                 
-                st.rerun()
+                if hasattr(cat, 'seasonality'):
+                    st.write(f"**Сезонность:** {cat.seasonality.value}")
+            
+            with detail_col2:
+                st.markdown("### 📏 Габариты")
+                st.write(f"**Длина:** {cat.min_length:.0f} - {cat.max_length:.0f} см")
+                st.write(f"**Ширина:** {cat.min_width:.0f} - {cat.max_width:.0f} см")
+                st.write(f"**Высота:** {cat.min_height:.0f} - {cat.max_height:.0f} см")
+                st.write(f"**Вес:** {cat.min_weight:.2f} - {cat.max_weight:.2f} кг")
+                st.write(f"**Типичный объём:** {cat.typical_volume:.2f} л")
+                st.write(f"**Типичный вес:** {cat.typical_weight:.2f} кг")
+    
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в разделе 'Категории с весогабаритами'")
+        st.error(f"**Ошибка:** {str(e)}")
+        st.error(f"**Тип:** {type(e).__name__}")
+        
+        with st.expander("📋 Полный traceback", expanded=True):
+            import traceback
+            st.code(traceback.format_exc())
+
+
+# ============================================================================
+# 🆕 БЛОК 23: UI ДЛЯ AI ТАРИФОВ (v100.20)
+# ============================================================================
+def show_ai_tariffs_interface():
+    """ AI Тарифы с прогнозированием"""
+    try:
+        st.header("🤖 Шаг 5: AI Тарифы с прогнозом")
+        st.info("""
+🤖 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ ИИ:**
+1. Получите API ключ на platform.deepseek.com
+2. Введите ключ в поле ниже
+3. Система автоматически обновит тарифы
+4. Получите прогноз изменения тарифов на 3 месяца вперёд
+
+💡 **Преимущества:**
+- ✅ Актуальные тарифы 2026 года
+- ✅ Прогноз изменения тарифов
+- ✅ Автоматическое обновление
+- ✅ История изменений
+""")
+        
+        # Проверка доступности OpenAI
+        if not OPENAI_AVAILABLE:
+            st.warning("⚠️ OpenAI не установлен. Установите: `pip install openai`")
+            return
+        
+        # API ключ
+        api_key = st.text_input(
+            "🔑 DeepSeek API Key",
+            type="password",
+            placeholder="sk-...",
+            key="ai_tariffs_api_key",
+            help="Получите ключ на platform.deepseek.com"
+        )
+        
+        # Настройки
+        settings_col1, settings_col2 = st.columns(2)
+        
+        with settings_col1:
+            marketplace = st.selectbox(
+                "🏪 Маркетплейс",
+                ["Все", "Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет"],
+                key="ai_tariffs_marketplace"
+            )
+        
+        with settings_col2:
+            include_forecast = st.checkbox(
+                "📈 Включить прогноз на 3 месяца",
+                value=True,
+                key="ai_tariffs_forecast"
+            )
+        
+        # Кнопки действий
+        action_col1, action_col2 = st.columns(2)
+        
+        with action_col1:
+            if st.button("🔄 Обновить тарифы", type="primary", use_container_width=True):
+                if not api_key:
+                    st.error("❌ Введите API ключ")
+                    return
+                
+                with st.spinner("Обновление тарифов через AI..."):
+                    try:
+                        # Проверяем наличие класса DeepSeekRateUpdater
+                        if 'DeepSeekRateUpdater' in globals():
+                            updater = DeepSeekRateUpdater(api_key=api_key)
+                            
+                            if marketplace == "Все":
+                                result = updater.update_all_marketplaces(include_forecast=include_forecast)
+                            else:
+                                rates, source, forecast = updater.get_rates_from_ai(
+                                    marketplace=marketplace,
+                                    force_refresh=True,
+                                    include_forecast=include_forecast
+                                )
+                                result = {
+                                    "success": rates is not None,
+                                    "updated": 1 if rates else 0,
+                                    "forecast": forecast
+                                }
+                            
+                            if result.get("success"):
+                                st.success(f"✅ Обновлено {result.get('updated', 0)} маркетплейсов")
+                                st.balloons()
+                                
+                                if include_forecast and result.get("forecast"):
+                                    st.subheader("📈 Прогноз на 3 месяца")
+                                    st.json(result["forecast"])
+                            else:
+                                st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+                        else:
+                            st.warning("⚠️ Класс DeepSeekRateUpdater не найден в коде")
+                            st.info("💡 Для работы AI тарифов необходимо определить класс DeepSeekRateUpdater")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Ошибка обновления: {e}")
+                        logger.exception("Ошибка обновления тарифов через AI")
+        
+        with action_col2:
+            if st.button("📊 Показать текущие тарифы", use_container_width=True):
+                try:
+                    unit_economics = get_marketplace_unit_economics()
+                    if unit_economics and hasattr(unit_economics, '_configs'):
+                        configs = unit_economics._configs
+                        
+                        tariff_data = []
+                        for mp_name, config in configs.items():
+                            tariff_data.append({
+                                "Маркетплейс": mp_name,
+                                "Комиссия": f"{config.commission_rate*100:.1f}%",
+                                "Логистика база": f"{config.logistics_base:.2f} ₽",
+                                "Логистика/кг": f"{config.logistics_per_kg:.2f} ₽",
+                                "Хранение/день": f"{config.storage_per_day:.2f} ₽",
+                                "Источник": config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source)
+                            })
+                        
+                        if tariff_data:
+                            st.subheader("📊 Текущие тарифы")
+                            st_dataframe_compat(pd.DataFrame(tariff_data), hide_index=True)
+                        else:
+                            st.warning("⚠️ Тарифы не найдены")
+                    else:
+                        st.warning("⚠️ UnitEconomics не инициализирован")
+                except Exception as e:
+                    st.error(f"❌ Ошибка получения тарифов: {e}")
+        
+        st.divider()
+        
+        # История обновлений
+        st.subheader(" История обновлений")
+        st.info("️ Здесь будет отображаться история изменений тарифов")
+        
+        # Статистика кэша
+        try:
+            tariff_cache = get_smart_tariff_cache()
+            stats = tariff_cache.get_stats()
+            
+            if stats:
+                st.subheader("📊 Статистика кэша тарифов")
+                
+                cache_col1, cache_col2, cache_col3 = st.columns(3)
+                
+                with cache_col1:
+                    st.metric(" Всего записей", stats.get('total_entries', 0))
+                
+                with cache_col2:
+                    st.metric("⏰ Истекших", stats.get('expired_count', 0))
+                
+                with cache_col3:
+                    st.metric("📈 Прогнозов", stats.get('forecast_count', 0))
+        except Exception as e:
+            logger.warning(f"Не удалось получить статистику кэша: {e}")
+    
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в разделе 'AI Тарифы'")
+        st.error(f"**Ошибка:** {str(e)}")
+        st.error(f"**Тип:** {type(e).__name__}")
+        
+        with st.expander("📋 Полный traceback", expanded=True):
+            import traceback
+            st.code(traceback.format_exc())
+
+
+# ============================================================================
+# 🆕 БЛОК 24: UI ДЛЯ API ТАРИФОВ (v100.20)
+# ============================================================================
+def show_api_tariffs_interface():
+    """🌐 Прямое подключение к API маркетплейсов"""
+    try:
+        st.header("🌐 Шаг 6: API Тарифы маркетплейсов")
+        st.info("""
+🌐 **ПРЯМОЕ ПОДКЛЮЧЕНИЕ К API МАРКЕТПЛЕЙСОВ:**
+- ✅ Ozon Seller API
+- ✅ Wildberries API
+- ✅ Яндекс Маркет API
+- ✅ AliExpress API
+
+💡 **Требования:**
+- API ключи для каждого маркетплейса
+- Права доступа к тарифам
+- Активный статус продавца
+""")
+        
+        # Выбор маркетплейса
+        marketplace = st.selectbox(
+            "🏪 Выберите маркетплейс",
+            ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет"],
+            key="api_tariffs_marketplace"
+        )
+        
+        st.divider()
+        
+        # Настройки API в зависимости от маркетплейса
+        st.subheader(f"🔑 Настройки API для {marketplace}")
+        
+        if marketplace == "Ozon":
+            col1, col2 = st.columns(2)
+            with col1:
+                api_key = st.text_input(
+                    "🔑 Api-Key",
+                    type="password",
+                    key="api_key_ozon",
+                    help="Api-Key из личного кабинета Ozon Seller"
+                )
+            with col2:
+                client_id = st.text_input(
+                    "🆔 Client-Id",
+                    type="password",
+                    key="client_id_ozon",
+                    help="Client-Id из личного кабинета Ozon Seller"
+                )
+            
+            st.caption("📖 Получите ключи: https://seller.ozon.ru/app/settings/api-keys")
+        
+        elif marketplace == "Wildberries":
+            api_key = st.text_input(
+                "🔑 API Key",
+                type="password",
+                key="api_key_wb",
+                help="API ключ из личного кабинета WB"
+            )
+            client_id = None
+            
+            st.caption("📖 Получите ключ: https://seller.wildberries.ru/supplier-settings/access-to-api")
+        
+        elif marketplace == "Яндекс Маркет":
+            api_key = st.text_input(
+                "🔑 OAuth Token",
+                type="password",
+                key="api_key_yandex",
+                help="OAuth токен Яндекс Маркета"
+            )
+            client_id = st.text_input(
+                "🆔 Campaign ID",
+                type="password",
+                key="client_id_yandex",
+                help="ID кампании"
+            )
+            
+            st.caption("📖 Документация: https://yandex.ru/dev/market/partner/")
+        
+        elif marketplace == "AliExpress":
+            api_key = st.text_input(
+                " App Key",
+                type="password",
+                key="api_key_ali",
+                help="App Key из AliExpress Open Platform"
+            )
+            client_id = st.text_input(
+                " App Secret",
+                type="password",
+                key="client_id_ali",
+                help="App Secret из AliExpress Open Platform"
+            )
+            
+            st.caption("📖 Получите ключи: https://openservice.aliexpress.com/")
+        
+        else:  # Мегамаркет
+            api_key = st.text_input(
+                "🔑 API Key",
+                type="password",
+                key="api_key_mega",
+                help="API ключ Мегамаркет"
+            )
+            client_id = None
+            
+            st.caption("📖 Документация: https://megamarket.ru/docs/api/")
+        
+        st.divider()
+        
+        # Кнопка получения тарифов
+        if st.button(" Получить тарифы", type="primary", use_container_width=True):
+            if not api_key:
+                st.error("❌ Введите API ключ")
+                return
+            
+            if marketplace == "Ozon" and not client_id:
+                st.error("❌ Для Ozon необходимо указать Client-Id")
+                return
+            
+            with st.spinner(f"Получение тарифов для {marketplace}..."):
+                try:
+                    # Здесь будет реальное API подключение
+                    st.info(f"ℹ️ Получение тарифов для {marketplace}...")
+                    
+                    # TODO: Реализовать реальное API подключение
+                    st.warning("""
+                    ⚠️ **Функция в разработке**
+                    
+                    Для работы прямого API подключения необходимо:
+                    1. Настроить OAuth аутентификацию
+                    2. Реализовать обработку ответов API
+                    3. Добавить кэширование результатов
+                    4. Обработать ошибки и rate limiting
+                    
+                    💡 **Альтернатива:** Используйте раздел '🤖 AI Тарифы' для обновления через ИИ
+                    """)
+                
+                except Exception as e:
+                    st.error(f"❌ Ошибка получения тарифов: {e}")
+                    logger.exception(f"Ошибка API {marketplace}")
+        
+        st.divider()
+        
+        # Текущие тарифы
+        st.subheader("📊 Текущие тарифы в системе")
+        
+        try:
+            unit_economics = get_marketplace_unit_economics()
+            if unit_economics and hasattr(unit_economics, '_configs'):
+                configs = unit_economics._configs
+                
+                if marketplace in configs:
+                    config = configs[marketplace]
+                    
+                    tariff_data = {
+                        "Параметр": [
+                            "Комиссия", "Мин. комиссия", "Логистика база",
+                            "Логистика за кг", "Логистика за л", "Хранение",
+                            "Эквайринг", "Возвраты", "Последняя миля",
+                            "Подписка", "Источник", "Обновлено"
+                        ],
+                        "Значение": [
+                            f"{config.commission_rate*100:.1f}%",
+                            f"{config.min_commission:.2f} ₽",
+                            f"{config.logistics_base:.2f} ₽",
+                            f"{config.logistics_per_kg:.2f} ₽",
+                            f"{config.logistics_per_liter:.2f} ₽",
+                            f"{config.storage_per_day:.2f} ₽/л/день",
+                            f"{config.acquiring_fee*100:.1f}%",
+                            f"{config.return_fee*100:.1f}%",
+                            f"{config.last_mile_fee:.2f} ₽",
+                            f"{config.subscription_fee:.2f} ₽",
+                            config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source),
+                            config.last_updated.strftime('%d.%m.%Y %H:%M') if hasattr(config.last_updated, 'strftime') else str(config.last_updated)
+                        ]
+                    }
+                    
+                    st_dataframe_compat(pd.DataFrame(tariff_data), hide_index=True)
+                else:
+                    st.info(f"ℹ️ Тарифы для {marketplace} не найдены в конфигурации")
             else:
-                st.error("❌ Ошибка импорта")
-                with st.expander(" Показать ошибки"):
-                    for error in result["errors"]:
-                        st.error(error)
+                st.warning("⚠️ Конфигурации маркетплейсов не найдены")
+        except Exception as e:
+            st.warning(f"️ Ошибка отображения тарифов: {e}")
+    
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в разделе 'API Тарифы'")
+        st.error(f"**Ошибка:** {str(e)}")
+        st.error(f"**Тип:** {type(e).__name__}")
         
-        # Удалить временный файл
-        if temp_path.exists():
-            temp_path.unlink()
-    
-    # Кнопка скачать шаблон
-    if st.button("📥 Скачать шаблон Excel", key="download_category_template"):
-        template_data = {
-            'Категория': ['Фильтры', 'Колодки', 'Масла', 'Шины'],
-            'Длина': [15, 15, 10, 60],
-            'Ширина': [15, 10, 10, 60],
-            'Высота': [15, 5, 25, 25],
-            'Вес': [0.5, 2.0, 1.0, 10.0],
-            'Единица длины': ['см', 'см', 'см', 'см'],
-            'Единица веса': ['кг', 'кг', 'кг', 'кг']
-        }
-        
-        template_df = pd.DataFrame(template_data)
-        
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            template_df.to_excel(writer, index=False, sheet_name='Категории')
-        
-        output.seek(0)
-        
-        st.download_button(
-            label="⬇️ Скачать шаблон",
-            data=output,
-            file_name="шаблон_категорий.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_category_template_btn"
-        )
-
-
-def show_category_add_manual(db: CategoryDimensionsDB):
-    """Добавление категории вручную"""
-    st.subheader("➕ Добавить категорию вручную")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        category_name = st.text_input(
-            "📝 Название категории",
-            placeholder="например: Фильтры масляные",
-            key="category_name"
-        )
-        
-        length = st.number_input(
-            "📏 Длина",
-            min_value=0.0,
-            value=0.0,
-            step=0.1,
-            key="category_length"
-        )
-        
-        width = st.number_input(
-            "📐 Ширина",
-            min_value=0.0,
-            value=0.0,
-            step=0.1,
-            key="category_width"
-        )
-    
-    with col2:
-        height = st.number_input(
-            "📐 Высота",
-            min_value=0.0,
-            value=0.0,
-            step=0.1,
-            key="category_height"
-        )
-        
-        weight = st.number_input(
-            "⚖️ Вес",
-            min_value=0.0,
-            value=0.0,
-            step=0.1,
-            key="category_weight"
-        )
-        
-        unit = st.selectbox(
-            " Единица длины",
-            ["см", "мм", "м"],
-            key="category_unit"
-        )
-        
-        weight_unit = st.selectbox(
-            "⚖️ Единица веса",
-            ["кг", "г", "т"],
-            key="category_weight_unit"
-        )
-    
-    if st.button("➕ Добавить категорию", type="primary", key="add_category"):
-        if not category_name:
-            st.error("❌ Введите название категории")
-        elif length <= 0 or width <= 0 or height <= 0 or weight <= 0:
-            st.error("❌ Все размеры должны быть больше 0")
-        else:
-            db.add_category(
-                name=category_name,
-                length=length,
-                width=width,
-                height=height,
-                weight=weight,
-                unit=unit,
-                weight_unit=weight_unit
-            )
-            st.success(f"✅ Категория '{category_name}' добавлена")
-            st.rerun()
-
-
-def show_category_list(db: CategoryDimensionsDB):
-    """Список категорий"""
-    st.subheader("📋 Список категорий")
-    
-    categories = db.get_all_categories()
-    
-    if not categories:
-        st.info("️ Категории не добавлены")
-        return
-    
-    st.info(f"📊 Всего категорий: {len(categories)}")
-    
-    # Таблица категорий
-    data = []
-    for key, cat in categories.items():
-        data.append({
-            'Категория': cat['name'],
-            'Длина (см)': cat['length_cm'],
-            'Ширина (см)': cat['width_cm'],
-            'Высота (см)': cat['height_cm'],
-            'Вес (кг)': cat['weight_kg'],
-            'Единица': cat.get('unit', 'см'),
-            'Ед. веса': cat.get('weight_unit', 'кг')
-        })
-    
-    df = pd.DataFrame(data)
-    st_dataframe_compat(df, key="categories_table")
-    
-    # Удаление категории
-    st.divider()
-    st.subheader("🗑️ Удалить категорию")
-    
-    category_to_delete = st.selectbox(
-        "Выберите категорию для удаления",
-        options=list(categories.keys()),
-        format_func=lambda x: categories[x]['name'],
-        key="delete_category_select"
-    )
-    
-    if st.button("🗑️ Удалить", key="delete_category_btn"):
-        db.delete_category(category_to_delete)
-        st.success(f"✅ Категория удалена")
-        st.rerun()
-    
-    # Очистка всех
-    st.divider()
-    if st.button("⚠️ Очистить все категории", key="clear_all_categories"):
-        if st.checkbox("Подтверждаю удаление всех категорий", key="confirm_clear"):
-            db.clear_all()
-            st.success("✅ Все категории удалены")
-            st.rerun()
-
-
-def show_category_export(db: CategoryDimensionsDB):
-    """Экспорт категорий"""
-    st.subheader("📤 Экспорт категорий")
-    
-    categories = db.get_all_categories()
-    
-    if not categories:
-        st.info("ℹ️ Нет категорий для экспорта")
-        return
-    
-    st.info(f"📊 Всего категорий: {len(categories)}")
-    
-    if st.button("📥 Экспортировать в Excel", key="export_categories"):
-        output_path = TEMP_DIR / f"categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        TEMP_DIR.mkdir(exist_ok=True)
-        
-        if db.export_to_excel(str(output_path)):
-            with open(output_path, "rb") as f:
-                file_data = f.read()
-            
-            st.download_button(
-                label="⬇️ Скачать Excel файл",
-                data=file_data,
-                file_name=output_path.name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_categories_excel"
-            )
-            
-            st.success("✅ Файл готов к скачиванию")
-        else:
-            st.error("❌ Ошибка экспорта")
-
-
-def show_category_stats(db: CategoryDimensionsDB):
-    """Статистика категорий"""
-    st.subheader("📊 Статистика")
-    
-    stats = db.get_statistics()
-    
-    if stats.get('total', 0) == 0:
-        st.info("️ Нет данных для статистики")
-        return
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📦 Всего категорий", stats['total'])
-    
-    with col2:
-        st.metric("📏 Ср. длина", f"{stats.get('avg_length', 0):.1f} см")
-    
-    with col3:
-        st.metric("📐 Ср. ширина", f"{stats.get('avg_width', 0):.1f} см")
-    
-    with col4:
-        st.metric("📐 Ср. высота", f"{stats.get('avg_height', 0):.1f} см")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("⚖️ Ср. вес", f"{stats.get('avg_weight', 0):.2f} кг")
-    
-    with col2:
-        st.metric("⚖️ Диапазон веса", f"{stats.get('min_weight', 0):.2f} - {stats.get('max_weight', 0):.2f} кг")
+        with st.expander(" Полный traceback", expanded=True):
+            import traceback
+            st.code(traceback.format_exc())
 
 
 # ============================================================================
-# 🆕 БЛОК 23: ИНТЕГРАЦИЯ С ВАЛИДАТОРОМ ВЕСОГАБАРИТОВ
+# ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКОВ 22, 23, 24
 # ============================================================================
+print("✅ Блоки 22, 23, 24 загружены: UI функции для категорий, AI тарифов и API тарифов")
+logger.info("✅ Блоки 22-24 загружены: show_category_dimensions_interface(), show_ai_tariffs_interface(), show_api_tariffs_interface()")
 
-def validate_dimensions_with_category(
-    length: float,
-    width: float,
-    height: float,
-    weight: float,
-    category: str,
-    tolerance_percent: float = 20.0
-) -> Dict[str, Any]:
-    """
-    ✅ Валидация весогабаритов с использованием базы категорий
-    
-    Args:
-        length, width, height: Фактические размеры (см)
-        weight: Фактический вес (кг)
-        category: Название категории
-        tolerance_percent: Допустимое отклонение в %
-    
-    Returns:
-        Dict с результатами валидации
-    """
-    result = {
-        "valid": True,
-        "category": category,
-        "deviations": [],
-        "warnings": []
-    }
-    
-    # Получаем стандартные размеры категории
-    if 'category_dimensions_db' in st.session_state:
-        db = st.session_state.category_dimensions_db
-        category_data = db.get_category(category)
-        
-        if category_data:
-            std_length = category_data['length_cm']
-            std_width = category_data['width_cm']
-            std_height = category_data['height_cm']
-            std_weight = category_data['weight_kg']
-            
-            # Проверяем отклонения
-            if std_length > 0:
-                length_dev = abs(length - std_length) / std_length * 100
-                if length_dev > tolerance_percent:
-                    result["deviations"].append({
-                        "parameter": "Длина",
-                        "actual": length,
-                        "expected": std_length,
-                        "deviation_percent": length_dev
-                    })
-                    result["valid"] = False
-            
-            if std_width > 0:
-                width_dev = abs(width - std_width) / std_width * 100
-                if width_dev > tolerance_percent:
-                    result["deviations"].append({
-                        "parameter": "Ширина",
-                        "actual": width,
-                        "expected": std_width,
-                        "deviation_percent": width_dev
-                    })
-                    result["valid"] = False
-            
-            if std_height > 0:
-                height_dev = abs(height - std_height) / std_height * 100
-                if height_dev > tolerance_percent:
-                    result["deviations"].append({
-                        "parameter": "Высота",
-                        "actual": height,
-                        "expected": std_height,
-                        "deviation_percent": height_dev
-                    })
-                    result["valid"] = False
-            
-            if std_weight > 0:
-                weight_dev = abs(weight - std_weight) / std_weight * 100
-                if weight_dev > tolerance_percent:
-                    result["deviations"].append({
-                        "parameter": "Вес",
-                        "actual": weight,
-                        "expected": std_weight,
-                        "deviation_percent": weight_dev
-                    })
-                    result["valid"] = False
-            
-            if result["valid"]:
-                result["warnings"].append("✅ Все параметры в пределах нормы")
-        else:
-            result["warnings"].append(f"⚠️ Категория '{category}' не найдена в базе")
-    
-    return result
 # ============================================================================
 # 🆕 БЛОК 25: СИСТЕМА СОХРАНЕНИЯ И ЗАГРУЗКИ ДАННЫХ (v100.16)
 # ============================================================================
