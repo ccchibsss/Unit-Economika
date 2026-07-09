@@ -9923,25 +9923,35 @@ text
 Прогноз на месяц 1: 16.0%
 Тренд: up
 """)
-
 # ============================================================================
-# 🆕 БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА (v2.0)
+# 🆕 БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА (v3.0)
 # ============================================================================
 # ✅ Поддержка множества маркетплейсов
 # ✅ Автоматическое обнаружение источников
 # ✅ Интеллектуальное кэширование с TTL
 # ✅ Мониторинг качества данных
+# ✅ Предиктивный выбор источника
+# ✅ Умное кэширование с предзагрузкой
+# ✅ Полные метрики производительности
 # ============================================================================
 
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Generator, Callable
 import pandas as pd
 import json
 from datetime import datetime, timedelta
 import hashlib
 import logging
 from functools import lru_cache
+import asyncio
+from collections import deque
+import threading
+import time
+
+# ============================================================================
+# БАЗОВЫЕ КОМПОНЕНТЫ
+# ============================================================================
 
 class SourcePriority(Enum):
     """Приоритет источников данных"""
@@ -9970,9 +9980,366 @@ class TariffData:
     hash: str
     expires_at: datetime
 
-class SmartTariffLoaderV2:
+@dataclass
+class DataQualityMetrics:
+    """Метрики качества данных"""
+    completeness: float = 0.0  # 0-1
+    consistency: float = 0.0   # 0-1
+    freshness: float = 0.0     # 0-1
+    anomalies: List[str] = field(default_factory=list)
+    overall_score: float = 0.0
+
+# ============================================================================
+# МОНИТОРИНГ ПРОИЗВОДИТЕЛЬНОСТИ
+# ============================================================================
+
+class PerformanceMonitor:
+    """Мониторинг производительности"""
+    
+    def __init__(self, max_history: int = 1000):
+        self.max_history = max_history
+        self.metrics = {
+            'load_times': deque(maxlen=max_history),
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'api_calls': 0,
+            'api_errors': 0,
+            'ai_calls': 0,
+            'ai_errors': 0,
+            'errors': deque(maxlen=max_history),
+            'source_usage': {},
+            'data_sizes': deque(maxlen=max_history)
+        }
+        self.lock = threading.Lock()
+    
+    def record_load(self, duration: float, source: str, success: bool, data_size: int = 0):
+        """Запись метрики загрузки"""
+        with self.lock:
+            self.metrics['load_times'].append({
+                'timestamp': datetime.now(),
+                'duration': duration,
+                'source': source,
+                'success': success
+            })
+            
+            if data_size > 0:
+                self.metrics['data_sizes'].append({
+                    'timestamp': datetime.now(),
+                    'size': data_size,
+                    'source': source
+                })
+            
+            # Обновляем статистику источников
+            if source not in self.metrics['source_usage']:
+                self.metrics['source_usage'][source] = {'success': 0, 'fail': 0}
+            
+            if success:
+                self.metrics['source_usage'][source]['success'] += 1
+            else:
+                self.metrics['source_usage'][source]['fail'] += 1
+    
+    def record_cache(self, hit: bool):
+        """Запись попадания в кэш"""
+        with self.lock:
+            if hit:
+                self.metrics['cache_hits'] += 1
+            else:
+                self.metrics['cache_misses'] += 1
+    
+    def record_error(self, error: str, source: str):
+        """Запись ошибки"""
+        with self.lock:
+            self.metrics['errors'].append({
+                'timestamp': datetime.now(),
+                'error': error,
+                'source': source
+            })
+            
+            if source == 'api':
+                self.metrics['api_errors'] += 1
+            elif source == 'ai':
+                self.metrics['ai_errors'] += 1
+    
+    def record_api_call(self):
+        """Запись API вызова"""
+        with self.lock:
+            self.metrics['api_calls'] += 1
+    
+    def record_ai_call(self):
+        """Запись AI вызова"""
+        with self.lock:
+            self.metrics['ai_calls'] += 1
+    
+    def get_performance_report(self) -> Dict:
+        """Генерация отчета о производительности"""
+        with self.lock:
+            load_times = [m['duration'] for m in self.metrics['load_times']]
+            data_sizes = [m['size'] for m in self.metrics['data_sizes']]
+            
+            total_cache = self.metrics['cache_hits'] + self.metrics['cache_misses']
+            total_calls = self.metrics['api_calls'] + self.metrics['ai_calls']
+            total_errors = self.metrics['api_errors'] + self.metrics['ai_errors']
+            
+            return {
+                'avg_load_time': sum(load_times) / len(load_times) if load_times else 0,
+                'max_load_time': max(load_times) if load_times else 0,
+                'min_load_time': min(load_times) if load_times else 0,
+                'cache_hit_rate': self.metrics['cache_hits'] / total_cache if total_cache > 0 else 0,
+                'total_api_calls': self.metrics['api_calls'],
+                'total_ai_calls': self.metrics['ai_calls'],
+                'error_rate': total_errors / total_calls if total_calls > 0 else 0,
+                'avg_data_size': sum(data_sizes) / len(data_sizes) if data_sizes else 0,
+                'source_success_rate': {
+                    source: stats['success'] / (stats['success'] + stats['fail']) 
+                    if (stats['success'] + stats['fail']) > 0 else 0
+                    for source, stats in self.metrics['source_usage'].items()
+                }
+            }
+
+# ============================================================================
+# ПРЕДИКТИВНЫЙ ВЫБОР ИСТОЧНИКА
+# ============================================================================
+
+class SourceSelector:
+    """Автоматический выбор источника на основе метрик"""
+    
+    def __init__(self):
+        self.quality_history = {}
+        self.failure_count = {}
+        self.success_count = {}
+        self.last_selection = {}
+    
+    def update_source_quality(self, source: str, quality: DataQualityMetrics, success: bool):
+        """Обновление качества источника"""
+        if source not in self.quality_history:
+            self.quality_history[source] = []
+        
+        # Сохраняем историю качества (последние 10 записей)
+        self.quality_history[source].append({
+            'timestamp': datetime.now(),
+            'quality': quality,
+            'success': success
+        })
+        
+        if len(self.quality_history[source]) > 10:
+            self.quality_history[source] = self.quality_history[source][-10:]
+        
+        # Обновляем счетчики
+        if success:
+            self.success_count[source] = self.success_count.get(source, 0) + 1
+        else:
+            self.failure_count[source] = self.failure_count.get(source, 0) + 1
+    
+    def select_best_source(self, available_sources: List[str], 
+                          context: Dict = None) -> Optional[str]:
+        """Выбор лучшего источника на основе истории"""
+        if not available_sources:
+            return None
+        
+        scores = {}
+        
+        for source in available_sources:
+            # Базовый скор
+            score = 1.0
+            
+            # Учитываем историю успехов/неудач
+            success = self.success_count.get(source, 0)
+            failures = self.failure_count.get(source, 0)
+            total = success + failures
+            
+            if total > 0:
+                success_rate = success / total
+                score *= (0.5 + 0.5 * success_rate)  # От 0.5 до 1.0
+            else:
+                score *= 0.7  # Нет истории - средний скор
+            
+            # Штраф за частые ошибки
+            if failures > 5:
+                score *= 0.9
+            if failures > 10:
+                score *= 0.8
+            if failures > 20:
+                score *= 0.6
+            
+            # Учитываем качество данных
+            if source in self.quality_history and self.quality_history[source]:
+                recent_quality = [q['quality'] for q in self.quality_history[source][-5:]]
+                if recent_quality:
+                    avg_quality = sum(q.overall_score for q in recent_quality) / len(recent_quality)
+                    score *= (0.7 + 0.3 * avg_quality)
+            
+            # Учитываем контекст (например, время суток)
+            if context:
+                hour = context.get('hour', datetime.now().hour)
+                # API может быть медленнее в часы пик
+                if source == 'api' and hour in [18, 19, 20, 21]:
+                    score *= 0.8
+                # Кэш лучше в часы пик
+                if source == 'cache' and hour in [18, 19, 20, 21]:
+                    score *= 1.1
+            
+            scores[source] = score
+        
+        # Выбираем источник с максимальным скором
+        best_source = max(scores, key=scores.get)
+        self.last_selection[best_source] = datetime.now()
+        
+        return best_source
+    
+    def get_source_stats(self) -> Dict:
+        """Получение статистики по источникам"""
+        stats = {}
+        all_sources = set(self.success_count.keys()) | set(self.failure_count.keys())
+        
+        for source in all_sources:
+            success = self.success_count.get(source, 0)
+            failures = self.failure_count.get(source, 0)
+            total = success + failures
+            
+            stats[source] = {
+                'success': success,
+                'failures': failures,
+                'total': total,
+                'success_rate': success / total if total > 0 else 0,
+                'last_selected': self.last_selection.get(source)
+            }
+        
+        return stats
+
+# ============================================================================
+# УМНОЕ КЭШИРОВАНИЕ С ПРЕДЗАГРУЗКОЙ
+# ============================================================================
+
+class SmartCacheManager:
+    """Умный менеджер кэша с предзагрузкой"""
+    
+    def __init__(self, tariff_cache, config: Dict = None):
+        self.cache = tariff_cache
+        self.config = config or {}
+        self.prefetch_schedule = {}
+        self.prefetch_thread = None
+        self.running = False
+        self.lock = threading.Lock()
+        self.logger = logging.getLogger('SmartCacheManager')
+    
+    def schedule_prefetch(self, marketplace: str, 
+                         confidence_threshold: float = 0.7,
+                         prefetch_interval: int = 3600):
+        """Планирование предзагрузки для популярных маркетплейсов"""
+        with self.lock:
+            self.prefetch_schedule[marketplace] = {
+                'last_prefetch': None,
+                'confidence_threshold': confidence_threshold,
+                'prefetch_interval': prefetch_interval,
+                'last_data': None,
+                'enabled': True
+            }
+            self.logger.info(f"Планирование предзагрузки для {marketplace}")
+    
+    def stop_prefetch(self, marketplace: str):
+        """Остановка предзагрузки"""
+        with self.lock:
+            if marketplace in self.prefetch_schedule:
+                self.prefetch_schedule[marketplace]['enabled'] = False
+                self.logger.info(f"Остановлена предзагрузка для {marketplace}")
+    
+    def should_prefetch(self, marketplace: str) -> bool:
+        """Проверка необходимости предзагрузки"""
+        with self.lock:
+            if marketplace not in self.prefetch_schedule:
+                return False
+            
+            schedule = self.prefetch_schedule[marketplace]
+            if not schedule['enabled']:
+                return False
+            
+            if schedule['last_prefetch'] is None:
+                return True
+            
+            elapsed = (datetime.now() - schedule['last_prefetch']).total_seconds()
+            return elapsed > schedule['prefetch_interval']
+    
+    def prefetch_data(self, marketplace: str, loader, force: bool = False):
+        """Предзагрузка данных"""
+        if not force and not self.should_prefetch(marketplace):
+            return None
+        
+        try:
+            result = loader.load_tariffs_advanced(
+                marketplace=marketplace,
+                preferred_sources=["api", "ai"],
+                force_refresh=False
+            )
+            
+            if result['data'] and result['confidence'] > 0.7:
+                with self.lock:
+                    self.prefetch_schedule[marketplace]['last_prefetch'] = datetime.now()
+                    self.prefetch_schedule[marketplace]['last_data'] = result['data']
+                
+                # Сохраняем в кэш
+                self.cache.set(marketplace, result['data'])
+                self.logger.info(f"✅ Предзагрузка для {marketplace} выполнена успешно")
+                return result['data']
+            else:
+                self.logger.warning(f"⚠️ Предзагрузка для {marketplace} не удалась (conf: {result['confidence']})")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка предзагрузки {marketplace}: {e}")
+            return None
+    
+    def start_background_prefetch(self, loader, interval: int = 300):
+        """Запуск фоновой предзагрузки"""
+        if self.running:
+            return
+        
+        self.running = True
+        
+        def prefetch_loop():
+            while self.running:
+                try:
+                    for marketplace in list(self.prefetch_schedule.keys()):
+                        if self.should_prefetch(marketplace):
+                            self.prefetch_data(marketplace, loader)
+                    time.sleep(interval)
+                except Exception as e:
+                    self.logger.error(f"Ошибка в фоновой предзагрузке: {e}")
+                    time.sleep(interval)
+        
+        self.prefetch_thread = threading.Thread(target=prefetch_loop, daemon=True)
+        self.prefetch_thread.start()
+        self.logger.info("Запущена фоновая предзагрузка")
+    
+    def stop_background_prefetch(self):
+        """Остановка фоновой предзагрузки"""
+        self.running = False
+        if self.prefetch_thread:
+            self.prefetch_thread.join(timeout=5)
+        self.logger.info("Остановлена фоновая предзагрузка")
+    
+    def get_prefetch_status(self) -> Dict:
+        """Получение статуса предзагрузки"""
+        status = {}
+        with self.lock:
+            for marketplace, schedule in self.prefetch_schedule.items():
+                status[marketplace] = {
+                    'enabled': schedule['enabled'],
+                    'last_prefetch': schedule['last_prefetch'],
+                    'has_data': schedule['last_data'] is not None,
+                    'next_prefetch': schedule['last_prefetch'] + timedelta(
+                        seconds=schedule['prefetch_interval']
+                    ) if schedule['last_prefetch'] else None
+                }
+        return status
+
+# ============================================================================
+# ОСНОВНОЙ КЛАСС - SMART TARIFF LOADER V3
+# ============================================================================
+
+class SmartTariffLoaderV3:
     """
-    🧠 **УМНАЯ ЗАГРУЗКА ТАРИФОВ (v2.0)**
+    🧠 **УМНАЯ ЗАГРУЗКА ТАРИФОВ (v3.0)**
+    Расширенная версия с предиктивным выбором и мониторингом
     """
     
     SOURCES_CONFIG = {
@@ -9997,9 +10364,14 @@ class SmartTariffLoaderV2:
         self.api_connector = MarketplaceAPIConnector()
         self.ai_updater = DeepSeekRateUpdater()
         self.tariff_cache = get_smart_tariff_cache()
-        self.logger = logging.getLogger('SmartTariffLoaderV2')
+        self.logger = logging.getLogger('SmartTariffLoaderV3')
         self.cache_ttl = {}
         self.config = self._load_config(config_path) if config_path else {}
+        
+        # Инициализация новых компонентов
+        self.performance_monitor = PerformanceMonitor()
+        self.source_selector = SourceSelector()
+        self.cache_manager = SmartCacheManager(self.tariff_cache, self.config.get('cache', {}))
         
         # Статистика использования источников
         self.source_stats = {
@@ -10007,6 +10379,19 @@ class SmartTariffLoaderV2:
             "ai": {"success": 0, "fail": 0, "total": 0},
             "cache": {"success": 0, "fail": 0, "total": 0}
         }
+        
+        # Запускаем фоновую предзагрузку если настроено
+        if self.config.get('cache', {}).get('prefetch_enabled', False):
+            prefetch_interval = self.config.get('cache', {}).get('prefetch_interval', 300)
+            self.cache_manager.start_background_prefetch(self, prefetch_interval)
+            
+            # Планируем предзагрузку для всех маркетплейсов
+            for marketplace in self.SOURCES_CONFIG.keys():
+                self.cache_manager.schedule_prefetch(
+                    marketplace,
+                    confidence_threshold=0.7,
+                    prefetch_interval=3600
+                )
     
     def _load_config(self, config_path: str) -> Dict:
         """Загрузка конфигурации из файла"""
@@ -10031,7 +10416,8 @@ class SmartTariffLoaderV2:
             "api": 0.95,
             "ai": 0.85,
             "cache": 0.80,
-            "hybrid": 0.90
+            "hybrid": 0.90,
+            "fallback_cache": 0.60
         }.get(source, 0.70)
         
         # Корректировка на основе полноты данных
@@ -10039,6 +10425,9 @@ class SmartTariffLoaderV2:
         if data and isinstance(data, dict):
             # Проверяем наличие обязательных полей
             required_fields = ['warehouse', 'services', 'prices']
+            if 'rates' in data:
+                required_fields = ['rates']
+            
             present_fields = sum(1 for field in required_fields if field in data)
             completeness_factor = present_fields / len(required_fields)
         
@@ -10065,7 +10454,88 @@ class SmartTariffLoaderV2:
             if 'rates' not in data:
                 errors.append("Отсутствует поле rates")
         
+        # Дополнительная проверка качества данных
+        if 'rates' in data:
+            rates = data['rates']
+            if isinstance(rates, dict):
+                # Проверяем разумность значений
+                for key, value in rates.items():
+                    if isinstance(value, (int, float)):
+                        if value < 0:
+                            errors.append(f"Отрицательное значение в {key}: {value}")
+                        if value > 10000:
+                            errors.append(f"Подозрительно высокое значение в {key}: {value}")
+        
         return len(errors) == 0, errors
+    
+    def _analyze_data_quality(self, data: Dict, source: str) -> DataQualityMetrics:
+        """Анализ качества полученных данных"""
+        metrics = DataQualityMetrics()
+        
+        if not data:
+            metrics.anomalies.append("Нет данных")
+            return metrics
+        
+        # Проверка полноты
+        if 'rates' in data:
+            rates = data['rates']
+            if isinstance(rates, dict):
+                # Проверяем наличие ключевых ставок
+                required_rates = ['base', 'night', 'holiday']
+                if source == 'ozon':
+                    required_rates = ['base', 'express', 'standard']
+                elif source == 'wildberries':
+                    required_rates = ['base', 'box', 'mono']
+                
+                present = sum(1 for r in required_rates if r in rates)
+                metrics.completeness = present / len(required_rates) if required_rates else 1.0
+                
+                # Проверка согласованности
+                if 'base' in rates and 'night' in rates:
+                    if rates['night'] >= rates['base']:
+                        metrics.consistency = 0.5
+                        metrics.anomalies.append("Ночная ставка выше базовой")
+                    else:
+                        metrics.consistency = 1.0
+                elif 'base' in rates and 'express' in rates:
+                    if rates['express'] < rates['base']:
+                        metrics.consistency = 0.5
+                        metrics.anomalies.append("Экспресс-ставка ниже базовой")
+                    else:
+                        metrics.consistency = 1.0
+                else:
+                    metrics.consistency = 0.7
+        
+        # Проверка свежести
+        if 'timestamp' in data:
+            try:
+                if isinstance(data['timestamp'], str):
+                    timestamp = datetime.fromisoformat(data['timestamp'])
+                else:
+                    timestamp = data['timestamp']
+                
+                age = (datetime.now() - timestamp).total_seconds()
+                max_age = 86400  # 24 часа
+                metrics.freshness = max(0, 1 - age / max_age)
+            except:
+                metrics.freshness = 0.5
+        else:
+            # Если timestamp нет, оцениваем по источнику
+            if source == 'api':
+                metrics.freshness = 0.9
+            elif source == 'ai':
+                metrics.freshness = 0.7
+            else:
+                metrics.freshness = 0.5
+        
+        # Общий скор качества
+        metrics.overall_score = (
+            metrics.completeness * 0.4 +
+            metrics.consistency * 0.3 +
+            metrics.freshness * 0.3
+        )
+        
+        return metrics
     
     def load_tariffs_advanced(
         self,
@@ -10076,7 +10546,8 @@ class SmartTariffLoaderV2:
         force_refresh: bool = False,
         max_retries: int = 3,
         timeout: int = 30,
-        fallback_to_cache: bool = True
+        fallback_to_cache: bool = True,
+        use_predictive_selection: bool = True
     ) -> Dict[str, Any]:
         """
         Расширенная загрузка тарифов с приоритетами
@@ -10090,6 +10561,7 @@ class SmartTariffLoaderV2:
             max_retries: Максимум попыток
             timeout: Таймаут запроса
             fallback_to_cache: Использовать кэш при ошибке
+            use_predictive_selection: Использовать предиктивный выбор
         """
         
         result = {
@@ -10098,6 +10570,7 @@ class SmartTariffLoaderV2:
             "data": {},
             "source_used": None,
             "confidence": 0.0,
+            "quality": None,
             "execution_time": 0,
             "errors": [],
             "warnings": [],
@@ -10122,25 +10595,51 @@ class SmartTariffLoaderV2:
                 result["errors"].append("Нет доступных источников")
                 return result
             
+            # Предиктивный выбор источника
+            if use_predictive_selection and len(filtered_sources) > 1:
+                context = {
+                    'hour': datetime.now().hour,
+                    'day_of_week': datetime.now().weekday(),
+                    'source_health': {
+                        source: self.source_selector.success_count.get(source, 0) /
+                                (self.source_selector.success_count.get(source, 0) + 
+                                 self.source_selector.failure_count.get(source, 1))
+                        for source in filtered_sources
+                    }
+                }
+                
+                best_source = self.source_selector.select_best_source(filtered_sources, context)
+                if best_source:
+                    # Перемещаем лучший источник в начало
+                    filtered_sources.remove(best_source)
+                    filtered_sources.insert(0, best_source)
+                    result["warnings"].append(f"🎯 Предиктивный выбор: {best_source}")
+            
             # Пробуем загрузить данные
             for source in filtered_sources:
                 retry_count = 0
                 while retry_count < max_retries:
                     try:
+                        load_start = time.time()
+                        
                         if source == "api":
                             load_result = self._load_from_api_with_retry(
                                 marketplace, api_key, client_id, timeout
                             )
+                            self.performance_monitor.record_api_call()
                         elif source == "ai":
                             load_result = self._load_from_ai_with_retry(
                                 marketplace, force_refresh, timeout
                             )
+                            self.performance_monitor.record_ai_call()
                         elif source == "cache":
                             load_result = self._load_from_cache_with_ttl(
                                 marketplace
                             )
                         else:
                             continue
+                        
+                        load_duration = time.time() - load_start
                         
                         # Проверяем результат
                         if not load_result["errors"] and load_result["data"]:
@@ -10155,17 +10654,32 @@ class SmartTariffLoaderV2:
                                 result["confidence"] = self._calculate_confidence(
                                     source, load_result["data"]
                                 )
+                                
+                                # Анализ качества данных
+                                quality = self._analyze_data_quality(load_result["data"], marketplace.lower())
+                                result["quality"] = quality.__dict__
+                                
+                                # Обновляем историю качества
+                                self.source_selector.update_source_quality(source, quality, True)
+                                
                                 result["warnings"].extend(load_result.get("warnings", []))
                                 
                                 # Обновляем статистику
                                 self.source_stats[source]["success"] += 1
                                 self.source_stats[source]["total"] += 1
                                 
+                                # Записываем метрики производительности
+                                self.performance_monitor.record_load(
+                                    load_duration, source, True, len(str(result["data"]))
+                                )
+                                
                                 break
                             else:
                                 result["warnings"].append(
                                     f"Данные из {source} не прошли валидацию: {', '.join(validation_errors)}"
                                 )
+                                self.source_selector.update_source_quality(source, 
+                                    DataQualityMetrics(anomalies=validation_errors), False)
                         
                         retry_count += 1
                         result["retries"] += 1
@@ -10177,6 +10691,8 @@ class SmartTariffLoaderV2:
                         self.logger.error(f"Ошибка при загрузке из {source}: {e}")
                         self.source_stats[source]["fail"] += 1
                         self.source_stats[source]["total"] += 1
+                        self.performance_monitor.record_error(str(e), source)
+                        self.performance_monitor.record_load(0, source, False)
                 
                 # Если данные получены, выходим
                 if result["data"]:
@@ -10190,6 +10706,9 @@ class SmartTariffLoaderV2:
                     result["source_used"] = "fallback_cache"
                     result["confidence"] = 0.60
                     result["warnings"].append("💾 Использованы устаревшие кэшированные данные")
+                    
+                    quality = self._analyze_data_quality(fallback_result["data"], marketplace.lower())
+                    result["quality"] = quality.__dict__
             
             # Вычисляем время выполнения
             result["execution_time"] = (datetime.now() - start_time).total_seconds()
@@ -10199,6 +10718,7 @@ class SmartTariffLoaderV2:
         except Exception as e:
             result["errors"].append(f"Критическая ошибка: {str(e)}")
             result["execution_time"] = (datetime.now() - start_time).total_seconds()
+            self.performance_monitor.record_error(str(e), "system")
             return result
     
     def _load_from_api_with_retry(self, marketplace: str, api_key: str, 
@@ -10235,8 +10755,10 @@ class SmartTariffLoaderV2:
                 
         except TimeoutError:
             result["errors"].append(f"Таймаут API ({timeout}с)")
+            self.performance_monitor.record_error("API Timeout", "api")
         except Exception as e:
             result["errors"].append(f"Ошибка API: {str(e)}")
+            self.performance_monitor.record_error(str(e), "api")
             
         return result
     
@@ -10267,8 +10789,10 @@ class SmartTariffLoaderV2:
                 
         except TimeoutError:
             result["errors"].append(f"Таймаут AI ({timeout}с)")
+            self.performance_monitor.record_error("AI Timeout", "ai")
         except Exception as e:
             result["errors"].append(f"Ошибка AI: {str(e)}")
+            self.performance_monitor.record_error(str(e), "ai")
             
         return result
     
@@ -10286,6 +10810,9 @@ class SmartTariffLoaderV2:
                 
                 if age > ttl:
                     result["warnings"].append(f"⚠️ Кэш устарел ({int(age/3600)}ч назад)")
+                    self.performance_monitor.record_cache(False)
+                else:
+                    self.performance_monitor.record_cache(True)
                 
                 result["data"] = {
                     "rates": cached.data,
@@ -10295,9 +10822,11 @@ class SmartTariffLoaderV2:
                 result["warnings"].append(f"💾 Использован кэш от {datetime.fromtimestamp(cached.timestamp).strftime('%d.%m.%Y %H:%M')}")
             else:
                 result["errors"].append("Кэшированные данные не найдены")
+                self.performance_monitor.record_cache(False)
                 
         except Exception as e:
             result["errors"].append(f"Ошибка кэша: {str(e)}")
+            self.performance_monitor.record_error(str(e), "cache")
             
         return result
     
@@ -10310,8 +10839,15 @@ class SmartTariffLoaderV2:
         if marketplace in self.SOURCES_CONFIG:
             api_config = self.SOURCES_CONFIG[marketplace].get("api", {})
             required = api_config.get("requires", [])
-            if all(k in self.config.get('credentials', {}) or 
-                   locals().get(k) for k in required):
+            # Проверяем наличие всех необходимых параметров
+            all_required_present = True
+            for req in required:
+                if req == "api_key" and not api_key:
+                    all_required_present = False
+                elif req == "client_id" and not client_id:
+                    all_required_present = False
+            
+            if all_required_present:
                 available.append("api")
         
         # Проверяем AI
@@ -10340,14 +10876,20 @@ class SmartTariffLoaderV2:
                 preferred_sources=[source],
                 api_key=api_key,
                 client_id=client_id,
-                fallback_to_cache=False
+                fallback_to_cache=False,
+                use_predictive_selection=False
             )
+            
+            quality = result.get('quality', {})
             
             comparisons.append({
                 "Источник": source.upper(),
                 "Статус": "✅ Доступен" if result["data"] else "❌ Недоступен",
                 "Количество полей": len(result["data"]) if result["data"] else 0,
                 "Доверие": f"{result['confidence']*100:.0f}%" if result["data"] else "0%",
+                "Качество": f"{quality.get('overall_score', 0)*100:.0f}%" if result["data"] else "0%",
+                "Полнота": f"{quality.get('completeness', 0)*100:.0f}%" if result["data"] else "0%",
+                "Свежесть": f"{quality.get('freshness', 0)*100:.0f}%" if result["data"] else "0%",
                 "Время загрузки": f"{result['execution_time']:.2f}с",
                 "Ошибки": ", ".join(result["errors"][:2]) if result["errors"] else "Нет",
                 "Предупреждения": ", ".join(result["warnings"][:2]) if result["warnings"] else "Нет"
@@ -10355,12 +10897,69 @@ class SmartTariffLoaderV2:
         
         return pd.DataFrame(comparisons)
     
+    def load_tariffs_streaming(
+        self,
+        marketplace: str,
+        batch_size: int = 1000,
+        callback: Callable = None
+    ) -> Generator[Dict, None, None]:
+        """
+        Потоковая загрузка для больших объемов данных
+        """
+        result = self.load_tariffs_advanced(marketplace)
+        
+        if not result["data"]:
+            yield {
+                "error": "Нет данных для загрузки",
+                "result": result
+            }
+            return
+        
+        data = result["data"]
+        
+        if 'rates' in data and isinstance(data['rates'], list):
+            total_items = len(data['rates'])
+            for i in range(0, total_items, batch_size):
+                batch = data['rates'][i:i+batch_size]
+                batch_result = {
+                    "batch": i // batch_size + 1,
+                    "data": batch,
+                    "total": total_items,
+                    "progress": (i + len(batch)) / total_items,
+                    "source": result["source_used"],
+                    "confidence": result["confidence"]
+                }
+                
+                yield batch_result
+                
+                if callback:
+                    callback(batch_result)
+                    
+        elif 'rates' in data and isinstance(data['rates'], dict):
+            # Для словарей отдаем все сразу
+            yield {
+                "batch": 1,
+                "data": data,
+                "total": 1,
+                "progress": 1.0,
+                "source": result["source_used"],
+                "confidence": result["confidence"]
+            }
+        else:
+            yield {
+                "error": "Неизвестный формат данных",
+                "data": data
+            }
+    
     def get_statistics(self) -> Dict[str, Any]:
         """Получение статистики использования"""
         stats = {
             "total_requests": sum(s["total"] for s in self.source_stats.values()),
             "success_rate": {},
-            "sources": self.source_stats
+            "sources": self.source_stats,
+            "performance": self.performance_monitor.get_performance_report(),
+            "source_selection": self.source_selector.get_source_stats(),
+            "prefetch": self.cache_manager.get_prefetch_status()
         }
         
         for source, data in self.source_stats.items():
@@ -10394,6 +10993,11 @@ class SmartTariffLoaderV2:
         except Exception as e:
             self.logger.error(f"Ошибка бэкапа: {e}")
             return None
+    
+    def __del__(self):
+        """Деструктор для остановки фоновых задач"""
+        if hasattr(self, 'cache_manager'):
+            self.cache_manager.stop_background_prefetch()
 
 # ============================================================================
 # 🚀 ИСПОЛЬЗОВАНИЕ
@@ -10401,7 +11005,14 @@ class SmartTariffLoaderV2:
 
 # Пример использования
 if __name__ == "__main__":
-    loader = SmartTariffLoaderV2()
+    # Настройка логирования
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Создаем загрузчик
+    loader = SmartTariffLoaderV3()
     
     # Загрузка с автоматическим выбором источника
     result = loader.load_tariffs_advanced(
@@ -10409,18 +11020,55 @@ if __name__ == "__main__":
         preferred_sources=["api", "ai", "cache"],
         api_key="your_api_key",
         client_id="your_client_id",
-        force_refresh=False
+        force_refresh=False,
+        use_predictive_selection=True
     )
     
+    print("=" * 80)
+    print("📊 РЕЗУЛЬТАТ ЗАГРУЗКИ")
+    print("=" * 80)
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     
     # Сравнение источников
-    comparison_df = loader.compare_sources_advanced("Ozon")
-    print(comparison_df)
+    print("\n" + "=" * 80)
+    print("📊 СРАВНЕНИЕ ИСТОЧНИКОВ")
+    print("=" * 80)
+    comparison_df = loader.compare_sources_advanced("Ozon", api_key="your_api_key")
+    print(comparison_df.to_string(index=False))
+    
+    # Потоковая загрузка
+    print("\n" + "=" * 80)
+    print("📊 ПОТОКОВАЯ ЗАГРУЗКА")
+    print("=" * 80)
+    for batch in loader.load_tariffs_streaming("Ozon", batch_size=100):
+        if 'error' in batch:
+            print(f"❌ {batch['error']}")
+        else:
+            print(f"📦 Батч {batch['batch']}: {len(batch['data'])} записей, прогресс: {batch['progress']*100:.0f}%")
     
     # Статистика
+    print("\n" + "=" * 80)
+    print("📊 СТАТИСТИКА")
+    print("=" * 80)
     stats = loader.get_statistics()
-    print(f"Статистика: {stats}")
+    print(f"Всего запросов: {stats['total_requests']}")
+    print(f"Успешность API: {stats['success_rate'].get('api', '0%')}")
+    print(f"Успешность AI: {stats['success_rate'].get('ai', '0%')}")
+    print(f"Успешность кэша: {stats['success_rate'].get('cache', '0%')}")
+    
+    print(f"\nПроизводительность:")
+    perf = stats['performance']
+    print(f"  Среднее время загрузки: {perf['avg_load_time']:.2f}с")
+    print(f"  Hit rate кэша: {perf['cache_hit_rate']*100:.1f}%")
+    print(f"  Error rate: {perf['error_rate']*100:.1f}%")
+    
+    print(f"\nПредзагрузка:")
+    prefetch = stats['prefetch']
+    for marketplace, status in prefetch.items():
+        print(f"  {marketplace}: {'✅ Активна' if status['enabled'] else '❌ Остановлена'}")
+        if status['last_prefetch']:
+            print(f"    Последняя: {status['last_prefetch'].strftime('%H:%M:%S')}")
+            
 
 # ============================================================================
 # 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (v100.16 - ИСПРАВЛЕННАЯ ВЕРСИЯ)
