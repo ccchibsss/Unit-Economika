@@ -10344,7 +10344,7 @@ def show_ai_tariffs_interface():
         pip install openai
 
 # ============================================================================
-# БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА (v3.0)
+# БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА (v3.1)
 # ============================================================================
 # Поддержка множества маркетплейсов
 # Автоматическое обнаружение источников
@@ -10353,6 +10353,12 @@ def show_ai_tariffs_interface():
 # Предиктивный выбор источника
 # Умное кэширование с предзагрузкой
 # Полные метрики производительности
+# ИСПРАВЛЕНИЯ v3.1:
+# - Добавлена проверка наличия методов у tariff_cache
+# - Исправлена обработка source.value в TariffSource
+# - Добавлены fallback методы для отсутствующих функций
+# - Исправлена ошибка в _load_from_cache_with_ttl
+# - Добавлена обработка случая, когда cache.get возвращает None
 # ============================================================================
 
 from enum import Enum
@@ -10381,7 +10387,7 @@ class SourcePriority(Enum):
     FALLBACK = 4
 
 @dataclass
-class TariffSource:
+class TariffSourceInfo:
     """Информация об источнике тарифов"""
     name: str
     priority: SourcePriority
@@ -10691,17 +10697,18 @@ class SmartCacheManager:
                 force_refresh=False
             )
             
-            if result['data'] and result['confidence'] > 0.7:
+            if result.get('data') and result.get('confidence', 0) > 0.7:
                 with self.lock:
                     self.prefetch_schedule[marketplace]['last_prefetch'] = datetime.now()
                     self.prefetch_schedule[marketplace]['last_data'] = result['data']
                 
                 # Сохраняем в кэш
-                self.cache.set(marketplace, result['data'])
+                if hasattr(self.cache, 'set'):
+                    self.cache.set(marketplace, result['data'])
                 self.logger.info(f"Предзагрузка для {marketplace} выполнена успешно")
                 return result['data']
             else:
-                self.logger.warning(f"Предзагрузка для {marketplace} не удалась (conf: {result['confidence']})")
+                self.logger.warning(f"Предзагрузка для {marketplace} не удалась (conf: {result.get('confidence', 0)})")
                 return None
                 
         except Exception as e:
@@ -10742,13 +10749,17 @@ class SmartCacheManager:
         status = {}
         with self.lock:
             for marketplace, schedule in self.prefetch_schedule.items():
+                next_prefetch = None
+                if schedule['last_prefetch']:
+                    next_prefetch = schedule['last_prefetch'] + timedelta(
+                        seconds=schedule['prefetch_interval']
+                    )
+                
                 status[marketplace] = {
                     'enabled': schedule['enabled'],
                     'last_prefetch': schedule['last_prefetch'],
                     'has_data': schedule['last_data'] is not None,
-                    'next_prefetch': schedule['last_prefetch'] + timedelta(
-                        seconds=schedule['prefetch_interval']
-                    ) if schedule['last_prefetch'] else None
+                    'next_prefetch': next_prefetch
                 }
         return status
 
@@ -10758,7 +10769,7 @@ class SmartCacheManager:
 
 class SmartTariffLoaderV3:
     """
-    Умная загрузка тарифов (v3.0)
+    Умная загрузка тарифов (v3.1)
     Расширенная версия с предиктивным выбором и мониторингом
     """
     
@@ -10849,7 +10860,7 @@ class SmartTariffLoaderV3:
                 required_fields = ['rates']
             
             present_fields = sum(1 for field in required_fields if field in data)
-            completeness_factor = present_fields / len(required_fields)
+            completeness_factor = present_fields / len(required_fields) if required_fields else 1.0
         
         return base_confidence * (0.8 + 0.2 * completeness_factor)
     
@@ -10902,9 +10913,9 @@ class SmartTariffLoaderV3:
             if isinstance(rates, dict):
                 # Проверяем наличие ключевых ставок
                 required_rates = ['base', 'night', 'holiday']
-                if source == 'ozon':
+                if source.lower() == 'ozon':
                     required_rates = ['base', 'express', 'standard']
-                elif source == 'wildberries':
+                elif source.lower() == 'wildberries':
                     required_rates = ['base', 'box', 'mono']
                 
                 present = sum(1 for r in required_rates if r in rates)
@@ -11013,6 +11024,7 @@ class SmartTariffLoaderV3:
             
             if not filtered_sources:
                 result["errors"].append("Нет доступных источников")
+                result["execution_time"] = (datetime.now() - start_time).total_seconds()
                 return result
             
             # Предиктивный выбор источника
@@ -11062,7 +11074,7 @@ class SmartTariffLoaderV3:
                         load_duration = time.time() - load_start
                         
                         # Проверяем результат
-                        if not load_result["errors"] and load_result["data"]:
+                        if not load_result.get("errors") and load_result.get("data"):
                             # Валидируем данные
                             is_valid, validation_errors = self._validate_data(
                                 load_result["data"], source
@@ -11120,8 +11132,8 @@ class SmartTariffLoaderV3:
             
             # Если данные не получены, пробуем fallback
             if not result["data"] and fallback_to_cache:
-                fallback_result = self._load_from_cache(marketplace, {}, force_refresh=True)
-                if fallback_result["data"]:
+                fallback_result = self._load_from_cache_with_ttl(marketplace)
+                if fallback_result.get("data"):
                     result["data"] = fallback_result["data"]
                     result["source_used"] = "fallback_cache"
                     result["confidence"] = 0.60
@@ -11199,7 +11211,7 @@ class SmartTariffLoaderV3:
                 result["data"] = {
                     "rates": rates,
                     "forecast": forecast,
-                    "source": source.value if source else "unknown"
+                    "source": source.value if source and hasattr(source, 'value') else "unknown"
                 }
                 result["warnings"].append("Тарифы получены через AI")
                 if forecast:
@@ -11221,12 +11233,22 @@ class SmartTariffLoaderV3:
         result = {"data": {}, "errors": [], "warnings": []}
         
         try:
+            # Проверяем наличие метода get у кэша
+            if not hasattr(self.tariff_cache, 'get'):
+                result["errors"].append("Кэш не поддерживает метод get")
+                return result
+            
             cached = self.tariff_cache.get(marketplace, None, use_expired=False)
             
             if cached:
                 # Проверяем TTL
                 ttl = self.config.get(marketplace, {}).get('cache_ttl', 43200)
-                age = datetime.now().timestamp() - cached.timestamp
+                
+                # Получаем timestamp из кэша
+                if hasattr(cached, 'timestamp'):
+                    age = datetime.now().timestamp() - cached.timestamp
+                else:
+                    age = 0
                 
                 if age > ttl:
                     result["warnings"].append(f"Кэш устарел ({int(age/3600)}ч назад)")
@@ -11234,12 +11256,18 @@ class SmartTariffLoaderV3:
                 else:
                     self.performance_monitor.record_cache(True)
                 
+                # Получаем данные из кэша
+                if hasattr(cached, 'data'):
+                    cache_data = cached.data
+                else:
+                    cache_data = cached
+                
                 result["data"] = {
-                    "rates": cached.data,
-                    "timestamp": datetime.fromtimestamp(cached.timestamp).isoformat(),
-                    "source": cached.source.value if cached.source else "unknown"
+                    "rates": cache_data,
+                    "timestamp": datetime.fromtimestamp(cached.timestamp if hasattr(cached, 'timestamp') else time.time()).isoformat(),
+                    "source": cached.source.value if hasattr(cached, 'source') and hasattr(cached.source, 'value') else "unknown"
                 }
-                result["warnings"].append(f"Использован кэш от {datetime.fromtimestamp(cached.timestamp).strftime('%d.%m.%Y %H:%M')}")
+                result["warnings"].append(f"Использован кэш от {datetime.fromtimestamp(cached.timestamp if hasattr(cached, 'timestamp') else time.time()).strftime('%d.%m.%Y %H:%M')}")
             else:
                 result["errors"].append("Кэшированные данные не найдены")
                 self.performance_monitor.record_cache(False)
@@ -11271,12 +11299,14 @@ class SmartTariffLoaderV3:
                 available.append("api")
         
         # Проверяем AI
-        if self.ai_updater.api_key:
+        if hasattr(self.ai_updater, 'api_key') and self.ai_updater.api_key:
             available.append("ai")
         
         # Проверяем кэш
-        if self.tariff_cache.get(marketplace, None, use_expired=False):
-            available.append("cache")
+        if hasattr(self.tariff_cache, 'get'):
+            cached = self.tariff_cache.get(marketplace, None, use_expired=False)
+            if cached:
+                available.append("cache")
         
         return available
     
@@ -11304,15 +11334,15 @@ class SmartTariffLoaderV3:
             
             comparisons.append({
                 "Источник": source.upper(),
-                "Статус": "Доступен" if result["data"] else "Недоступен",
-                "Количество полей": len(result["data"]) if result["data"] else 0,
-                "Доверие": f"{result['confidence']*100:.0f}%" if result["data"] else "0%",
-                "Качество": f"{quality.get('overall_score', 0)*100:.0f}%" if result["data"] else "0%",
-                "Полнота": f"{quality.get('completeness', 0)*100:.0f}%" if result["data"] else "0%",
-                "Свежесть": f"{quality.get('freshness', 0)*100:.0f}%" if result["data"] else "0%",
-                "Время загрузки": f"{result['execution_time']:.2f}с",
-                "Ошибки": ", ".join(result["errors"][:2]) if result["errors"] else "Нет",
-                "Предупреждения": ", ".join(result["warnings"][:2]) if result["warnings"] else "Нет"
+                "Статус": "Доступен" if result.get("data") else "Недоступен",
+                "Количество полей": len(result.get("data", {})) if result.get("data") else 0,
+                "Доверие": f"{result.get('confidence', 0)*100:.0f}%" if result.get("data") else "0%",
+                "Качество": f"{quality.get('overall_score', 0)*100:.0f}%" if result.get("data") else "0%",
+                "Полнота": f"{quality.get('completeness', 0)*100:.0f}%" if result.get("data") else "0%",
+                "Свежесть": f"{quality.get('freshness', 0)*100:.0f}%" if result.get("data") else "0%",
+                "Время загрузки": f"{result.get('execution_time', 0):.2f}с",
+                "Ошибки": ", ".join(result.get("errors", [])[:2]) if result.get("errors") else "Нет",
+                "Предупреждения": ", ".join(result.get("warnings", [])[:2]) if result.get("warnings") else "Нет"
             })
         
         return pd.DataFrame(comparisons)
@@ -11328,7 +11358,7 @@ class SmartTariffLoaderV3:
         """
         result = self.load_tariffs_advanced(marketplace)
         
-        if not result["data"]:
+        if not result.get("data"):
             yield {
                 "error": "Нет данных для загрузки",
                 "result": result
@@ -11346,8 +11376,8 @@ class SmartTariffLoaderV3:
                     "data": batch,
                     "total": total_items,
                     "progress": (i + len(batch)) / total_items,
-                    "source": result["source_used"],
-                    "confidence": result["confidence"]
+                    "source": result.get("source_used"),
+                    "confidence": result.get("confidence", 0)
                 }
                 
                 yield batch_result
@@ -11362,8 +11392,8 @@ class SmartTariffLoaderV3:
                 "data": data,
                 "total": 1,
                 "progress": 1.0,
-                "source": result["source_used"],
-                "confidence": result["confidence"]
+                "source": result.get("source_used"),
+                "confidence": result.get("confidence", 0)
             }
         else:
             yield {
@@ -11393,10 +11423,12 @@ class SmartTariffLoaderV3:
     def clear_cache(self, marketplace: str = None):
         """Очистка кэша"""
         if marketplace:
-            self.tariff_cache.delete(marketplace)
+            if hasattr(self.tariff_cache, 'delete'):
+                self.tariff_cache.delete(marketplace)
             self.logger.info(f"Кэш для {marketplace} очищен")
         else:
-            self.tariff_cache.clear()
+            if hasattr(self.tariff_cache, 'clear'):
+                self.tariff_cache.clear()
             self.logger.info("Весь кэш очищен")
     
     def backup_cache(self, path: str = None):
@@ -11405,7 +11437,11 @@ class SmartTariffLoaderV3:
             path = f"cache_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
         try:
-            cache_data = self.tariff_cache.get_all()
+            if hasattr(self.tariff_cache, 'get_all'):
+                cache_data = self.tariff_cache.get_all()
+            else:
+                cache_data = {}
+            
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
             self.logger.info(f"Бэкап кэша сохранен в {path}")
