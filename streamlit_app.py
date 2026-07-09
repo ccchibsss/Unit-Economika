@@ -5406,15 +5406,18 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.14)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.15)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.14:
+# ✅ ИСПРАВЛЕНИЯ v100.15:
 # 1. Полная защита от дубликатов колонок при маппинге
 # 2. Исправлена ошибка "column 'weight' is duplicate"
 # 3. Правильная обработка габаритов из файлов
 # 4. Улучшен detect_columns с приоритетом точного совпадения
 # 5. Fallback при ошибке rename
 # 6. Логирование для отладки
+# 7. ✅ НОВОЕ: Улучшенная обработка чисел с запятыми (11,5 → 11.5)
+# 8. ✅ НОВОЕ: Проверка типа данных перед конвертацией
+# 9. ✅ НОВОЕ: Отладочная панель для габаритов
 # ============================================================================
 
 @st.cache_resource
@@ -5678,11 +5681,11 @@ class HighVolumeAutoPartsCatalog:
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ========================================================================
-    # ОБРАБОТКА ФАЙЛОВ (✅ ИСПРАВЛЕНО v100.14)
+    # ОБРАБОТКА ФАЙЛОВ (✅ ИСПРАВЛЕНО v100.15)
     # ========================================================================
     def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
         """
-        ✅ ИСПРАВЛЕНИЕ v100.14: Защита от дубликатов при маппинге колонок
+        ✅ ИСПРАВЛЕНИЕ v100.15: Защита от дубликатов при маппинге колонок
         Использует систему приоритетов для выбора лучшего варианта
         """
         column_variants = {
@@ -5742,7 +5745,7 @@ class HighVolumeAutoPartsCatalog:
     
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
         """
-        ✅ ИСПРАВЛЕНИЕ v100.14: Полная защита от дубликатов колонок
+        ✅ ИСПРАВЛЕНИЕ v100.15: Полная защита от дубликатов колонок + улучшенная обработка чисел
         """
         logger.info(f"Обработка файла: {file_type} ({file_path})")
         
@@ -5786,7 +5789,7 @@ class HighVolumeAutoPartsCatalog:
         
         logger.info(f"Маппинг колонок для {file_type}: {column_mapping}")
         
-        # ✅ ИСПРАВЛЕНИЕ v100.14: Безопасное переименование с защитой от дубликатов
+        # ✅ ИСПРАВЛЕНИЕ v100.15: Безопасное переименование с защитой от дубликатов
         try:
             df = df.rename(column_mapping)
         except Exception as e:
@@ -5801,7 +5804,7 @@ class HighVolumeAutoPartsCatalog:
                 except Exception as e2:
                     logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
         
-        # ✅ ИСПРАВЛЕНИЕ v100.14: Удаляем дубликаты колонок после rename
+        # ✅ ИСПРАВЛЕНИЕ v100.15: Удаляем дубликаты колонок после rename
         if len(df.columns) != len(set(df.columns)):
             logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
             seen = set()
@@ -5819,19 +5822,47 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # Нормализация числовых колонок (габариты, цена)
+        # ✅ ИСПРАВЛЕНИЕ v100.15: УЛУЧШЕННАЯ обработка числовых колонок
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
                 try:
-                    df = df.with_columns(
-                        pl.col(col).cast(pl.Utf8)
-                        .str.replace_all(',', '.')
-                        .cast(pl.Float64)
-                        .alias(col)
-                    )
+                    # Проверяем тип данных
+                    col_dtype = df[col].dtype
+                    
+                    if col_dtype in [pl.Float64, pl.Float32, pl.Int64, pl.Int32]:
+                        # Если это уже число - просто округляем
+                        df = df.with_columns(
+                            pl.col(col).round(2).alias(col)
+                        )
+                        logger.info(f"✅ Колонка {col} уже числовая, округлена до 2 знаков")
+                    else:
+                        # Если это строка или другой тип - конвертируем
+                        df = df.with_columns([
+                            # Заменяем запятую на точку
+                            pl.col(col)
+                            .cast(pl.Utf8)
+                            .str.replace_all(',', '.')
+                            # Удаляем лишние символы (пробелы, буквы)
+                            .str.replace_all(r'[^\d.\-]', '')
+                            # Пытаемся конвертировать в число
+                            .cast(pl.Float64, strict=False)
+                            # Округляем до 2 знаков
+                            .round(2)
+                            .alias(col)
+                        ])
+                        logger.info(f"✅ Колонка {col} конвертирована из строк в числа")
+                    
+                    # Логируем пример значений для отладки
+                    sample_values = df[col].head(5).to_list()
+                    logger.info(f"📊 Пример значений в {col}: {sample_values}")
+                    
                 except Exception as e:
-                    logger.warning(f"Не удалось преобразовать {col} в число: {e}")
+                    logger.warning(f"⚠️ Не удалось преобразовать {col} в число: {e}")
+                    # Fallback: устанавливаем 0 для неконвертированных значений
+                    df = df.with_columns(
+                        pl.lit(0.0).alias(col)
+                    )
         
         # Удаление дубликатов по ключевым колонкам
         key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
@@ -5922,7 +5953,7 @@ class HighVolumeAutoPartsCatalog:
             self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """Обработка и загрузка данных в базу"""
+        """✅ ИСПРАВЛЕНИЕ v100.15: С отладочной панелью для габаритов"""
         st.info("🔄 Начало загрузки и обновления данных в базе...")
         
         steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
@@ -6108,6 +6139,35 @@ class HighVolumeAutoPartsCatalog:
             parts_df = parts_df.select(select_exprs)
             
             self.upsert_data('parts', parts_df, ['artikul_norm', 'brand_norm'])
+        
+        # ✅ ИСПРАВЛЕНИЕ v100.15: ОТЛАДКА - Показываем статистику по габаритам после загрузки
+        if 'dimensions' in dataframes and not dataframes['dimensions'].is_empty():
+            dims_df = dataframes['dimensions']
+            
+            with st.expander("🔍 Отладка: Статистика габаритов", expanded=False):
+                st.write("**Статистика по числовым колонкам:**")
+                
+                stats_data = []
+                for col in ['length', 'width', 'height', 'weight']:
+                    if col in dims_df.columns:
+                        col_data = dims_df[col]
+                        stats_data.append({
+                            "Колонка": col,
+                            "Всего значений": len(col_data),
+                            "Не-NULL значений": col_data.not_null().sum(),
+                            "Нулевых значений": (col_data == 0).sum(),
+                            "Минимум": col_data.min(),
+                            "Максимум": col_data.max(),
+                            "Среднее": round(col_data.mean(), 2) if col_data.mean() is not None else 0
+                        })
+                
+                if stats_data:
+                    st.dataframe(pd.DataFrame(stats_data))
+                
+                st.write("**Пример первых 10 записей:**")
+                sample_cols = ['artikul', 'brand', 'length', 'width', 'height', 'weight', 'dimensions_str']
+                available_cols = [col for col in sample_cols if col in dims_df.columns]
+                st.dataframe(dims_df.select(available_cols).head(10).to_pandas())
         
         progress_bar.progress(1.0, text="Обновление базы данных завершено!")
         time.sleep(1)
@@ -10707,51 +10767,770 @@ def validate_dimensions_with_category(
     
     return result
 # ============================================================================
+# 🆕 БЛОК 25: СИСТЕМА СОХРАНЕНИЯ И ЗАГРУЗКИ ДАННЫХ (v100.8)
+# ============================================================================
+# ✅ Возможности:
+# 1. Сохранение всей базы данных в файл (.duckdb)
+# 2. Экспорт настроек и правил в JSON
+# 3. Создание полного бэкапа в ZIP-архиве
+# 4. Загрузка данных из файла
+# 5. Импорт настроек из JSON
+# 6. Восстановление из ZIP-архива
+# 7. Автосохранение при изменениях
+# 8. История бэкапов
+# ============================================================================
+
+# === КОНСТАНТЫ ===
+BACKUPS_DIR = BASE_DIR / "backups"
+BACKUPS_DIR.mkdir(exist_ok=True, parents=True)
+SETTINGS_EXPORT_FILE = DATA_DIR / "settings_export.json"
+MAX_BACKUPS = 10  # Максимальное количество хранимых бэкапов
+
+
+# ============================================================================
+# КЛАСС МЕНЕДЖЕРА СОХРАНЕНИЙ
+# ============================================================================
+class DataManager:
+    """Менеджер сохранения и загрузки данных приложения"""
+    
+    def __init__(self, catalog=None):
+        self.catalog = catalog
+        self.backups_dir = BACKUPS_DIR
+        self.data_dir = DATA_DIR
+        self.logger = logging.getLogger('DataManager')
+    
+    # ====================================================================
+    # СОХРАНЕНИЕ БАЗЫ ДАННЫХ
+    # ====================================================================
+    def save_database(self, output_path: Optional[Path] = None) -> bool:
+        """Сохранение DuckDB базы в файл"""
+        if self.catalog is None or self.catalog.conn is None:
+            self.logger.error("Каталог не инициализирован")
+            return False
+        
+        try:
+            if output_path is None:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_path = self.backups_dir / f"catalog_{timestamp}.duckdb"
+            
+            # Создаем резервную копию текущей базы
+            current_db = self.catalog.db_path
+            if current_db.exists():
+                import shutil
+                shutil.copy2(current_db, output_path)
+                self.logger.info(f"✅ База сохранена: {output_path}")
+                return True
+            else:
+                self.logger.warning("База данных не существует")
+                return False
+        
+        except Exception as e:
+            self.logger.error(f"Ошибка сохранения базы: {e}")
+            return False
+    
+    def load_database(self, input_path: Path) -> bool:
+        """Загрузка DuckDB базы из файла"""
+        if self.catalog is None:
+            self.logger.error("Каталог не инициализирован")
+            return False
+        
+        try:
+            if not input_path.exists():
+                self.logger.error(f"Файл не найден: {input_path}")
+                return False
+            
+            # Закрываем текущее соединение
+            if self.catalog.conn:
+                self.catalog.conn.close()
+            
+            # Копируем файл в рабочее место
+            import shutil
+            shutil.copy2(input_path, self.catalog.db_path)
+            
+            # Пересоздаем соединение
+            self.catalog.conn = duckdb.connect(database=str(self.catalog.db_path))
+            self.catalog.setup_database()
+            
+            self.logger.info(f"✅ База загружена: {input_path}")
+            return True
+        
+        except Exception as e:
+            self.logger.error(f"Ошибка загрузки базы: {e}")
+            return False
+    
+    # ====================================================================
+    # СОХРАНЕНИЕ НАСТРОЕК
+    # ====================================================================
+    def export_settings(self, output_path: Optional[Path] = None) -> bool:
+        """Экспорт всех настроек в JSON"""
+        if self.catalog is None:
+            return False
+        
+        try:
+            if output_path is None:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_path = self.backups_dir / f"settings_{timestamp}.json"
+            
+            settings_data = {
+                "version": APP_VERSION,
+                "export_date": datetime.now().isoformat(),
+                "price_rules": self.catalog.price_rules,
+                "exclusion_rules": self.catalog.exclusion_rules,
+                "category_mapping": self.catalog.category_mapping,
+                "cloud_config": {k: v for k, v in self.catalog.cloud_config.items() 
+                                if k != 'last_sync'}
+            }
+            
+            output_path.write_text(
+                json.dumps(settings_data, indent=2, ensure_ascii=False),
+                encoding='utf-8'
+            )
+            
+            self.logger.info(f"✅ Настройки экспортированы: {output_path}")
+            return True
+        
+        except Exception as e:
+            self.logger.error(f"Ошибка экспорта настроек: {e}")
+            return False
+    
+    def import_settings(self, input_path: Path) -> bool:
+        """Импорт настроек из JSON"""
+        if self.catalog is None:
+            return False
+        
+        try:
+            if not input_path.exists():
+                self.logger.error(f"Файл не найден: {input_path}")
+                return False
+            
+            data = json.loads(input_path.read_text(encoding='utf-8'))
+            
+            if 'price_rules' in data:
+                self.catalog.price_rules = data['price_rules']
+                self.catalog.save_price_rules()
+            
+            if 'exclusion_rules' in data:
+                self.catalog.exclusion_rules = data['exclusion_rules']
+                self.catalog.save_exclusion_rules()
+            
+            if 'category_mapping' in data:
+                self.catalog.category_mapping = data['category_mapping']
+                self.catalog.save_category_mapping()
+            
+            self.logger.info(f"✅ Настройки импортированы: {input_path}")
+            return True
+        
+        except Exception as e:
+            self.logger.error(f"Ошибка импорта настроек: {e}")
+            return False
+    
+    # ====================================================================
+    # ПОЛНЫЙ БЭКАП (ZIP)
+    # ====================================================================
+    def create_full_backup(self, output_path: Optional[Path] = None) -> Optional[Path]:
+        """Создание полного бэкапа в ZIP-архиве"""
+        try:
+            if output_path is None:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                output_path = self.backups_dir / f"backup_{timestamp}.zip"
+            
+            import zipfile
+            
+            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # База данных
+                if self.catalog.db_path.exists():
+                    zipf.write(self.catalog.db_path, "catalog.duckdb")
+                
+                # Настройки
+                for config_file in ['price_rules.json', 'cloud_config.json', 
+                                   'exclusion_rules.txt', 'category_mapping.txt']:
+                    file_path = self.data_dir / config_file
+                    if file_path.exists():
+                        zipf.write(file_path, f"config/{config_file}")
+                
+                # Лог файл (последние 1000 строк)
+                if LOG_FILE.exists():
+                    try:
+                        lines = LOG_FILE.read_text(encoding='utf-8').splitlines()[-1000:]
+                        zipf.writestr("logs/recent.log", "\n".join(lines))
+                    except Exception:
+                        pass
+                
+                # Метаданные бэкапа
+                metadata = {
+                    "version": APP_VERSION,
+                    "created_at": datetime.now().isoformat(),
+                    "parts_count": self.catalog.get_statistics().get('parts', 0) if self.catalog else 0,
+                    "python_version": sys.version
+                }
+                zipf.writestr("metadata.json", json.dumps(metadata, indent=2))
+            
+            self.logger.info(f"✅ Полный бэкап создан: {output_path}")
+            return output_path
+        
+        except Exception as e:
+            self.logger.error(f"Ошибка создания бэкапа: {e}")
+            return None
+    
+    def restore_from_backup(self, backup_path: Path) -> bool:
+        """Восстановление из ZIP-архива"""
+        try:
+            if not backup_path.exists():
+                self.logger.error(f"Файл не найден: {backup_path}")
+                return False
+            
+            import zipfile
+            
+            with zipfile.ZipFile(backup_path, 'r') as zipf:
+                # Проверяем метаданные
+                if 'metadata.json' in zipf.namelist():
+                    metadata = json.loads(zipf.read('metadata.json'))
+                    self.logger.info(f"Бэкап от {metadata.get('created_at')}, версия {metadata.get('version')}")
+                
+                # Восстанавливаем базу данных
+                if 'catalog.duckdb' in zipf.namelist():
+                    if self.catalog and self.catalog.conn:
+                        self.catalog.conn.close()
+                    
+                    zipf.extract('catalog.duckdb', str(self.data_dir))
+                    
+                    if self.catalog:
+                        self.catalog.conn = duckdb.connect(database=str(self.catalog.db_path))
+                        self.catalog.setup_database()
+                
+                # Восстанавливаем конфиги
+                for name in zipf.namelist():
+                    if name.startswith('config/'):
+                        filename = name.replace('config/', '')
+                        target_path = self.data_dir / filename
+                        zipf.extract(name, str(self.data_dir))
+                        # Перемещаем из подпапки
+                        extracted = self.data_dir / name
+                        if extracted.exists() and extracted != target_path:
+                            import shutil
+                            shutil.move(str(extracted), str(target_path))
+            
+            # Перезагружаем конфигурации
+            if self.catalog:
+                self.catalog.price_rules = self.catalog.load_price_rules()
+                self.catalog.exclusion_rules = self.catalog.load_exclusion_rules()
+                self.catalog.category_mapping = self.catalog.load_category_mapping()
+                self.catalog.cloud_config = self.catalog.load_cloud_config()
+            
+            self.logger.info(f"✅ Восстановление завершено: {backup_path}")
+            return True
+        
+        except Exception as e:
+            self.logger.error(f"Ошибка восстановления: {e}")
+            return False
+    
+    # ====================================================================
+    # УПРАВЛЕНИЕ БЭКАПАМИ
+    # ====================================================================
+    def list_backups(self) -> List[Dict[str, Any]]:
+        """Список всех бэкапов"""
+        backups = []
+        
+        for file_path in sorted(self.backups_dir.glob("*.zip"), reverse=True):
+            stat = file_path.stat()
+            size_mb = stat.st_size / (1024 * 1024)
+            created = datetime.fromtimestamp(stat.st_mtime)
+            
+            backups.append({
+                "name": file_path.name,
+                "path": file_path,
+                "size_mb": round(size_mb, 2),
+                "created": created,
+                "created_str": created.strftime('%d.%m.%Y %H:%M:%S')
+            })
+        
+        # Ограничиваем количество
+        if len(backups) > MAX_BACKUPS:
+            for old_backup in backups[MAX_BACKUPS:]:
+                try:
+                    old_backup['path'].unlink()
+                except Exception:
+                    pass
+            backups = backups[:MAX_BACKUPS]
+        
+        return backups
+    
+    def delete_backup(self, backup_path: Path) -> bool:
+        """Удаление бэкапа"""
+        try:
+            if backup_path.exists():
+                backup_path.unlink()
+                self.logger.info(f"Удален бэкап: {backup_path}")
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Ошибка удаления бэкапа: {e}")
+            return False
+    
+    def cleanup_old_backups(self, keep_count: int = 5) -> int:
+        """Удаление старых бэкапов"""
+        backups = self.list_backups()
+        deleted = 0
+        
+        for backup in backups[keep_count:]:
+            if self.delete_backup(backup['path']):
+                deleted += 1
+        
+        return deleted
+
+
+# ============================================================================
+# ФАБРИЧНАЯ ФУНКЦИЯ
+# ============================================================================
+@st.cache_resource
+def get_data_manager():
+    """Получение менеджера данных через st.cache_resource"""
+    return DataManager()
+
+
+# ============================================================================
+# UI ФУНКЦИИ
+# ============================================================================
+def show_data_save_load_interface():
+    """📁 Интерфейс сохранения и загрузки данных"""
+    st.header("💾 Сохранение и загрузка данных")
+    st.info("""
+**ВОЗМОЖНОСТИ:**
+-  **Сохранить базу** — экспорт DuckDB в файл
+- ⚙️ **Экспорт настроек** — сохранение правил и конфигураций в JSON
+- ️ **Полный бэкап** — создание ZIP-архива со всеми данными
+- 📥 **Загрузить базу** — импорт DuckDB из файла
+-  **Импорт настроек** — загрузка настроек из JSON
+- 🔄 **Восстановление** — полное восстановление из ZIP-архива
+- 🗑️ **Управление бэкапами** — просмотр и удаление старых бэкапов
+
+💡 **СОВЕТ:** Регулярно создавайте бэкапы перед важными операциями!
+""")
+    
+    # Инициализация
+    if 'data_manager' not in st.session_state:
+        st.session_state.data_manager = get_data_manager()
+    
+    manager = st.session_state.data_manager
+    
+    # Привязываем каталог если есть
+    if 'high_volume_catalog' in st.session_state:
+        manager.catalog = st.session_state.high_volume_catalog
+    
+    # Меню
+    save_load_tab = st.tabs([
+        "💾 Сохранение",
+        "📥 Загрузка",
+        "🗂️ Управление бэкапами",
+        "⚙️ Настройки"
+    ])
+    
+    # ====================================================================
+    # ВКЛАДКА 1: СОХРАНЕНИЕ
+    # ====================================================================
+    with save_load_tab[0]:
+        st.subheader("💾 Сохранение данных")
+        
+        save_col1, save_col2 = st.columns(2)
+        
+        with save_col1:
+            st.markdown("#### 📦 База данных")
+            st.caption("Сохранение DuckDB базы в файл")
+            
+            if st.button("💾 Сохранить базу", use_container_width=True):
+                if manager.catalog and manager.catalog.conn:
+                    with st.spinner("Сохранение базы..."):
+                        if manager.save_database():
+                            st.success("✅ База успешно сохранена!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Ошибка сохранения")
+                else:
+                    st.warning("⚠️ Каталог не инициализирован")
+        
+        with save_col2:
+            st.markdown("#### ⚙️ Настройки")
+            st.caption("Экспорт правил и конфигураций в JSON")
+            
+            if st.button("️ Экспорт настроек", use_container_width=True):
+                with st.spinner("Экспорт настроек..."):
+                    if manager.export_settings():
+                        st.success("✅ Настройки экспортированы!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Ошибка экспорта")
+        
+        st.divider()
+        
+        st.markdown("#### ️ Полный бэкап (ZIP)")
+        st.caption("Создание архива со всеми данными, настройками и логами")
+        
+        col_backup1, col_backup2 = st.columns([3, 1])
+        
+        with col_backup1:
+            backup_name = st.text_input(
+                "Название бэкапа (опционально)",
+                placeholder="Например: перед_обновлением_цен",
+                help="Если не указано, будет использована дата и время"
+            )
+        
+        with col_backup2:
+            st.write("")  # Отступ
+            st.write("")  # Отступ
+            if st.button("️ Создать бэкап", type="primary", use_container_width=True):
+                with st.spinner("Создание бэкапа..."):
+                    backup_path = manager.create_full_backup()
+                    if backup_path:
+                        st.success(f"✅ Бэкап создан: {backup_path.name}")
+                        
+                        # Предлагаем скачать
+                        with open(backup_path, "rb") as f:
+                            st.download_button(
+                                label="⬇️ Скачать бэкап",
+                                data=f,
+                                file_name=backup_path.name,
+                                mime="application/zip",
+                                key="download_backup"
+                            )
+                        
+                        st.rerun()
+                    else:
+                        st.error(" Ошибка создания бэкапа")
+    
+    # ====================================================================
+    # ВКЛАДКА 2: ЗАГРУЗКА
+    # ====================================================================
+    with save_load_tab[1]:
+        st.subheader("📥 Загрузка данных")
+        
+        load_col1, load_col2 = st.columns(2)
+        
+        with load_col1:
+            st.markdown("#### 📦 Загрузить базу данных")
+            st.caption("Импорт DuckDB из файла (.duckdb)")
+            
+            db_file = st.file_uploader(
+                "Выберите файл базы данных",
+                type=['duckdb'],
+                key="load_db_file",
+                help="Файл должен быть в формате DuckDB"
+            )
+            
+            if db_file is not None:
+                st.info(f"📄 Выбран файл: {db_file.name} ({db_file.size / 1024:.1f} КБ)")
+                
+                if st.button(" Загрузить базу", type="primary", use_container_width=True):
+                    # Сохраняем во временный файл
+                    temp_path = TEMP_DIR / f"temp_{int(time.time())}.duckdb"
+                    TEMP_DIR.mkdir(exist_ok=True)
+                    
+                    with open(temp_path, "wb") as f:
+                        f.write(db_file.getbuffer())
+                    
+                    with st.spinner("Загрузка базы..."):
+                        if manager.load_database(temp_path):
+                            st.success("✅ База успешно загружена!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Ошибка загрузки")
+                    
+                    # Удаляем временный файл
+                    try:
+                        temp_path.unlink()
+                    except Exception:
+                        pass
+        
+        with load_col2:
+            st.markdown("#### ⚙️ Импорт настроек")
+            st.caption("Загрузка настроек из JSON файла")
+            
+            settings_file = st.file_uploader(
+                "Выберите файл настроек",
+                type=['json'],
+                key="load_settings_file",
+                help="Файл должен быть в формате JSON"
+            )
+            
+            if settings_file is not None:
+                st.info(f"📄 Выбран файл: {settings_file.name}")
+                
+                if st.button("⚙️ Импорт настроек", type="primary", use_container_width=True):
+                    temp_path = TEMP_DIR / f"temp_{int(time.time())}.json"
+                    TEMP_DIR.mkdir(exist_ok=True)
+                    
+                    with open(temp_path, "wb") as f:
+                        f.write(settings_file.getbuffer())
+                    
+                    with st.spinner("Импорт настроек..."):
+                        if manager.import_settings(temp_path):
+                            st.success("✅ Настройки импортированы!")
+                            st.rerun()
+                        else:
+                            st.error(" Ошибка импорта")
+                    
+                    try:
+                        temp_path.unlink()
+                    except Exception:
+                        pass
+        
+        st.divider()
+        
+        st.markdown("#### 🔄 Восстановление из бэкапа (ZIP)")
+        st.caption("Полное восстановление всех данных из ZIP-архива")
+        
+        backup_file = st.file_uploader(
+            "Выберите ZIP-архив бэкапа",
+            type=['zip'],
+            key="load_backup_file",
+            help="Файл должен быть создан функцией 'Создать бэкап'"
+        )
+        
+        if backup_file is not None:
+            st.info(f"📄 Выбран файл: {backup_file.name} ({backup_file.size / 1024:.1f} КБ)")
+            
+            st.warning("⚠️ **ВНИМАНИЕ:** Восстановление заменит все текущие данные!")
+            
+            if st.checkbox("Я понимаю, что текущие данные будут заменены", key="confirm_restore"):
+                if st.button("🔄 Восстановить из бэкапа", type="primary", use_container_width=True):
+                    temp_path = TEMP_DIR / f"temp_{int(time.time())}.zip"
+                    TEMP_DIR.mkdir(exist_ok=True)
+                    
+                    with open(temp_path, "wb") as f:
+                        f.write(backup_file.getbuffer())
+                    
+                    with st.spinner("Восстановление..."):
+                        # Сначала создаем бэкап текущих данных
+                        st.info("Создание резервной копии текущих данных...")
+                        manager.create_full_backup()
+                        
+                        if manager.restore_from_backup(temp_path):
+                            st.success("✅ Восстановление завершено!")
+                            st.balloons()
+                            st.rerun()
+                        else:
+                            st.error("❌ Ошибка восстановления")
+                    
+                    try:
+                        temp_path.unlink()
+                    except Exception:
+                        pass
+    
+    # ====================================================================
+    # ВКЛАДКА 3: УПРАВЛЕНИЕ БЭКАПАМИ
+    # ====================================================================
+    with save_load_tab[2]:
+        st.subheader("🗂️ Управление бэкапами")
+        
+        backups = manager.list_backups()
+        
+        if not backups:
+            st.info("📭 Бэкапы не найдены")
+        else:
+            st.info(f"📊 Найдено бэкапов: {len(backups)}")
+            
+            # Таблица бэкапов
+            backup_data = []
+            for backup in backups:
+                backup_data.append({
+                    "Название": backup['name'],
+                    "Размер": f"{backup['size_mb']} МБ",
+                    "Создан": backup['created_str'],
+                    "Действия": backup['path']
+                })
+            
+            backup_df = pd.DataFrame(backup_data)
+            st.dataframe(backup_df, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            
+            # Действия с бэкапами
+            st.markdown("#### Действия")
+            
+            action_col1, action_col2 = st.columns(2)
+            
+            with action_col1:
+                st.markdown("📥 Скачать бэкап")
+                selected_backup = st.selectbox(
+                    "Выберите бэкап",
+                    options=range(len(backups)),
+                    format_func=lambda x: f"{backups[x]['name']} ({backups[x]['created_str']})",
+                    key="select_backup_download"
+                )
+                
+                if st.button("️ Скачать выбранный бэкап", use_container_width=True):
+                    backup_path = backups[selected_backup]['path']
+                    with open(backup_path, "rb") as f:
+                        st.download_button(
+                            label="⬇️ Скачать",
+                            data=f,
+                            file_name=backup_path.name,
+                            mime="application/zip",
+                            key=f"download_backup_{selected_backup}",
+                            use_container_width=True
+                        )
+            
+            with action_col2:
+                st.markdown("🗑️ Удалить бэкап")
+                backup_to_delete = st.selectbox(
+                    "Выберите бэкап для удаления",
+                    options=range(len(backups)),
+                    format_func=lambda x: f"{backups[x]['name']} ({backups[x]['created_str']})",
+                    key="select_backup_delete"
+                )
+                
+                if st.checkbox("Подтверждаю удаление", key="confirm_delete_backup"):
+                    if st.button("️ Удалить", type="secondary", use_container_width=True):
+                        backup_path = backups[backup_to_delete]['path']
+                        if manager.delete_backup(backup_path):
+                            st.success("✅ Бэкап удален")
+                            st.rerun()
+                        else:
+                            st.error("❌ Ошибка удаления")
+            
+            st.divider()
+            
+            # Очистка старых бэкапов
+            st.markdown("#### 🧹 Очистка старых бэкапов")
+            keep_count = st.number_input(
+                "Количество бэкапов для сохранения",
+                min_value=1,
+                max_value=20,
+                value=5,
+                step=1,
+                key="keep_backups_count"
+            )
+            
+            if st.button(" Удалить старые бэкапы", use_container_width=True):
+                deleted = manager.cleanup_old_backups(keep_count)
+                st.success(f"✅ Удалено старых бэкапов: {deleted}")
+                st.rerun()
+    
+    # ====================================================================
+    # ВКЛАДКА 4: НАСТРОЙКИ
+    # ====================================================================
+    with save_load_tab[3]:
+        st.subheader("⚙️ Настройки сохранения")
+        
+        st.markdown("#### Автосохранение")
+        auto_save = st.checkbox(
+            "Включить автосохранение",
+            value=st.session_state.get('auto_save_enabled', False),
+            key="auto_save_checkbox",
+            help="Автоматическое создание бэкапа при важных изменениях"
+        )
+        st.session_state.auto_save_enabled = auto_save
+        
+        if auto_save:
+            auto_save_interval = st.number_input(
+                "Интервал автосохранения (минут)",
+                min_value=5,
+                max_value=1440,
+                value=60,
+                step=5,
+                key="auto_save_interval"
+            )
+            st.session_state.auto_save_interval = auto_save_interval
+        
+        st.divider()
+        
+        st.markdown("#### Пути сохранения")
+        
+        col_path1, col_path2 = st.columns(2)
+        
+        with col_path1:
+            st.markdown("📁 Директория бэкапов")
+            st.code(str(BACKUPS_DIR), language="text")
+        
+        with col_path2:
+            st.markdown("📁 Директория данных")
+            st.code(str(DATA_DIR), language="text")
+        
+        st.divider()
+        
+        st.markdown("#### Статистика")
+        
+        stats_col1, stats_col2, stats_col3 = st.columns(3)
+        
+        with stats_col1:
+            total_backups = len(manager.list_backups())
+            st.metric(" Всего бэкапов", total_backups)
+        
+        with stats_col2:
+            total_size = sum(b['size_mb'] for b in manager.list_backups())
+            st.metric(" Общий размер", f"{total_size:.1f} МБ")
+        
+        with stats_col3:
+            if manager.catalog:
+                parts_count = manager.catalog.get_statistics().get('parts', 0)
+                st.metric("📊 Записей в базе", f"{parts_count:,}")
+            else:
+                st.metric("📊 Записей в базе", "Н/Д")
+        
+        st.divider()
+        
+        st.markdown("#### 🗑️ Очистка")
+        
+        if st.button("🗑️ Очистить все бэкапы", type="secondary"):
+            if st.checkbox("Я понимаю, что все бэкапы будут удалены", key="confirm_clear_all"):
+                for backup in manager.list_backups():
+                    manager.delete_backup(backup['path'])
+                st.success("✅ Все бэкапы удалены")
+                st.rerun()
+
+
+# ============================================================================
+# ИНТЕГРАЦИЯ В ГЛАВНОЕ МЕНЮ
+# ============================================================================
+# Добавьте в функцию main() новый пункт меню:
+#
+# section = st.sidebar.radio("Выберите раздел:", [
+#     "📁 Загрузка данных",
+#     "📊 Юнит-экономика",
+#     "🗂️ Каталог для группировки",
+#     "📏 Категории с весогабаритами",
+#     "💾 Сохранение и загрузка",  # ✅ НОВЫЙ ПУНКТ
+#     "🤖 AI Тарифы",
+#     "🌐 API Тарифы маркетплейсов",
+#     " Умная загрузка тарифов"
+# ], key="main_navigation")
+#
+# if section == "💾 Сохранение и загрузка":
+#     show_data_save_load_interface()
+# ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 def main():
     """Главная функция приложения"""
-    st.set_page_config(
-        page_title=APP_NAME,
-        page_icon="🚗",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
+    st.set_page_config(page_title=APP_NAME, page_icon="", layout="wide", initial_sidebar_state="expanded")
     st.title(APP_NAME)
     st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-    
     st.sidebar.title("🧭 Навигация")
-    section = st.sidebar.radio(
-        "Выберите раздел:",
-        [
-            "📁 Загрузка данных",
-            "📊 Юнит-экономика",
-            "🗂️ Каталог для группировки",
-            "📏 Категории с весогабаритами",  # ✅ НОВЫЙ РАЗДЕЛ
-            "🤖 AI Тарифы",
-            "🌐 API Тарифы маркетплейсов",
-            " Умная загрузка тарифов"
-        ],
-        key="main_navigation"
-    )
     
-    if section == "📁 Загрузка данных":
+    section = st.sidebar.radio("Выберите раздел:", [
+        "📁 Загрузка данных",
+        " Юнит-экономика",
+        "️ Каталог для группировки",
+        "📏 Категории с весогабаритами",
+        "💾 Сохранение и загрузка",  # ✅ ДОБАВЛЕНО
+        "🤖 AI Тарифы",
+        "🌐 API Тарифы маркетплейсов",
+        "🧠 Умная загрузка тарифов"
+    ], key="main_navigation")
+    
+    if section == " Загрузка данных":
         show_data_upload_interface()
     elif section == "📊 Юнит-экономика":
         show_unit_economics_interface()
     elif section == "🗂️ Каталог для группировки":
         show_catalog_grouping_interface()
-    elif section == "📏 Категории с весогабаритами":  # ✅ НОВЫЙ РАЗДЕЛ
+    elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
+    elif section == "💾 Сохранение и загрузка":  # ✅ ДОБАВЛЕНО
+        show_data_save_load_interface()
     elif section == "🤖 AI Тарифы":
         show_ai_tariffs_interface()
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
     elif section == "🧠 Умная загрузка тарифов":
         show_smart_tariff_interface()
-
-
-# ✅ ТОЧКА ВХОДА
-if __name__ == "__main__":
-    main()
