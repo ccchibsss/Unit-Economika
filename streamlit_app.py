@@ -7045,13 +7045,20 @@ class AdvancedDimensionsValidator:
             "weight_kg": round(weight, 2)
         }
 # ============================================================================
-# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.6 - С ИСПРАВЛЕНИЕМ КРАКОЗЯБР)
+# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.7 - С НОРМАЛИЗАЦИЕЙ ВЕСОГАБАРИТОВ)
 # ============================================================================
+# ✅ ИСПРАВЛЕНИЯ v100.7:
+# 1. Добавлена нормализация весогабаритов после чтения файла
+# 2. Исправлена проблема с датами вместо чисел
+# 3. Исправлена проблема с плавающей точностью (16.400000000000002)
+# 4. Округление до 2 знаков после запятой
+# ============================================================================
+
 def show_data_upload_interface():
     """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ"""
     st.header("📁 Шаг 1: Загрузка данных каталога")
     st.info("""
-📋 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
+ **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
 **ШАГ 1:** Подготовьте файл с данными товаров (Excel или CSV)
 **ШАГ 2:** Убедитесь, что файл содержит обязательные колонки:
 - ✅ Артикул (идентификатор товара)
@@ -7061,7 +7068,7 @@ def show_data_upload_interface():
 **ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
 - 📏 Длина, Ширина, Высота (числовые значения)
 - 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
-**🆕 v100.6:** Автоматическое исправление кракозябр (двойного UTF-8 кодирования)
+**🆕 v100.7:** Автоматическая нормализация весогабаритов (исправление дат и плавающей точности)
 **ШАГ 3:** Нажмите кнопку ниже и выберите файл
 **ШАГ 4:** Дождитесь успешной загрузки
 💡 **КАК ПРАВИЛЬНО СОХРАНИТЬ CSV В EXCEL:**
@@ -7082,7 +7089,6 @@ def show_data_upload_interface():
             file_name = uploaded_file.name.lower()
             
             if file_name.endswith('.csv'):
-                # 🆕 v100.6: Используем умное чтение CSV с исправлением кракозябр
                 try:
                     df = smart_read_csv(uploaded_file)
                 except Exception as e:
@@ -7132,16 +7138,83 @@ def show_data_upload_interface():
                 st.warning(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
                 df, fixed_count = fix_dataframe_encoding(df)
                 st.success(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
-                
-                # Показываем исправленные колонки
                 st.info(f"📋 Колонки после исправления: {', '.join(str(c) for c in df.columns.tolist())}")
             
             df.columns = df.columns.str.strip()
             
             # ====================================================================
+            # 🆕 v100.7: НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ
+            # ====================================================================
+            st.subheader("🔧 Нормализация весогабаритов")
+            
+            # Колонки для нормализации
+            dimension_cols = ['Длина', 'Ширина', 'Высота', 'Вес']
+            
+            # Функция для нормализации числовых значений
+            def normalize_dimension_value(val):
+                """Нормализует значение весогабарита"""
+                if pd.isna(val):
+                    return 0.0
+                
+                # Если это дата (datetime)
+                if isinstance(val, (datetime, pd.Timestamp)):
+                    logger.warning(f"Обнаружена дата вместо числа: {val}")
+                    return 0.0
+                
+                # Если это строка
+                if isinstance(val, str):
+                    val = val.strip()
+                    # Проверяем, не дата ли это (содержит буквы месяцев)
+                    month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+                                  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+                    if any(month in val.lower() for month in month_names):
+                        logger.warning(f"Обнаружена дата в строке: {val}")
+                        return 0.0
+                    
+                    # Пробуем преобразовать строку в число
+                    try:
+                        # Заменяем запятую на точку
+                        cleaned = val.replace(',', '.')
+                        return round(float(cleaned), 2)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Не удалось преобразовать строку в число: {val}")
+                        return 0.0
+                
+                # Если это число
+                try:
+                    num = float(val)
+                    # Округляем до 2 знаков после запятой
+                    return round(num, 2)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # Применяем нормализацию к колонкам весогабаритов
+            normalized_count = 0
+            for col in dimension_cols:
+                if col in df.columns:
+                    # Считаем количество исправленных значений
+                    before_count = df[col].notna().sum()
+                    df[col] = df[col].apply(normalize_dimension_value)
+                    after_count = (df[col] > 0).sum()
+                    
+                    if before_count != after_count:
+                        normalized_count += 1
+                        logger.info(f"Нормализована колонка {col}: {before_count} → {after_count} значений")
+            
+            if normalized_count > 0:
+                st.success(f"✅ Нормализовано колонок: {normalized_count}")
+                st.info("📋 Все значения округлены до 2 знаков после запятой")
+                
+                # Показываем пример нормализованных данных
+                st.write("Пример нормализованных данных:")
+                available_cols = [col for col in dimension_cols if col in df.columns]
+                if available_cols:
+                    st_dataframe_compat(df[available_cols].head(10))
+            
+            # ====================================================================
             # 📏 Автоматический парсинг размеров
             # ====================================================================
-            st.subheader("📏 Автоматический парсинг размеров")
+            st.subheader(" Автоматический парсинг размеров")
             dims_cols = []
             for col in df.columns:
                 col_lower = str(col).lower()
@@ -7233,7 +7306,7 @@ def show_data_upload_interface():
                     except Exception:
                         st.metric("💰 Средняя цена", "Ошибка")
                 else:
-                    st.metric("💰 Средняя цена", "—")
+                    st.metric(" Средняя цена", "—")
             
             with stats_col3:
                 cost_col = None
@@ -7265,12 +7338,12 @@ def show_data_upload_interface():
                     except Exception:
                         st.metric("🏷️ Брендов", "Ошибка")
                 else:
-                    st.metric("🏷️ Брендов", "—")
+                    st.metric("️ Брендов", "—")
             
             # ====================================================================
             # 🔧 Доступные действия
             # ====================================================================
-            st.subheader("🔧 Доступные действия")
+            st.subheader(" Доступные действия")
             action_col1, action_col2, action_col3 = st.columns(3)
             
             with action_col1:
@@ -7289,14 +7362,14 @@ def show_data_upload_interface():
                             st.session_state.uploaded_data = df
                             st.success("✅ Классификация завершена!")
                             
-                            st.subheader("📊 Распределение по категориям")
+                            st.subheader(" Распределение по категориям")
                             category_counts = df['Категория'].value_counts()
                             st_dataframe_compat(category_counts, key="category_counts")
                         else:
                             st.warning("⚠️ Не найдена колонка с названием товара")
             
             with action_col2:
-                if st.button("📊 Обогатить каталог", type="primary", key="upload_enrich_button"):
+                if st.button(" Обогатить каталог", type="primary", key="upload_enrich_button"):
                     st.info("ℹ️ Перейдите в раздел '🔍 Обогащение каталога' для поиска аналогов")
             
             with action_col3:
@@ -7330,18 +7403,16 @@ def show_data_upload_interface():
             "Описание": ["Описание товара 1", "Описание товара 2", "Описание товара 3"]
         })
         
-        # ✅ Правильный BOM для Excel
         import codecs
         output = io.BytesIO()
         output.write(codecs.BOM_UTF8)
         
-        # ✅ ИСПРАВЛЕНИЕ: Убран параметр encoding из to_csv()
         csv_string = template_df.to_csv(index=False, sep=';')
         output.write(csv_string.encode('utf-8'))
         output.seek(0)
         
         st.download_button(
-            label="📥 Скачать шаблон CSV (Excel-совместимый)",
+            label=" Скачать шаблон CSV (Excel-совместимый)",
             data=output,
             file_name="шаблон_каталога.csv",
             mime="text/csv; charset=utf-8",
