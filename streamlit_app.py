@@ -6737,13 +6737,7 @@ class AdvancedDimensionsValidator:
             "weight_kg": round(weight, 2)
         }
 # ============================================================================
-# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.7 - С НОРМАЛИЗАЦИЕЙ ВЕСОГАБАРИТОВ)
-# ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.7:
-# 1. Добавлена нормализация весогабаритов после чтения файла
-# 2. Исправлена проблема с датами вместо чисел
-# 3. Исправлена проблема с плавающей точностью (16.400000000000002)
-# 4. Округление до 2 знаков после запятой
+# БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.18 - ИСПРАВЛЕННЫЕ ОТСТУПЫ)
 # ============================================================================
 
 def show_data_upload_interface():
@@ -6758,18 +6752,15 @@ def show_data_upload_interface():
 - ✅ Цена (цена продажи)
 - ✅ Себестоимость (закупочная цена)
 **ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
-- 📏 Длина, Ширина, Высота (числовые значения)
+-  Длина, Ширина, Высота (числовые значения)
 - 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
-**🆕 v100.7:** Автоматическая нормализация весогабаритов (исправление дат и плавающей точности)
+**🆕 v100.7:** Автоматическая нормализация весогабаритов
 **ШАГ 3:** Нажмите кнопку ниже и выберите файл
 **ШАГ 4:** Дождитесь успешной загрузки
-💡 **КАК ПРАВИЛЬНО СОХРАНИТЬ CSV В EXCEL:**
-1. Файл → Сохранить как → **CSV UTF-8 (разделитель — запятая)**
-2. Или используйте кнопку "Скачать шаблон" ниже (он уже в правильной кодировке)
 """)
     
     uploaded_file = st.file_uploader(
-        "📤 Загрузите файл каталога (Excel или CSV)",
+        " Загрузите файл каталога (Excel или CSV)",
         type=['xlsx', 'xls', 'csv'],
         key="data_upload_file",
         help="Поддерживаются форматы: .xlsx, .xls, .csv"
@@ -6824,7 +6815,7 @@ def show_data_upload_interface():
                 st.warning("⚠️ Файл содержит только пустые строки. Проверьте данные.")
                 return
             
-            # 🆕 v100.6: Дополнительная проверка и исправление кракозябр
+            # Проверка и исправление кракозябр
             mojibake_cols = [col for col in df.columns if isinstance(col, str) and detect_mojibake(col)]
             if mojibake_cols:
                 st.warning(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
@@ -6834,57 +6825,39 @@ def show_data_upload_interface():
             
             df.columns = df.columns.str.strip()
             
-            # ====================================================================
-            # 🆕 v100.7: НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ
-            # ====================================================================
+            # Нормализация весогабаритов
             st.subheader("🔧 Нормализация весогабаритов")
             
-            # Колонки для нормализации
             dimension_cols = ['Длина', 'Ширина', 'Высота', 'Вес']
             
-            # Функция для нормализации числовых значений
             def normalize_dimension_value(val):
-                """Нормализует значение весогабарита"""
                 if pd.isna(val):
                     return 0.0
                 
-                # Если это дата (datetime)
                 if isinstance(val, (datetime, pd.Timestamp)):
-                    logger.warning(f"Обнаружена дата вместо числа: {val}")
                     return 0.0
                 
-                # Если это строка
                 if isinstance(val, str):
                     val = val.strip()
-                    # Проверяем, не дата ли это (содержит буквы месяцев)
-                    month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-                                  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+                    month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
                     if any(month in val.lower() for month in month_names):
-                        logger.warning(f"Обнаружена дата в строке: {val}")
                         return 0.0
                     
-                    # Пробуем преобразовать строку в число
                     try:
-                        # Заменяем запятую на точку
                         cleaned = val.replace(',', '.')
                         return round(float(cleaned), 2)
                     except (ValueError, TypeError):
-                        logger.warning(f"Не удалось преобразовать строку в число: {val}")
                         return 0.0
                 
-                # Если это число
                 try:
                     num = float(val)
-                    # Округляем до 2 знаков после запятой
                     return round(num, 2)
                 except (ValueError, TypeError):
                     return 0.0
             
-            # Применяем нормализацию к колонкам весогабаритов
             normalized_count = 0
             for col in dimension_cols:
                 if col in df.columns:
-                    # Считаем количество исправленных значений
                     before_count = df[col].notna().sum()
                     df[col] = df[col].apply(normalize_dimension_value)
                     after_count = (df[col] > 0).sum()
@@ -6896,88 +6869,16 @@ def show_data_upload_interface():
             if normalized_count > 0:
                 st.success(f"✅ Нормализовано колонок: {normalized_count}")
                 st.info("📋 Все значения округлены до 2 знаков после запятой")
-                
-                # Показываем пример нормализованных данных
-                st.write("Пример нормализованных данных:")
-                available_cols = [col for col in dimension_cols if col in df.columns]
-                if available_cols:
-                    st_dataframe_compat(df[available_cols].head(10))
-            
-            # ====================================================================
-            # 📏 Автоматический парсинг размеров
-            # ====================================================================
-            st.subheader(" Автоматический парсинг размеров")
-            dims_cols = []
-            for col in df.columns:
-                col_lower = str(col).lower()
-                if any(w in col_lower for w in ['весогабариты', 'размеры', 'dimensions', 'габариты', 'размер']):
-                    dims_cols.append(col)
-            
-            if dims_cols:
-                dims_col = dims_cols[0]
-                st.info(f"🔍 Найдена колонка с размерами: **{dims_col}**")
-                
-                parsed_data = []
-                for idx, row in df.iterrows():
-                    dim_str = str(row.get(dims_col, ''))
-                    if dim_str and dim_str != 'nan':
-                        l, w, h = parse_dimensions_string(dim_str)
-                        parsed_data.append({
-                            'index': idx,
-                            'parsed_length': l,
-                            'parsed_width': w,
-                            'parsed_height': h
-                        })
-                
-                if parsed_data:
-                    parsed_df = pd.DataFrame(parsed_data)
-                    
-                    for i, row in parsed_df.iterrows():
-                        idx = row['index']
-                        if row['parsed_length'] > 0:
-                            df.at[idx, 'Длина_парс'] = row['parsed_length']
-                            df.at[idx, 'Ширина_парс'] = row['parsed_width']
-                            df.at[idx, 'Высота_парс'] = row['parsed_height']
-                    
-                    rename_map = {}
-                    if 'Длина_парс' in df.columns and 'Длина' not in df.columns:
-                        rename_map['Длина_парс'] = 'Длина'
-                    if 'Ширина_парс' in df.columns and 'Ширина' not in df.columns:
-                        rename_map['Ширина_парс'] = 'Ширина'
-                    if 'Высота_парс' in df.columns and 'Высота' not in df.columns:
-                        rename_map['Высота_парс'] = 'Высота'
-                    
-                    if rename_map:
-                        df = df.rename(columns=rename_map)
-                    
-                    st.success(f"✅ Распарсено {len(parsed_data)} записей")
-                    
-                    sample_data = []
-                    for i in range(min(5, len(parsed_data))):
-                        row = parsed_data[i]
-                        sample_data.append({
-                            'Исходная строка': df.iloc[row['index']].get(dims_col, ''),
-                            'Длина': row['parsed_length'],
-                            'Ширина': row['parsed_width'],
-                            'Высота': row['parsed_height']
-                        })
-                    
-                    if sample_data:
-                        st_dataframe_compat(pd.DataFrame(sample_data))
             
             # Сохраняем в session_state
             st.session_state.uploaded_data = df
             st.success(f"✅ Успешно загружено {len(df)} товаров")
             
-            # ====================================================================
-            # 👁️ Предпросмотр данных
-            # ====================================================================
+            # Предпросмотр данных
             st.subheader("👁️ Предпросмотр данных (первые 10 строк)")
             st_dataframe_compat(df.head(10), key="upload_preview_table")
             
-            # ====================================================================
-            # 📊 Статистика загруженных данных
-            # ====================================================================
+            # Статистика загруженных данных
             st.subheader("📊 Статистика загруженных данных")
             stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
             
@@ -6998,7 +6899,7 @@ def show_data_upload_interface():
                     except Exception:
                         st.metric("💰 Средняя цена", "Ошибка")
                 else:
-                    st.metric(" Средняя цена", "—")
+                    st.metric("💰 Средняя цена", "—")
             
             with stats_col3:
                 cost_col = None
@@ -7030,12 +6931,10 @@ def show_data_upload_interface():
                     except Exception:
                         st.metric("🏷️ Брендов", "Ошибка")
                 else:
-                    st.metric("️ Брендов", "—")
+                    st.metric("🏷️ Брендов", "—")
             
-            # ====================================================================
-            # 🔧 Доступные действия
-            # ====================================================================
-            st.subheader(" Доступные действия")
+            # Доступные действия
+            st.subheader("🔧 Доступные действия")
             action_col1, action_col2, action_col3 = st.columns(3)
             
             with action_col1:
@@ -7054,15 +6953,15 @@ def show_data_upload_interface():
                             st.session_state.uploaded_data = df
                             st.success("✅ Классификация завершена!")
                             
-                            st.subheader(" Распределение по категориям")
+                            st.subheader("📊 Распределение по категориям")
                             category_counts = df['Категория'].value_counts()
                             st_dataframe_compat(category_counts, key="category_counts")
                         else:
                             st.warning("⚠️ Не найдена колонка с названием товара")
             
             with action_col2:
-                if st.button(" Обогатить каталог", type="primary", key="upload_enrich_button"):
-                    st.info("ℹ️ Перейдите в раздел '🔍 Обогащение каталога' для поиска аналогов")
+                if st.button("📊 Обогатить каталог", type="primary", key="upload_enrich_button"):
+                    st.info("️ Перейдите в раздел '🔍 Обогащение каталога' для поиска аналогов")
             
             with action_col3:
                 if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
@@ -7073,13 +6972,11 @@ def show_data_upload_interface():
         
         except Exception as e:
             st.error(f"❌ Ошибка загрузки файла: {str(e)}")
-            with st.expander("📋 Подробности ошибки", expanded=True):
+            with st.expander(" Подробности ошибки", expanded=True):
                 st.code(traceback.format_exc())
     
-    # ========================================================================
-    # 📥 Скачать шаблон данных
-    # ========================================================================
-    if st.button("📥 Скачать шаблон данных"):
+    # Скачать шаблон данных
+    if st.button(" Скачать шаблон данных"):
         template_df = pd.DataFrame({
             "Артикул": ["ABC-001", "ABC-002", "ABC-003"],
             "Бренд": ["Bosch", "Bosch", "Siemens"],
@@ -7104,7 +7001,7 @@ def show_data_upload_interface():
         output.seek(0)
         
         st.download_button(
-            label=" Скачать шаблон CSV (Excel-совместимый)",
+            label="📥 Скачать шаблон CSV (Excel-совместимый)",
             data=output,
             file_name="шаблон_каталога.csv",
             mime="text/csv; charset=utf-8",
@@ -8814,21 +8711,20 @@ def show_catalog_calculation_parallel():
     else:
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 # ============================================================================
-# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ)
+# БЛОК 17: UI функции каталога (ИСПРАВЛЕННАЯ ВЕРСИЯ v100.18)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.11:
-# 1. Исправлен MIME-тип для Parquet экспорта
-# 2. Улучшена обработка ошибок при экспорте
-# 3. Добавлена корректная работа с sidebar radio
+# ✅ ИСПРАВЛЕНИЯ v100.18:
+# 1. Убран конфликт st.sidebar.radio с основным меню
+# 2. Используется st.radio вместо st.sidebar.radio
+# 3. Добавлена полная обработка ошибок
+# 4. Все функции определены корректно
 # ============================================================================
 
 def show_catalog_grouping_interface():
-    """
-    🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
-    High-Volume каталог с поддержкой 10M+ записей
-    """
-    st.header("🗂️ Шаг 3: Каталог для группировки")
-    st.info("""
+    """🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ"""
+    try:
+        st.header("🗂️ Шаг 3: Каталог для группировки")
+        st.info("""
 📋 **О РАЗДЕЛЕ:**
 Этот раздел предназначен для работы с большими каталогами товаров.
 **Возможности:**
@@ -8839,46 +8735,69 @@ def show_catalog_grouping_interface():
 - ✅ Экспорт в Excel, CSV, Parquet
 - ✅ Статистика и аналитика
 """)
+        
+        # Проверка доступности библиотек
+        if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
+            st.warning("️ Для работы с большими каталогами установите: `pip install polars duckdb`")
+            st.info("📦 Текущий статус:")
+            st.write(f"- Polars: {'✅' if POLARS_AVAILABLE else '❌'}")
+            st.write(f"- DuckDB: {'✅' if DUCKDB_AVAILABLE else '❌'}")
+            return
+        
+        # Инициализация каталога с обработкой ошибок
+        if 'high_volume_catalog' not in st.session_state:
+            try:
+                st.session_state.high_volume_catalog = get_high_volume_catalog()
+                st.success("✅ Каталог инициализирован")
+            except Exception as e:
+                st.error(f"❌ Ошибка инициализации каталога: {e}")
+                st.error(f"**Тип ошибки:** {type(e).__name__}")
+                
+                with st.expander(" Подробности", expanded=False):
+                    import traceback
+                    st.code(traceback.format_exc())
+                return
+        
+        catalog = st.session_state.high_volume_catalog
+        
+        if not catalog.conn:
+            st.error("❌ Ошибка подключения к базе данных")
+            return
+        
+        # ✅ ИСПРАВЛЕНИЕ v100.18: Используем st.radio вместо st.sidebar.radio
+        # чтобы избежать конфликта с основным меню навигации
+        option = st.radio(
+            "📑 Меню каталога",
+            ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", " Экспорт", "🔧 Управление"],
+            key="catalog_menu_v2",
+            horizontal=True
+        )
+        
+        if option == "📥 Загрузка данных":
+            show_catalog_upload(catalog)
+        elif option == "🔍 Поиск и фильтрация":
+            show_catalog_search(catalog)
+        elif option == "📊 Статистика":
+            show_catalog_statistics(catalog)
+        elif option == "📤 Экспорт":
+            show_catalog_export(catalog)
+        elif option == "🔧 Управление":
+            show_catalog_management(catalog)
     
-    if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
-        st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
-        return
-    
-    if 'high_volume_catalog' not in st.session_state:
-        st.session_state.high_volume_catalog = get_high_volume_catalog()
-    
-    catalog = st.session_state.high_volume_catalog
-    
-    if not catalog.conn:
-        st.error("❌ Ошибка подключения к базе данных")
-        return
-    
-    st.sidebar.title("🧭 Меню каталога")
-    
-    # ✅ ИСПРАВЛЕНИЕ v100.11: используем уникальный key для sidebar radio
-    option = st.sidebar.radio(
-        "Выберите раздел",
-        ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", "🔧 Управление"],
-        key="catalog_menu_sidebar"
-    )
-    
-    if option == "📥 Загрузка данных":
-        show_catalog_upload(catalog)
-    elif option == "🔍 Поиск и фильтрация":
-        show_catalog_search(catalog)
-    elif option == "📊 Статистика":
-        show_catalog_statistics(catalog)
-    elif option == "📤 Экспорт":
-        show_catalog_export(catalog)
-    elif option == "🔧 Управление":
-        show_catalog_management(catalog)
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в разделе 'Каталог для группировки'")
+        st.error(f"**Ошибка:** {str(e)}")
+        
+        with st.expander("📋 Подробности ошибки", expanded=True):
+            import traceback
+            st.code(traceback.format_exc())
 
 
 def show_catalog_upload(catalog):
     """Загрузка данных в каталог"""
     st.subheader("📥 Загрузка данных")
     st.info("""
-📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
+ **ТРЕБОВАНИЯ К ФАЙЛАМ:**
 - **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
 - **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
 - **Штрих-коды:** `artikul`, `brand`, `barcode`, `multiplicity`
@@ -8891,10 +8810,10 @@ def show_catalog_upload(catalog):
     with col1:
         oe_file = st.file_uploader("📋 Основные данные (OE)", type=['xlsx'], key="hv_oe")
         cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
-        barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
+        barcode_file = st.file_uploader(" Штрих-коды", type=['xlsx'], key="hv_barcode")
     
     with col2:
-        dims_file = st.file_uploader("📏 Габариты", type=['xlsx'], key="hv_dims")
+        dims_file = st.file_uploader(" Габариты", type=['xlsx'], key="hv_dims")
         images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
         prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
     
@@ -8989,11 +8908,11 @@ def show_catalog_statistics(catalog):
             st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
         
         if 'category_stats' in stats and not stats['category_stats'].empty:
-            st.subheader("📊 Распределение по категориям")
+            st.subheader(" Распределение по категориям")
             st_dataframe_compat(stats['category_stats'])
         
         if 'top_brands' in stats and not stats['top_brands'].empty:
-            st.subheader("🏆 Топ 10 брендов")
+            st.subheader(" Топ 10 брендов")
             st_dataframe_compat(stats['top_brands'])
 
 
@@ -9015,7 +8934,7 @@ def show_catalog_export(catalog):
     
     selected_columns = st.multiselect("Колонки", [
         "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
-        "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
+        "Категория товара", "Кратность", "Длина", "Ширина", "Высота", "Вес",
         "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
     ])
     
@@ -9055,7 +8974,6 @@ def show_catalog_export(catalog):
             with open(output_path, "rb") as f:
                 file_data = f.read()
             
-            # ✅ ИСПРАВЛЕНИЕ v100.11: правильный MIME-тип для каждого формата
             mime_map = {
                 "CSV": "text/csv; charset=utf-8",
                 "Excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9064,7 +8982,7 @@ def show_catalog_export(catalog):
             mime_type = mime_map.get(format_choice, "application/octet-stream")
             
             st.download_button(
-                label="⬇️ Скачать файл",
+                label="️ Скачать файл",
                 data=file_data,
                 file_name=output_path.name,
                 mime=mime_type,
@@ -9077,7 +8995,7 @@ def show_catalog_export(catalog):
 def show_catalog_management(catalog):
     """Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
-    st.warning("⚠️ Операции необратимы!")
+    st.warning("️ Операции необратимы!")
     
     management_option = st.radio(
         "Выберите действие:",
@@ -9094,7 +9012,7 @@ def show_catalog_management(catalog):
             "Удалить по артикули": "📦 Удалить все записи артикула",
             "Управление ценами": "💰 Цены и наценки",
             "Исключения": "🚫 Исключения при экспорте",
-            "Категории": "🗂️ Категории товаров",
+            "Категории": "️ Категории товаров",
             "Облачная синхронизация": "☁️ Облачная синхронизация"
         }[x]
     )
@@ -11124,26 +11042,22 @@ logger.info("✅ Блок 25 загружен: DataManager и show_data_save_loa
 # if section == "💾 Сохранение и загрузка":
 #     show_data_save_load_interface()
 # ============================================================================
-# ============================================================================
-# 🚀 ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+#  ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.18 - С ПОЛНОЙ ОБРАБОТКОЙ ОШИБОК)
 # ============================================================================
 def main():
-    """Главная функция приложения с полной отладкой"""
+    """Главная функция приложения с полной обработкой ошибок"""
     try:
         print("=" * 80)
         print("🚀 ЗАПУСК main()")
         print(f"📍 Python: {sys.version}")
-        print(f"📍 Streamlit: {st.__version__}")
+        print(f" Streamlit: {st.__version__}")
         print("=" * 80)
         sys.stdout.flush()
         
         # ✅ КРИТИЧНО: st.set_page_config должен быть ПЕРВЫМ вызовом!
-        print("🔄 Вызов st.set_page_config()...")
-        sys.stdout.flush()
-        
         st.set_page_config(
             page_title="Unit Economy Pro",
-            page_icon="",
+            page_icon="🚗",
             layout="wide",
             initial_sidebar_state="expanded"
         )
@@ -11152,9 +11066,6 @@ def main():
         sys.stdout.flush()
         
         # Заголовок
-        print("🔄 Установка заголовка...")
-        sys.stdout.flush()
-        
         st.title("💼 Unit Economy Pro для автозапчастей")
         st.caption(f"Версия {APP_VERSION} | Профессиональный расчёт юнит-экономики")
         
@@ -11162,24 +11073,19 @@ def main():
         sys.stdout.flush()
         
         # Sidebar
-        print("🔄 Создание sidebar...")
-        sys.stdout.flush()
-        
         st.sidebar.title(" Навигация")
         
         print("✅ Sidebar создан")
         sys.stdout.flush()
         
         # Меню навигации
-        print(" Создание меню навигации...")
-        sys.stdout.flush()
-        
         section = st.sidebar.radio(
             "Выберите раздел:",
             [
                 "📁 Загрузка данных",
-                " Юнит-экономика",
-                "️ Каталог для группировки",
+                "📊 Юнит-экономика",
+                "🗂️ Каталог для группировки",
+                "📏 Категории с весогабаритами",
                 "💾 Сохранение и загрузка",
                 "🤖 AI Тарифы",
                 "🌐 API Тарифы маркетплейсов",
@@ -11191,52 +11097,41 @@ def main():
         print(f"✅ Меню создано, выбран раздел: {section}")
         sys.stdout.flush()
         
-        # Вызов соответствующей функции с обработкой ошибок
+        # Словарь функций для вызова
+        section_functions = {
+            " Загрузка данных": show_data_upload_interface,
+            "📊 Юнит-экономика": show_unit_economics_interface,
+            "🗂️ Каталог для группировки": show_catalog_grouping_interface,
+            "📏 Категории с весогабаритами": show_category_dimensions_interface,
+            " Сохранение и загрузка": show_data_save_load_interface,
+            "🤖 AI Тарифы": show_ai_tariffs_interface,
+            " API Тарифы маркетплейсов": show_api_tariffs_interface,
+            "🧠 Умная загрузка тарифов": show_smart_tariff_interface,
+        }
+        
+        # Вызов соответствующей функции с полной обработкой ошибок
         print(f"🔄 Вызов функции для раздела: {section}")
         sys.stdout.flush()
         
         try:
-            if section == "📁 Загрузка данных":
-                print("🔄 Вызов show_data_upload_interface()...")
-                sys.stdout.flush()
-                show_data_upload_interface()
-                print("✅ show_data_upload_interface() завершён")
-            
-            elif section == "📊 Юнит-экономика":
-                print("🔄 Вызов show_unit_economics_interface()...")
-                sys.stdout.flush()
-                show_unit_economics_interface()
-                print("✅ show_unit_economics_interface() завершён")
-            
-            elif section == "🗂️ Каталог для группировки":
-                print("🔄 Вызов show_catalog_grouping_interface()...")
-                sys.stdout.flush()
-                show_catalog_grouping_interface()
-                print("✅ show_catalog_grouping_interface() завершён")
-            
-            elif section == "💾 Сохранение и загрузка":
-                print("🔄 Вызов show_data_save_load_interface()...")
-                sys.stdout.flush()
-                show_data_save_load_interface()
-                print("✅ show_data_save_load_interface() завершён")
-            
-            elif section == "🤖 AI Тарифы":
-                print("🔄 Вызов show_ai_tariffs_interface()...")
-                sys.stdout.flush()
-                show_ai_tariffs_interface()
-                print("✅ show_ai_tariffs_interface() завершён")
-            
-            elif section == "🌐 API Тарифы маркетплейсов":
-                print(" Вызов show_api_tariffs_interface()...")
-                sys.stdout.flush()
-                show_api_tariffs_interface()
-                print("✅ show_api_tariffs_interface() завершён")
-            
-            elif section == " Умная загрузка тарифов":
-                print("🔄 Вызов show_smart_tariff_interface()...")
-                sys.stdout.flush()
-                show_smart_tariff_interface()
-                print("✅ show_smart_tariff_interface() завершён")
+            if section in section_functions:
+                func = section_functions[section]
+                
+                # Проверяем, что функция существует
+                if callable(func):
+                    print(f" Вызов {func.__name__}()...")
+                    sys.stdout.flush()
+                    
+                    func()
+                    
+                    print(f"✅ {func.__name__}() завершён успешно")
+                    sys.stdout.flush()
+                else:
+                    st.error(f"❌ Функция для раздела '{section}' не является вызываемой")
+                    st.warning(f"⚠️ Проверьте определение функции в коде")
+            else:
+                st.error(f"❌ Раздел '{section}' не найден в списке доступных")
+                st.info(f"📋 Доступные разделы: {list(section_functions.keys())}")
             
             print("✅ Раздел отрисован успешно")
             sys.stdout.flush()
@@ -11244,7 +11139,7 @@ def main():
         except Exception as section_error:
             print(f"❌ ОШИБКА В РАЗДЕЛЕ {section}: {section_error}")
             print(f"📋 Тип ошибки: {type(section_error).__name__}")
-            print(f" Traceback:")
+            print(f"📋 Traceback:")
             import traceback
             traceback.print_exc()
             sys.stdout.flush()
@@ -11255,13 +11150,20 @@ def main():
             
             with st.expander("📋 Полный traceback", expanded=True):
                 st.code(traceback.format_exc())
+            
+            st.info("""
+            💡 **Возможные решения:**
+            1. Проверьте, что все необходимые библиотеки установлены
+            2. Проверьте логи приложения для получения подробностей
+            3. Попробуйте обновить страницу
+            """)
         
         print("✅ main() завершён успешно")
         sys.stdout.flush()
     
     except Exception as e:
-        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА В main(): {e}")
-        print(f"📋 Тип ошибки: {type(e).__name__}")
+        print(f" КРИТИЧЕСКАЯ ОШИБКА В main(): {e}")
+        print(f" Тип ошибки: {type(e).__name__}")
         print(f"📋 Traceback:")
         import traceback
         traceback.print_exc()
@@ -11280,11 +11182,10 @@ def main():
             💡 **Что делать:**
             1. Скопируйте текст ошибки выше
             2. Откройте логи приложения (Manage app → View logs)
-            3. Найдите строки с ❌ и 
-            4. Пришлите мне полный текст ошибки
+            3. Найдите строки с ❌ и 📋
+            4. Пришлите полный текст ошибки для исправления
             """)
         except Exception:
-            # Если даже st.error() не работает
             print("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось отобразить ошибку в Streamlit")
 
 
