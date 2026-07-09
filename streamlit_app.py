@@ -11124,7 +11124,8 @@ logger.info("✅ Блок 25 загружен: DataManager и show_data_save_loa
 # if section == "💾 Сохранение и загрузка":
 #     show_data_save_load_interface()
 # ============================================================================
-# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# ============================================================================
+# 🚀 ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 def main():
     """Главная функция приложения с полной отладкой"""
@@ -11164,21 +11165,21 @@ def main():
         print("🔄 Создание sidebar...")
         sys.stdout.flush()
         
-        st.sidebar.title("🧭 Навигация")
+        st.sidebar.title(" Навигация")
         
         print("✅ Sidebar создан")
         sys.stdout.flush()
         
         # Меню навигации
-        print("🔄 Создание меню навигации...")
+        print(" Создание меню навигации...")
         sys.stdout.flush()
         
         section = st.sidebar.radio(
             "Выберите раздел:",
             [
                 "📁 Загрузка данных",
-                "📊 Юнит-экономика",
-                "🗂️ Каталог для группировки",
+                " Юнит-экономика",
+                "️ Каталог для группировки",
                 "💾 Сохранение и загрузка",
                 "🤖 AI Тарифы",
                 "🌐 API Тарифы маркетплейсов",
@@ -11226,12 +11227,12 @@ def main():
                 print("✅ show_ai_tariffs_interface() завершён")
             
             elif section == "🌐 API Тарифы маркетплейсов":
-                print("🔄 Вызов show_api_tariffs_interface()...")
+                print(" Вызов show_api_tariffs_interface()...")
                 sys.stdout.flush()
                 show_api_tariffs_interface()
                 print("✅ show_api_tariffs_interface() завершён")
             
-            elif section == "🧠 Умная загрузка тарифов":
+            elif section == " Умная загрузка тарифов":
                 print("🔄 Вызов show_smart_tariff_interface()...")
                 sys.stdout.flush()
                 show_smart_tariff_interface()
@@ -11243,7 +11244,7 @@ def main():
         except Exception as section_error:
             print(f"❌ ОШИБКА В РАЗДЕЛЕ {section}: {section_error}")
             print(f"📋 Тип ошибки: {type(section_error).__name__}")
-            print(f"📋 Traceback:")
+            print(f" Traceback:")
             import traceback
             traceback.print_exc()
             sys.stdout.flush()
@@ -11279,9 +11280,16 @@ def main():
             💡 **Что делать:**
             1. Скопируйте текст ошибки выше
             2. Откройте логи приложения (Manage app → View logs)
-            3. Найдите строки с ❌ и 📋
+            3. Найдите строки с ❌ и 
             4. Пришлите мне полный текст ошибки
             """)
         except Exception:
             # Если даже st.error() не работает
             print("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось отобразить ошибку в Streamlit")
+
+
+# ============================================================================
+# 🚀 ТОЧКА ВХОДА В ПРИЛОЖЕНИЕ
+# ============================================================================
+if __name__ == "__main__":
+    main()
