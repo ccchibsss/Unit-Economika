@@ -11127,45 +11127,161 @@ logger.info("✅ Блок 25 загружен: DataManager и show_data_save_loa
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 def main():
-    """Главная функция приложения"""
+    """Главная функция приложения с полной отладкой"""
     try:
+        print("=" * 80)
+        print("🚀 ЗАПУСК main()")
+        print(f"📍 Python: {sys.version}")
+        print(f"📍 Streamlit: {st.__version__}")
+        print("=" * 80)
+        sys.stdout.flush()
+        
+        # ✅ КРИТИЧНО: st.set_page_config должен быть ПЕРВЫМ вызовом!
+        print("🔄 Вызов st.set_page_config()...")
+        sys.stdout.flush()
+        
         st.set_page_config(
-            page_title="Unit Economy Pro", 
-            page_icon="", 
-            layout="wide", 
+            page_title="Unit Economy Pro",
+            page_icon="",
+            layout="wide",
             initial_sidebar_state="expanded"
         )
         
+        print("✅ st.set_page_config выполнен успешно")
+        sys.stdout.flush()
+        
+        # Заголовок
+        print("🔄 Установка заголовка...")
+        sys.stdout.flush()
+        
         st.title("💼 Unit Economy Pro для автозапчастей")
-        st.caption("Версия 100.8 | Профессиональный расчёт юнит-экономики")
+        st.caption(f"Версия {APP_VERSION} | Профессиональный расчёт юнит-экономики")
+        
+        print("✅ Заголовок установлен")
+        sys.stdout.flush()
+        
+        # Sidebar
+        print("🔄 Создание sidebar...")
+        sys.stdout.flush()
         
         st.sidebar.title("🧭 Навигация")
         
-        section = st.sidebar.radio("Выберите раздел:", [
-            "📁 Загрузка данных",
-            "📊 Юнит-экономика",
-            "🗂️ Каталог для группировки",
-            "💾 Сохранение и загрузка",  # ✅ НОВЫЙ ПУНКТ
-            "🤖 AI Тарифы",
-            "🌐 API Тарифы маркетплейсов",
-            "🧠 Умная загрузка тарифов"
-        ], key="main_navigation")
+        print("✅ Sidebar создан")
+        sys.stdout.flush()
         
-        if section == "📁 Загрузка данных":
-            show_data_upload_interface()
-        elif section == "📊 Юнит-экономика":
-            show_unit_economics_interface()
-        elif section == "🗂️ Каталог для группировки":
-            show_catalog_grouping_interface()
-        elif section == "💾 Сохранение и загрузка":  # ✅ НОВЫЙ РАЗДЕЛ
-            show_data_save_load_interface()
-        elif section == "🤖 AI Тарифы":
-            show_ai_tariffs_interface()
-        elif section == "🌐 API Тарифы маркетплейсов":
-            show_api_tariffs_interface()
-        elif section == "🧠 Умная загрузка тарифов":
-            show_smart_tariff_interface()
+        # Меню навигации
+        print("🔄 Создание меню навигации...")
+        sys.stdout.flush()
+        
+        section = st.sidebar.radio(
+            "Выберите раздел:",
+            [
+                "📁 Загрузка данных",
+                "📊 Юнит-экономика",
+                "🗂️ Каталог для группировки",
+                "💾 Сохранение и загрузка",
+                "🤖 AI Тарифы",
+                "🌐 API Тарифы маркетплейсов",
+                "🧠 Умная загрузка тарифов"
+            ],
+            key="main_navigation"
+        )
+        
+        print(f"✅ Меню создано, выбран раздел: {section}")
+        sys.stdout.flush()
+        
+        # Вызов соответствующей функции с обработкой ошибок
+        print(f"🔄 Вызов функции для раздела: {section}")
+        sys.stdout.flush()
+        
+        try:
+            if section == "📁 Загрузка данных":
+                print("🔄 Вызов show_data_upload_interface()...")
+                sys.stdout.flush()
+                show_data_upload_interface()
+                print("✅ show_data_upload_interface() завершён")
+            
+            elif section == "📊 Юнит-экономика":
+                print("🔄 Вызов show_unit_economics_interface()...")
+                sys.stdout.flush()
+                show_unit_economics_interface()
+                print("✅ show_unit_economics_interface() завершён")
+            
+            elif section == "🗂️ Каталог для группировки":
+                print("🔄 Вызов show_catalog_grouping_interface()...")
+                sys.stdout.flush()
+                show_catalog_grouping_interface()
+                print("✅ show_catalog_grouping_interface() завершён")
+            
+            elif section == "💾 Сохранение и загрузка":
+                print("🔄 Вызов show_data_save_load_interface()...")
+                sys.stdout.flush()
+                show_data_save_load_interface()
+                print("✅ show_data_save_load_interface() завершён")
+            
+            elif section == "🤖 AI Тарифы":
+                print("🔄 Вызов show_ai_tariffs_interface()...")
+                sys.stdout.flush()
+                show_ai_tariffs_interface()
+                print("✅ show_ai_tariffs_interface() завершён")
+            
+            elif section == "🌐 API Тарифы маркетплейсов":
+                print("🔄 Вызов show_api_tariffs_interface()...")
+                sys.stdout.flush()
+                show_api_tariffs_interface()
+                print("✅ show_api_tariffs_interface() завершён")
+            
+            elif section == "🧠 Умная загрузка тарифов":
+                print("🔄 Вызов show_smart_tariff_interface()...")
+                sys.stdout.flush()
+                show_smart_tariff_interface()
+                print("✅ show_smart_tariff_interface() завершён")
+            
+            print("✅ Раздел отрисован успешно")
+            sys.stdout.flush()
+        
+        except Exception as section_error:
+            print(f"❌ ОШИБКА В РАЗДЕЛЕ {section}: {section_error}")
+            print(f"📋 Тип ошибки: {type(section_error).__name__}")
+            print(f"📋 Traceback:")
+            import traceback
+            traceback.print_exc()
+            sys.stdout.flush()
+            
+            st.error(f"❌ Ошибка в разделе '{section}'")
+            st.error(f"**Ошибка:** {str(section_error)}")
+            st.error(f"**Тип:** {type(section_error).__name__}")
+            
+            with st.expander("📋 Полный traceback", expanded=True):
+                st.code(traceback.format_exc())
+        
+        print("✅ main() завершён успешно")
+        sys.stdout.flush()
     
     except Exception as e:
-        st.error(f"❌ Критическая ошибка: {e}")
-        st.code(traceback.format_exc())
+        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА В main(): {e}")
+        print(f"📋 Тип ошибки: {type(e).__name__}")
+        print(f"📋 Traceback:")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        
+        # Показываем ошибку на странице
+        try:
+            st.error(f"❌ Критическая ошибка при запуске приложения")
+            st.error(f"**Ошибка:** {str(e)}")
+            st.error(f"**Тип:** {type(e).__name__}")
+            
+            with st.expander("📋 Полный traceback", expanded=True):
+                st.code(traceback.format_exc())
+            
+            st.info("""
+            💡 **Что делать:**
+            1. Скопируйте текст ошибки выше
+            2. Откройте логи приложения (Manage app → View logs)
+            3. Найдите строки с ❌ и 📋
+            4. Пришлите мне полный текст ошибки
+            """)
+        except Exception:
+            # Если даже st.error() не работает
+            print("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось отобразить ошибку в Streamlit")
