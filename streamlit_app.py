@@ -9010,7 +9010,7 @@ def show_catalog_grouping_interface():
                 st.error(f"❌ Ошибка инициализации каталога: {e}")
                 st.error(f"**Тип ошибки:** {type(e).__name__}")
                 
-                with st.expander(" Подробности", expanded=False):
+                with st.expander("📋 Подробности", expanded=False):
                     import traceback
                     st.code(traceback.format_exc())
                 return
@@ -9025,7 +9025,7 @@ def show_catalog_grouping_interface():
         # чтобы избежать конфликта с основным меню навигации
         option = st.radio(
             "📑 Меню каталога",
-            ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", " Экспорт", "🔧 Управление"],
+            ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", "🔧 Управление"],
             key="catalog_menu_v2",
             horizontal=True
         )
@@ -9067,10 +9067,10 @@ def show_catalog_upload(catalog):
     with col1:
         oe_file = st.file_uploader("📋 Основные данные (OE)", type=['xlsx'], key="hv_oe")
         cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
-        barcode_file = st.file_uploader(" Штрих-коды", type=['xlsx'], key="hv_barcode")
+        barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
     
     with col2:
-        dims_file = st.file_uploader(" Габариты", type=['xlsx'], key="hv_dims")
+        dims_file = st.file_uploader("📏 Габариты", type=['xlsx'], key="hv_dims")
         images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
         prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
     
@@ -9165,11 +9165,11 @@ def show_catalog_statistics(catalog):
             st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
         
         if 'category_stats' in stats and not stats['category_stats'].empty:
-            st.subheader(" Распределение по категориям")
+            st.subheader("📊 Распределение по категориям")
             st_dataframe_compat(stats['category_stats'])
         
         if 'top_brands' in stats and not stats['top_brands'].empty:
-            st.subheader(" Топ 10 брендов")
+            st.subheader("🏆 Топ 10 брендов")
             st_dataframe_compat(stats['top_brands'])
 
 
@@ -9239,7 +9239,7 @@ def show_catalog_export(catalog):
             mime_type = mime_map.get(format_choice, "application/octet-stream")
             
             st.download_button(
-                label="️ Скачать файл",
+                label="⬇️ Скачать файл",
                 data=file_data,
                 file_name=output_path.name,
                 mime=mime_type,
@@ -9252,7 +9252,7 @@ def show_catalog_export(catalog):
 def show_catalog_management(catalog):
     """Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
-    st.warning("️ Операции необратимы!")
+    st.warning("⚠️ Операции необратимы!")
     
     management_option = st.radio(
         "Выберите действие:",
@@ -9269,7 +9269,7 @@ def show_catalog_management(catalog):
             "Удалить по артикули": "📦 Удалить все записи артикула",
             "Управление ценами": "💰 Цены и наценки",
             "Исключения": "🚫 Исключения при экспорте",
-            "Категории": "️ Категории товаров",
+            "Категории": "🗂️ Категории товаров",
             "Облачная синхронизация": "☁️ Облачная синхронизация"
         }[x]
     )
@@ -9287,647 +9287,642 @@ def show_catalog_management(catalog):
     elif management_option == "Облачная синхронизация":
         catalog.show_cloud_sync()
 
-# ============================================================================
-# 🆕 БЛОК 18: AI ТАРИФЫ С DEEPSEEK - ПОЛНАЯ РЕАЛИЗАЦИЯ
-# ============================================================================
-# ✅ ВЕРСИЯ: v100.18 - ПОЛНАЯ РЕАЛИЗАЦИЯ С DEEPSEEK
-# ============================================================================
-# 📌 ОПИСАНИЕ:
-# 1. Полная интеграция с DeepSeek API
-# 2. Автоматическое извлечение тарифов из документации
-# 3. Прогнозирование изменений на 3 месяца
-# 4. Кэширование результатов
-# 5. Обработка ошибок и fallback
-# 6. UI для управления AI тарифами
-# ============================================================================
-
-import json
-import re
-import time
-import logging
-from typing import Dict, Any, Optional, Tuple, List
-from datetime import datetime, timedelta
 
 # ============================================================================
-# КЛАСС DEEPSEEK RATE UPDATER - ПОЛНАЯ РЕАЛИЗАЦИЯ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ КАТАЛОГОМ
 # ============================================================================
-class DeepSeekRateUpdater:
-    """
-    🧠 Обновление тарифов через DeepSeek AI
+
+def show_delete_by_brand_interface(catalog):
+    """Интерфейс удаления по бренду"""
+    st.subheader("🏭 Удаление по бренду")
     
-    Использует DeepSeek API для:
-    - Извлечения актуальных тарифов из документации маркетплейсов
-    - Анализа изменений тарифов
-    - Прогнозирования на 3 месяца
-    - Сравнения с текущими тарифами
-    """
+    try:
+        brands_result = catalog.conn.execute(
+            "SELECT DISTINCT brand FROM parts WHERE brand IS NOT NULL ORDER BY brand"
+        ).fetchall()
+        available_brands = [row[0] for row in brands_result] if brands_result else []
+    except Exception as e:
+        st.error(f"❌ Ошибка получения брендов: {e}")
+        return
     
-    # Базовые URL для документации маркетплейсов
-    DOCS_URLS = {
-        "Ozon": "https://docs.ozon.ru/seller/tariffs/",
-        "Wildberries": "https://seller.wildberries.ru/tariffs",
-        "Яндекс Маркет": "https://yandex.ru/market/partner/tariffs",
-        "AliExpress": "https://seller.aliexpress.ru/tariffs",
-        "Мегамаркет": "https://megamarket.ru/docs/tariffs"
-    }
+    if not available_brands:
+        st.info("📭 Нет данных для удаления")
+        return
     
-    # Поля для извлечения
-    TARIFF_FIELDS = [
-        "commission_rate",
-        "min_commission",
-        "logistics_base",
-        "logistics_per_kg",
-        "logistics_per_liter",
-        "storage_per_day",
-        "return_fee",
-        "acquiring_fee",
-        "last_mile_fee",
-        "delivery_fee_percent",
-        "hazardous_surcharge",
-        "fragile_surcharge",
-        "oversized_surcharge",
-        "seasonal_multipliers"
-    ]
+    selected_brand = st.selectbox("Выберите бренд для удаления", available_brands, key="delete_brand_select")
     
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Инициализация DeepSeekRateUpdater
-        
-        Args:
-            api_key: API ключ DeepSeek (если None, берется из переменных окружения)
-        """
-        self.api_key = api_key or os.environ.get('DEEPSEEK_API_KEY')
-        self.logger = logging.getLogger('DeepSeekRateUpdater')
-        self.cache_dir = TARIFFS_DIR / "ai_cache"
-        self.cache_dir.mkdir(exist_ok=True, parents=True)
-        
-        # Инициализация OpenAI клиента (DeepSeek использует совместимый API)
-        self.client = None
-        if self.api_key and OPENAI_AVAILABLE:
+    # Получаем нормированное имя бренда
+    brand_norm = catalog.normalize_key(pl.Series([selected_brand]))[0]
+    
+    count = catalog.conn.execute(
+        "SELECT COUNT(*) FROM parts WHERE brand_norm = ?", [brand_norm]
+    ).fetchone()[0]
+    
+    st.warning(f"⚠️ Будет удалено {count} записей бренда '{selected_brand}'")
+    
+    if st.checkbox("Подтверждаю удаление", key="confirm_delete_brand"):
+        if st.button("🗑️ Удалить", type="primary"):
             try:
-                # DeepSeek API совместим с OpenAI API
-                self.client = openai.OpenAI(
-                    api_key=self.api_key,
-                    base_url="https://api.deepseek.com/v1"
-                )
-                self.logger.info("✅ DeepSeek клиент инициализирован")
+                deleted = catalog.delete_by_brand(brand_norm)
+                st.success(f"✅ Удалено {deleted} записей")
+                st.rerun()
             except Exception as e:
-                self.logger.error(f"❌ Ошибка инициализации DeepSeek клиента: {e}")
-                self.client = None
-        
-        self._tariff_cache = {}
-        self._forecast_cache = {}
-        self._load_cache()
+                st.error(f"❌ Ошибка удаления: {e}")
+
+
+def show_delete_by_artikul_interface(catalog):
+    """Интерфейс удаления по артикулу"""
+    st.subheader("📦 Удаление по артикулу")
     
-    def _load_cache(self):
-        """Загрузка кэша из файлов"""
-        try:
-            cache_file = self.cache_dir / "tariffs_cache.json"
-            if cache_file.exists():
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    self._tariff_cache = json.load(f)
-                self.logger.info(f"📦 Загружено {len(self._tariff_cache)} записей из кэша")
-            
-            forecast_file = self.cache_dir / "forecast_cache.json"
-            if forecast_file.exists():
-                with open(forecast_file, 'r', encoding='utf-8') as f:
-                    self._forecast_cache = json.load(f)
-                self.logger.info(f"📈 Загружено {len(self._forecast_cache)} прогнозов из кэша")
-        
-        except Exception as e:
-            self.logger.warning(f"Ошибка загрузки кэша: {e}")
+    artikul_input = st.text_input("Введите артикул для удаления", key="delete_artikul_input")
     
-    def _save_cache(self):
-        """Сохранение кэша в файлы"""
-        try:
-            cache_file = self.cache_dir / "tariffs_cache.json"
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self._tariff_cache, f, ensure_ascii=False, indent=2)
-            
-            forecast_file = self.cache_dir / "forecast_cache.json"
-            with open(forecast_file, 'w', encoding='utf-8') as f:
-                json.dump(self._forecast_cache, f, ensure_ascii=False, indent=2)
-            
-            self.logger.info("💾 Кэш сохранен")
+    if artikul_input:
+        artikul_norm = catalog.normalize_key(pl.Series([artikul_input]))[0]
         
-        except Exception as e:
-            self.logger.error(f"Ошибка сохранения кэша: {e}")
-    
-    def _get_cache_key(self, marketplace: str, category: Optional[str] = None) -> str:
-        """Создание ключа для кэша"""
-        return f"{marketplace}:{category or 'all'}".lower()
-    
-    def _is_cache_valid(self, cache_key: str) -> bool:
-        """Проверка валидности кэша (24 часа)"""
-        if cache_key not in self._tariff_cache:
-            return False
+        count = catalog.conn.execute(
+            "SELECT COUNT(*) FROM parts WHERE artikul_norm = ?", [artikul_norm]
+        ).fetchone()[0]
         
-        entry = self._tariff_cache[cache_key]
-        timestamp = entry.get('timestamp', 0)
-        if time.time() - timestamp > 86400:  # 24 часа
-            return False
+        st.warning(f"⚠️ Найдено {count} записей для артикула '{artikul_input}'")
         
-        return True
-    
-    def _extract_tariffs_from_text(self, text: str, marketplace: str) -> Dict[str, Any]:
-        """
-        Извлечение тарифов из текста с помощью AI
-        
-        Args:
-            text: Текст документации
-            marketplace: Название маркетплейса
-        
-        Returns:
-            Dict[str, Any]: Извлеченные тарифы
-        """
-        if not self.client:
-            return {}
-        
-        try:
-            prompt = f"""
-            Ты - эксперт по тарифам маркетплейсов. Извлеки актуальные тарифы из следующего текста для маркетплейса {marketplace}.
-            
-            Извлеки следующие поля (если они есть в тексте):
-            - commission_rate: комиссия маркетплейса (в процентах, например 0.15 = 15%)
-            - min_commission: минимальная комиссия (в рублях)
-            - logistics_base: базовая стоимость логистики (в рублях)
-            - logistics_per_kg: стоимость логистики за кг (в рублях)
-            - logistics_per_liter: стоимость логистики за литр (в рублях)
-            - storage_per_day: стоимость хранения за день (в рублях за литр)
-            - return_fee: стоимость возврата (в процентах от цены)
-            - acquiring_fee: комиссия эквайринга (в процентах)
-            - last_mile_fee: стоимость последней мили (в рублях)
-            - delivery_fee_percent: стоимость доставки (в процентах от цены)
-            - hazardous_surcharge: надбавка за опасные товары (в процентах)
-            - fragile_surcharge: надбавка за хрупкие товары (в процентах)
-            - oversized_surcharge: надбавка за крупногабаритные товары (в процентах)
-            - seasonal_multipliers: сезонные коэффициенты (словарь с ключами winter, spring, summer, autumn)
-            
-            Текст для анализа:
-            {text[:4000]}  # Ограничиваем размер текста
-            
-            Ответ предоставь в формате JSON без дополнительного текста.
-            Если какое-то поле не найдено, не включай его в ответ.
-            """
-            
-            response = self.client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": "Ты - эксперт по тарифам маркетплейсов. Отвечай только в формате JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=2000
-            )
-            
-            # Извлекаем JSON из ответа
-            content = response.choices[0].message.content
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            
-            if json_match:
+        if count > 0 and st.checkbox("Подтверждаю удаление", key="confirm_delete_artikul"):
+            if st.button("🗑️ Удалить", type="primary"):
                 try:
-                    tariffs = json.loads(json_match.group())
-                    self.logger.info(f"✅ Извлечены тарифы для {marketplace}: {len(tariffs)} полей")
-                    return tariffs
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"❌ Ошибка парсинга JSON: {e}")
-                    self.logger.debug(f"Ответ: {content[:500]}")
-                    return {}
-            else:
-                self.logger.warning(f"⚠️ JSON не найден в ответе для {marketplace}")
-                return {}
-        
-        except Exception as e:
-            self.logger.error(f"❌ Ошибка при извлечении тарифов для {marketplace}: {e}")
-            return {}
-    
-    def _generate_forecast(self, current_rates: Dict[str, Any], marketplace: str) -> Dict[str, Any]:
-        """
-        Генерация прогноза на 3 месяца
-        
-        Args:
-            current_rates: Текущие тарифы
-            marketplace: Название маркетплейса
-        
-        Returns:
-            Dict[str, Any]: Прогноз на 3 месяца
-        """
-        if not self.client:
-            return {}
-        
-        try:
-            prompt = f"""
-            Ты - эксперт по прогнозированию тарифов маркетплейсов.
-            На основе текущих тарифов маркетплейса {marketplace} сделай прогноз на 3 месяца.
-            
-            Текущие тарифы:
-            {json.dumps(current_rates, ensure_ascii=False, indent=2)}
-            
-            Учти следующие факторы:
-            - Сезонность (зимой выше из-за сложной логистики)
-            - Инфляция (около 7% в год)
-            - Конкуренция между маркетплейсами
-            - Сезонные распродажи (черная пятница, новый год)
-            
-            Предоставь прогноз в формате JSON со следующими полями:
-            {{
-                "month_1": {{"commission_rate": 0.16, "logistics_base": 55, ...}},
-                "month_2": {{"commission_rate": 0.17, "logistics_base": 58, ...}},
-                "month_3": {{"commission_rate": 0.18, "logistics_base": 60, ...}},
-                "trend": "up" или "down" или "stable",
-                "confidence": 0.85 (от 0 до 1)
-            }}
-            """
-            
-            response = self.client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": "Ты - эксперт по прогнозированию. Отвечай только в формате JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=2000
-            )
-            
-            content = response.choices[0].message.content
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            
-            if json_match:
-                try:
-                    forecast = json.loads(json_match.group())
-                    self.logger.info(f"✅ Сгенерирован прогноз для {marketplace}")
-                    return forecast
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"❌ Ошибка парсинга прогноза: {e}")
-                    return {}
-            else:
-                self.logger.warning(f"⚠️ JSON не найден в прогнозе для {marketplace}")
-                return {}
-        
-        except Exception as e:
-            self.logger.error(f"❌ Ошибка генерации прогноза для {marketplace}: {e}")
-            return {}
-    
-    def get_rates_from_ai(
-        self,
-        marketplace: str,
-        category: Optional[str] = None,
-        force_refresh: bool = False,
-        use_cache: bool = True,
-        include_forecast: bool = False
-    ) -> Tuple[Optional[Dict], Optional[Any], Optional[Dict]]:
-        """
-        Получение тарифов через AI
-        
-        Args:
-            marketplace: Название маркетплейса
-            category: Категория товара (опционально)
-            force_refresh: Принудительное обновление
-            use_cache: Использовать кэш
-            include_forecast: Включить прогноз
-        
-        Returns:
-            Tuple[Optional[Dict], Optional[Any], Optional[Dict]]: (тарифы, источник, прогноз)
-        """
-        cache_key = self._get_cache_key(marketplace, category)
-        
-        # Проверяем кэш
-        if use_cache and not force_refresh and self._is_cache_valid(cache_key):
-            self.logger.info(f"📦 Использован кэш для {marketplace}")
-            entry = self._tariff_cache[cache_key]
-            
-            forecast = None
-            if include_forecast and cache_key in self._forecast_cache:
-                forecast = self._forecast_cache[cache_key]
-            
-            return entry.get('rates', {}), TariffSource.AI_CACHE, forecast
-        
-        # Получаем тарифы через AI
-        try:
-            # Проверяем клиент
-            if not self.client:
-                self.logger.warning(f"⚠️ DeepSeek клиент не инициализирован для {marketplace}")
-                return None, None, None
-            
-            # Формируем запрос
-            doc_url = self.DOCS_URLS.get(marketplace, "")
-            if doc_url:
-                # Пытаемся получить документацию
-                try:
-                    response = requests.get(doc_url, timeout=10, headers={
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    })
-                    if response.status_code == 200:
-                        text = response.text
-                    else:
-                        text = f"Не удалось загрузить документацию {marketplace}. Статус: {response.status_code}"
+                    deleted = catalog.delete_by_artikul(artikul_norm)
+                    st.success(f"✅ Удалено {deleted} записей")
+                    st.rerun()
                 except Exception as e:
-                    text = f"Ошибка загрузки документации {marketplace}: {str(e)}"
-            else:
-                text = f"URL для {marketplace} не найден. Используй базовые знания о тарифах."
-            
-            # Извлекаем тарифы
-            rates = self._extract_tariffs_from_text(text, marketplace)
-            
-            if not rates:
-                # Fallback: используем базовые тарифы
-                self.logger.warning(f"⚠️ Не удалось извлечь тарифы для {marketplace}, используем базовые")
-                rates = self._get_fallback_rates(marketplace)
-            
-            # Сохраняем в кэш
-            self._tariff_cache[cache_key] = {
-                'timestamp': time.time(),
-                'rates': rates,
-                'marketplace': marketplace,
-                'category': category
-            }
-            
-            # Генерируем прогноз
-            forecast = None
-            if include_forecast:
-                forecast = self._generate_forecast(rates, marketplace)
-                if forecast:
-                    self._forecast_cache[cache_key] = forecast
-            
-            # Сохраняем кэш
-            self._save_cache()
-            
-            return rates, TariffSource.AI_LIVE, forecast
-        
-        except Exception as e:
-            self.logger.error(f"❌ Ошибка получения тарифов для {marketplace}: {e}")
-            return None, None, None
+                    st.error(f"❌ Ошибка удаления: {e}")
+
+
+# ============================================================================
+# ИНТЕРФЕЙСЫ ДЛЯ НАСТРОЕК КАТАЛОГА
+# ============================================================================
+
+def show_catalog_price_settings(catalog):
+    """Интерфейс управления ценами"""
+    st.subheader("💰 Управление ценами и наценками")
     
-    def _get_fallback_rates(self, marketplace: str) -> Dict[str, Any]:
-        """Базовые тарифы для fallback"""
-        fallback_rates = {
-            "Ozon": {
-                "commission_rate": 0.15,
-                "min_commission": 30.0,
-                "logistics_base": 50.0,
-                "logistics_per_kg": 15.0,
-                "logistics_per_liter": 5.0,
-                "storage_per_day": 0.3,
-                "return_fee": 0.02,
-                "acquiring_fee": 0.015,
-                "last_mile_fee": 50.0,
-                "hazardous_surcharge": 0.02,
-                "fragile_surcharge": 0.01,
-                "oversized_surcharge": 0.015
-            },
-            "Wildberries": {
-                "commission_rate": 0.18,
-                "min_commission": 35.0,
-                "logistics_base": 60.0,
-                "logistics_per_kg": 18.0,
-                "logistics_per_liter": 6.0,
-                "storage_per_day": 0.5,
-                "return_fee": 0.03,
-                "acquiring_fee": 0.0,
-                "last_mile_fee": 0.0,
-                "hazardous_surcharge": 0.025,
-                "fragile_surcharge": 0.015,
-                "oversized_surcharge": 0.02
-            },
-            "Яндекс Маркет": {
-                "commission_rate": 0.14,
-                "min_commission": 0.0,
-                "logistics_base": 45.0,
-                "logistics_per_kg": 14.0,
-                "logistics_per_liter": 4.5,
-                "storage_per_day": 0.25,
-                "return_fee": 0.02,
-                "acquiring_fee": 0.02,
-                "last_mile_fee": 40.0,
-                "hazardous_surcharge": 0.018,
-                "fragile_surcharge": 0.01,
-                "oversized_surcharge": 0.012
-            },
-            "AliExpress": {
-                "commission_rate": 0.10,
-                "min_commission": 20.0,
-                "logistics_base": 80.0,
-                "logistics_per_kg": 25.0,
-                "logistics_per_liter": 8.0,
-                "storage_per_day": 0.2,
-                "return_fee": 0.01,
-                "acquiring_fee": 0.025,
-                "last_mile_fee": 70.0,
-                "hazardous_surcharge": 0.03,
-                "fragile_surcharge": 0.02,
-                "oversized_surcharge": 0.025
-            },
-            "Мегамаркет": {
-                "commission_rate": 0.13,
-                "min_commission": 28.0,
-                "logistics_base": 55.0,
-                "logistics_per_kg": 16.0,
-                "logistics_per_liter": 5.5,
-                "storage_per_day": 0.3,
-                "return_fee": 0.02,
-                "acquiring_fee": 0.018,
-                "last_mile_fee": 45.0,
-                "hazardous_surcharge": 0.02,
-                "fragile_surcharge": 0.012,
-                "oversized_surcharge": 0.015
-            }
-        }
-        
-        return fallback_rates.get(marketplace, {
-            "commission_rate": 0.15,
-            "min_commission": 30.0,
-            "logistics_base": 50.0,
-            "logistics_per_kg": 15.0,
-            "logistics_per_liter": 5.0,
-            "storage_per_day": 0.3,
-            "return_fee": 0.02,
-            "acquiring_fee": 0.015,
-            "last_mile_fee": 50.0,
-            "hazardous_surcharge": 0.02,
-            "fragile_surcharge": 0.01,
-            "oversized_surcharge": 0.015
-        })
+    # Общая наценка
+    st.markdown("### 📈 Общая наценка")
+    global_markup = st.number_input(
+        "Общая наценка (%):",
+        min_value=0.0,
+        max_value=500.0,
+        value=catalog.price_rules.get('global_markup', 0.2) * 100,
+        step=0.5,
+        key="global_markup_input"
+    )
+    catalog.price_rules['global_markup'] = global_markup / 100
     
-    def update_all_marketplaces(
-        self,
-        force_refresh: bool = False,
-        include_forecast: bool = False
-    ) -> Dict[str, Tuple[Optional[Dict], Optional[Any], Optional[Dict]]]:
-        """
-        Обновление тарифов для всех маркетплейсов
-        
-        Args:
-            force_refresh: Принудительное обновление
-            include_forecast: Включить прогноз
-        
-        Returns:
-            Dict[str, Tuple]: Результаты для каждого маркетплейса
-        """
-        results = {}
-        
-        for marketplace in self.DOCS_URLS.keys():
-            try:
-                rates, source, forecast = self.get_rates_from_ai(
-                    marketplace=marketplace,
-                    force_refresh=force_refresh,
-                    use_cache=not force_refresh,
-                    include_forecast=include_forecast
-                )
-                results[marketplace] = (rates, source, forecast)
-                self.logger.info(f"✅ Обновлены тарифы для {marketplace}")
-            except Exception as e:
-                self.logger.error(f"❌ Ошибка обновления {marketplace}: {e}")
-                results[marketplace] = (None, None, None)
-        
-        return results
+    # Наценки по брендам
+    st.markdown("### 🏷️ Наценки по брендам")
     
-    def get_tariff_forecast(
-        self,
-        marketplace: str,
-        category: Optional[str] = None,
-        months_ahead: int = 3
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Получение прогноза тарифов
+    try:
+        brands_result = catalog.conn.execute(
+            "SELECT DISTINCT brand FROM parts WHERE brand IS NOT NULL ORDER BY brand"
+        ).fetchall()
+        available_brands = [row[0] for row in brands_result] if brands_result else []
+    except Exception as e:
+        st.error(f"❌ Ошибка загрузки брендов: {e}")
+        return
+    
+    if available_brands:
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            selected_brand = st.selectbox(
+                "Выберите бренд:",
+                available_brands,
+                key="brand_markup_select"
+            )
         
-        Args:
-            marketplace: Название маркетплейса
-            category: Категория товара
-            months_ahead: Количество месяцев прогноза
+        with col2:
+            current_markup = catalog.price_rules.get('brand_markups', {}).get(
+                selected_brand, catalog.price_rules.get('global_markup', 0)
+            ) * 100
+            
+            brand_markup = st.number_input(
+                "Наценка (%):",
+                min_value=0.0,
+                max_value=500.0,
+                value=current_markup,
+                step=0.5,
+                key=f"markup_{selected_brand}"
+            )
+            
+            if st.button("💾 Сохранить наценку", key=f"save_markup_{selected_brand}"):
+                catalog.price_rules['brand_markups'][selected_brand] = brand_markup / 100
+                catalog.save_price_rules()
+                st.success(f"✅ Наценка для {selected_brand} сохранена")
+                st.rerun()
+    else:
+        st.info("📭 Нет брендов в базе данных")
+    
+    # Ограничения по ценам
+    st.markdown("### 🔒 Ограничения по ценам")
+    col1, col2 = st.columns(2)
+    with col1:
+        min_price = st.number_input(
+            "Минимальная цена:",
+            min_value=0.0,
+            value=float(catalog.price_rules.get('min_price', 0)),
+            step=1.0,
+            key="min_price_input"
+        )
+        catalog.price_rules['min_price'] = min_price
+    
+    with col2:
+        max_price = st.number_input(
+            "Максимальная цена:",
+            min_value=0.0,
+            value=float(catalog.price_rules.get('max_price', 999999)),
+            step=1.0,
+            key="max_price_input"
+        )
+        catalog.price_rules['max_price'] = max_price
+    
+    if st.button("💾 Сохранить все настройки цен", key="save_all_prices"):
+        catalog.save_price_rules()
+        st.success("✅ Все настройки цен сохранены")
+        st.rerun()
+
+
+def show_catalog_exclusion_settings(catalog):
+    """Интерфейс управления исключениями"""
+    st.subheader("🚫 Управление исключениями при экспорте")
+    st.info("Товары, содержащие эти слова в названии, будут исключены из экспорта")
+    
+    current_exclusions = "\n".join(catalog.exclusion_rules)
+    
+    new_exclusions = st.text_area(
+        "Список исключений (по одному на строку):",
+        value=current_exclusions,
+        height=200,
+        placeholder="Введите слова для исключения, например:\nКузов\nСтекла\nМасла",
+        key="exclusions_input"
+    )
+    
+    if st.button("💾 Сохранить правила исключения", key="save_exclusions"):
+        cleaned = [line.strip() for line in new_exclusions.splitlines() if line.strip()]
         
-        Returns:
-            Optional[Dict[str, Any]]: Прогноз
-        """
-        cache_key = self._get_cache_key(marketplace, category)
+        if len(cleaned) != len(set(cleaned)):
+            st.warning("Обнаружены дублирующие записи. Они будут автоматически удалены.")
         
-        # Проверяем кэш
-        if cache_key in self._forecast_cache:
-            forecast = self._forecast_cache[cache_key]
-            if forecast.get('timestamp', 0) > time.time() - 86400 * 7:  # 7 дней
-                return forecast
-        
-        # Получаем новые тарифы и прогноз
-        rates, source, forecast = self.get_rates_from_ai(
-            marketplace=marketplace,
-            category=category,
-            include_forecast=True
+        catalog.exclusion_rules = list(dict.fromkeys(cleaned))
+        catalog.save_exclusion_rules()
+        st.success(f"✅ Сохранено {len(catalog.exclusion_rules)} правил исключения")
+        st.rerun()
+
+
+def show_catalog_category_mapping(catalog):
+    """Интерфейс управления категориями"""
+    st.subheader("🗂️ Управление категориями товаров")
+    st.info("Настройте соответствие между названиями товаров и категориями")
+    
+    # Текущие правила
+    st.markdown("### 📋 Текущие правила")
+    if catalog.category_mapping:
+        mapping_data = []
+        for key, value in catalog.category_mapping.items():
+            mapping_data.append({
+                "Название товара": key,
+                "Категория": value
+            })
+        st_dataframe_compat(pd.DataFrame(mapping_data), hide_index=True)
+    else:
+        st.info("📭 Нет пользовательских правил")
+    
+    # Добавление правила
+    st.markdown("### ➕ Добавить правило")
+    col1, col2 = st.columns(2)
+    with col1:
+        name_pattern = st.text_input("Ключевое слово в названии", key="category_keyword")
+    with col2:
+        category = st.text_input("Категория", key="category_value")
+    
+    if st.button("➕ Добавить", key="add_category_rule"):
+        if name_pattern.strip() and category.strip():
+            catalog.category_mapping[name_pattern.strip()] = category.strip()
+            catalog.save_category_mapping()
+            st.success(f"✅ Добавлено: {name_pattern.strip()} → {category.strip()}")
+            st.rerun()
+        else:
+            st.error("❌ Заполните оба поля")
+    
+    # Удаление правила
+    if catalog.category_mapping:
+        st.markdown("### 🗑️ Удалить правило")
+        rule_to_delete = st.selectbox(
+            "Выберите правило:",
+            options=list(catalog.category_mapping.keys()),
+            format_func=lambda x: f"{x} → {catalog.category_mapping[x]}",
+            key="delete_category_rule"
         )
         
-        if forecast:
-            forecast['timestamp'] = time.time()
-            self._forecast_cache[cache_key] = forecast
-            self._save_cache()
-        
-        return forecast
+        if st.button("🗑️ Удалить", key="delete_category_rule_btn"):
+            del catalog.category_mapping[rule_to_delete]
+            catalog.save_category_mapping()
+            st.success(f"✅ Удалено: {rule_to_delete}")
+            st.rerun()
+
+
+def show_catalog_cloud_sync(catalog):
+    """Интерфейс облачной синхронизации"""
+    st.subheader("☁️ Облачная синхронизация")
     
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Получение статистики кэша"""
-        stats = {
-            "tariffs_count": len(self._tariff_cache),
-            "forecast_count": len(self._forecast_cache),
-            "cache_size_mb": 0
-        }
-        
-        try:
-            total_size = 0
-            for file in self.cache_dir.glob("*.json"):
-                total_size += file.stat().st_size
-            stats["cache_size_mb"] = round(total_size / (1024 * 1024), 2)
-        except Exception:
-            pass
-        
+    st.markdown("### ⚙️ Настройки")
+    
+    catalog.cloud_config['enabled'] = st.checkbox(
+        "Включить облачную синхронизацию",
+        value=catalog.cloud_config.get('enabled', False),
+        key="cloud_sync_enabled"
+    )
+    
+    providers = ["s3", "gcs", "azure"]
+    current_idx = providers.index(catalog.cloud_config.get('provider', 's3')) if catalog.cloud_config.get('provider', 's3') in providers else 0
+    catalog.cloud_config['provider'] = st.selectbox(
+        "Провайдер",
+        providers,
+        index=current_idx,
+        key="cloud_provider"
+    )
+    
+    catalog.cloud_config['bucket'] = st.text_input(
+        "Bucket / Container",
+        value=catalog.cloud_config.get('bucket', ''),
+        key="cloud_bucket"
+    )
+    
+    catalog.cloud_config['region'] = st.text_input(
+        "Регион",
+        value=catalog.cloud_config.get('region', ''),
+        key="cloud_region"
+    )
+    
+    catalog.cloud_config['sync_interval'] = st.number_input(
+        "Интервал синхронизации (сек)",
+        min_value=300,
+        max_value=86400,
+        value=int(catalog.cloud_config.get('sync_interval', 3600)),
+        step=300,
+        key="cloud_interval"
+    )
+    
+    if st.button("💾 Сохранить настройки", key="save_cloud_settings"):
+        catalog.save_cloud_config()
+        st.success("✅ Настройки облачной синхронизации сохранены")
+        st.rerun()
+    
+    st.markdown("### 📊 Текущее состояние")
+    last_sync = catalog.cloud_config.get('last_sync', 0)
+    if last_sync > 0:
+        st.info(f"Последняя синхронизация: {datetime.fromtimestamp(last_sync).strftime('%Y-%m-%d %H:%M:%S')}")
+    else:
+        st.info("Еще не синхронизировано")
+    
+    if st.button("🔄 Выполнить синхронизацию сейчас", key="sync_now"):
+        with st.spinner("Выполнение синхронизации..."):
+            catalog.perform_cloud_sync()
+            st.success("✅ Синхронизация завершена")
+            st.rerun()
+
+
+# ============================================================================
+# ФУНКЦИЯ show_catalog_management (обновленная версия)
+# ============================================================================
+
+def show_catalog_management(catalog):
+    """Управление каталогом (обновленная версия)"""
+    st.subheader("🔧 Управление каталогом")
+    st.warning("⚠️ Операции необратимы!")
+    
+    management_option = st.radio(
+        "Выберите действие:",
+        [
+            "Удалить по бренду",
+            "Удалить по артикули",
+            "Управление ценами",
+            "Исключения",
+            "Категории",
+            "Облачная синхронизация"
+        ],
+        format_func=lambda x: {
+            "Удалить по бренду": "🏭 Удалить все записи бренда",
+            "Удалить по артикули": "📦 Удалить все записи артикула",
+            "Управление ценами": "💰 Цены и наценки",
+            "Исключения": "🚫 Исключения при экспорте",
+            "Категории": "🗂️ Категории товаров",
+            "Облачная синхронизация": "☁️ Облачная синхронизация"
+        }[x]
+    )
+    
+    if management_option == "Удалить по бренду":
+        show_delete_by_brand_interface(catalog)
+    elif management_option == "Удалить по артикули":
+        show_delete_by_artikul_interface(catalog)
+    elif management_option == "Управление ценами":
+        show_catalog_price_settings(catalog)
+    elif management_option == "Исключения":
+        show_catalog_exclusion_settings(catalog)
+    elif management_option == "Категории":
+        show_catalog_category_mapping(catalog)
+    elif management_option == "Облачная синхронизация":
+        show_catalog_cloud_sync(catalog)
+
+
+# ============================================================================
+# ДОПОЛНИТЕЛЬНЫЕ УТИЛИТЫ ДЛЯ РАБОТЫ С КАТАЛОГОМ
+# ============================================================================
+
+def get_catalog_statistics_display(catalog) -> Dict[str, Any]:
+    """Получение статистики для отображения в UI"""
+    try:
+        stats = catalog.get_statistics()
         return stats
-    
-    def clear_cache(self) -> int:
-        """Очистка кэша"""
-        count = len(self._tariff_cache) + len(self._forecast_cache)
-        self._tariff_cache = {}
-        self._forecast_cache = {}
-        
-        # Удаляем файлы
-        for file in self.cache_dir.glob("*.json"):
-            try:
-                file.unlink()
-            except Exception:
-                pass
-        
-        self.logger.info(f"🗑️ Очищено {count} записей кэша")
-        return count
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики: {e}")
+        return {}
 
+
+def format_catalog_stats(stats: Dict[str, Any]) -> pd.DataFrame:
+    """Форматирование статистики для отображения"""
+    if not stats:
+        return pd.DataFrame()
+    
+    data = []
+    for key, value in stats.items():
+        if isinstance(value, (int, float)):
+            if key in ['parts', 'oe', 'cross', 'prices']:
+                data.append({
+                    "Показатель": key.replace('_', ' ').title(),
+                    "Значение": f"{value:,}"
+                })
+            elif key == 'avg_price':
+                data.append({
+                    "Показатель": "Средняя цена",
+                    "Значение": f"{value:.2f} ₽"
+                })
+    
+    return pd.DataFrame(data)
 
 # ============================================================================
-# UI ИНТЕРФЕЙС ДЛЯ AI ТАРИФОВ
-# ============================================================================
-def show_ai_tariffs_interface():
-    """🤖 AI ТАРИФЫ С DEEPSEEK"""
-    st.header("🤖 Шаг 4: AI Тарифы с DeepSeek")
-    
-    st.info("""
-    🧠 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ DEEPSEEK AI:**
-    
-    1. Получите API ключ на [platform.deepseek.com](https://platform.deepseek.com)
-    2. Введите ключ в поле ниже
-    3. Выберите маркетплейс для обновления
-    4. Нажмите "Обновить тарифы"
-    
-    💡 **Что делает AI:**
-    - Анализирует документацию маркетплейсов
-    - Извлекает актуальные тарифы
-    - Прогнозирует изменения на 3 месяца
-    - Сравнивает с текущими тарифами
-    - Определяет тренды изменения
-    """)
-    
-    # Проверка доступности OpenAI
-    if not OPENAI_AVAILABLE:
-        st.warning("""
-        ⚠️ **OpenAI не установлен**
-        
-        Для работы AI тарифов необходимо установить:
-        ```bash
-        pip install openai
+""")
+return
 
----
+API ключ
+api_key = st.text_input(
+"🔑 DeepSeek API Key",
+type="password",
+placeholder="sk-...",
+key="ai_tariffs_api_key",
+help="Получите ключ на platform.deepseek.com"
+)
 
-## 📝 ОПИСАНИЕ РЕАЛИЗАЦИИ:
+Настройки
+settings_col1, settings_col2 = st.columns(2)
 
-### 1. **Класс `DeepSeekRateUpdater`**
-- Полная реализация с DeepSeek API
-- Интеграция с OpenAI SDK (DeepSeek совместим)
-- Извлечение тарифов из документации
-- Генерация прогнозов на 3 месяца
-- Кэширование результатов
+with settings_col1:
+marketplace = st.selectbox(
+"🏪 Маркетплейс",
+["Все", "Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет"],
+key="ai_tariffs_marketplace"
+)
 
-### 2. **Методы класса:**
-- `get_rates_from_ai()` - получение тарифов через AI
-- `_extract_tariffs_from_text()` - извлечение тарифов из текста
-- `_generate_forecast()` - генерация прогноза
-- `update_all_marketplaces()` - обновление всех маркетплейсов
-- `get_tariff_forecast()` - получение прогноза
-- `get_cache_stats()` - статистика кэша
-- `clear_cache()` - очистка кэша
+with settings_col2:
+include_forecast = st.checkbox(
+"📈 Включить прогноз на 3 месяца",
+value=True,
+key="ai_tariffs_forecast"
+)
 
-### 3. **UI интерфейс:**
-- Ввод API ключа DeepSeek
-- Выбор маркетплейса
-- Включение прогноза
-- Отображение результатов
-- Просмотр текущих тарифов
-- Очистка кэша
+Кнопки действий
+action_col1, action_col2 = st.columns(2)
 
-### 4. **Особенности:**
-- Автоматическое извлечение тарифов из документации
-- Прогнозирование с учетом сезонности и инфляции
-- Кэширование результатов (24 часа)
-- Fallback тарифы при ошибках
-- Подробное логирование
+with action_col1:
+if st.button("🔄 Обновить тарифы", type="primary", use_container_width=True):
+if not api_key:
+st.error("❌ Введите API ключ")
+return
 
----
+with st.spinner("Обновление тарифов через AI..."):
+try:
 
-## ⚠️ ТРЕБОВАНИЯ:
-```bash
-pip install openai requests
+Проверяем наличие класса DeepSeekRateUpdater
+if 'DeepSeekRateUpdater' in globals():
+updater = DeepSeekRateUpdater(api_key=api_key)
 
+if marketplace == "Все":
+result = updater.update_all_marketplaces(include_forecast=include_forecast)
+
+Формируем результат для отображения
+success_count = sum(1 for v in result.values() if v[0] is not None)
+st.success(f"✅ Обновлено {success_count} из {len(result)} маркетплейсов")
+
+Показываем детали
+for mp, (rates, source, forecast) in result.items():
+if rates:
+with st.expander(f"📊 {mp} - обновлено"):
+st.json(rates)
+if forecast:
+st.caption("📈 Прогноз:")
+st.json(forecast)
+else:
+st.warning(f"⚠️ {mp} - не удалось обновить")
+
+if include_forecast:
+st.balloons()
+else:
+rates, source, forecast = updater.get_rates_from_ai(
+marketplace=marketplace,
+force_refresh=True,
+include_forecast=include_forecast
+)
+
+if rates:
+st.success(f"✅ Тарифы для {marketplace} обновлены!")
+
+with st.expander("📊 Текущие тарифы", expanded=True):
+st.json(rates)
+
+if include_forecast and forecast:
+with st.expander("📈 Прогноз на 3 месяца", expanded=True):
+st.json(forecast)
+
+st.balloons()
+else:
+st.error(f"❌ Не удалось обновить тарифы для {marketplace}")
+else:
+st.warning("⚠️ Класс DeepSeekRateUpdater не найден в коде")
+st.info("💡 Для работы AI тарифов необходимо определить класс DeepSeekRateUpdater")
+
+except Exception as e:
+st.error(f"❌ Ошибка обновления: {e}")
+logger.exception("Ошибка обновления тарифов через AI")
+
+with action_col2:
+if st.button("📊 Показать текущие тарифы", use_container_width=True):
+try:
+unit_economics = get_marketplace_unit_economics()
+if unit_economics and hasattr(unit_economics, '_configs'):
+configs = unit_economics._configs
+
+tariff_data = []
+for mp_name, config in configs.items():
+tariff_data.append({
+"Маркетплейс": mp_name,
+"Комиссия": f"{config.commission_rate*100:.1f}%",
+"Логистика база": f"{config.logistics_base:.2f} ₽",
+"Логистика/кг": f"{config.logistics_per_kg:.2f} ₽",
+"Хранение/день": f"{config.storage_per_day:.2f} ₽",
+"Источник": config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source)
+})
+
+if tariff_data:
+st.subheader("📊 Текущие тарифы")
+st_dataframe_compat(pd.DataFrame(tariff_data), hide_index=True)
+else:
+st.warning("⚠️ Тарифы не найдены")
+else:
+st.warning("⚠️ UnitEconomics не инициализирован")
+except Exception as e:
+st.error(f"❌ Ошибка получения тарифов: {e}")
+
+st.divider()
+
+История обновлений
+st.subheader("📜 История обновлений")
+
+Проверяем наличие кэша тарифов
+try:
+tariff_cache = get_smart_tariff_cache()
+history = tariff_cache.get_history(limit=20)
+
+if history:
+history_data = []
+for entry in history:
+history_data.append({
+"Время": entry.get('timestamp', '')[:19],
+"Действие": entry.get('action', ''),
+"Маркетплейс": entry.get('marketplace', ''),
+"Источник": entry.get('source', '')
+})
+
+st_dataframe_compat(pd.DataFrame(history_data), hide_index=True)
+else:
+st.info("📭 История обновлений пока пуста")
+except Exception as e:
+st.info("📭 История обновлений недоступна")
+logger.warning(f"Ошибка получения истории: {e}")
+
+st.divider()
+
+Статистика кэша
+st.subheader("📊 Статистика кэша тарифов")
+
+try:
+tariff_cache = get_smart_tariff_cache()
+stats = tariff_cache.get_statistics()
+
+if stats:
+cache_col1, cache_col2, cache_col3, cache_col4 = st.columns(4)
+
+with cache_col1:
+st.metric("📦 Всего записей", stats.get('total_entries', 0))
+
+with cache_col2:
+st.metric("⏰ Истекших", stats.get('expired_count', 0))
+
+with cache_col3:
+st.metric("📈 Прогнозов", stats.get('forecast_count', 0))
+
+with cache_col4:
+st.metric("📊 В истории", stats.get('history_count', 0))
+
+Кнопка очистки кэша
+if st.button("🗑️ Очистить кэш тарифов", type="secondary"):
+if st.checkbox("Подтверждаю очистку кэша", key="confirm_clear_tariff_cache"):
+deleted = tariff_cache.clear_expired()
+st.success(f"✅ Удалено {deleted} устаревших записей")
+st.rerun()
+else:
+st.info("📊 Статистика кэша недоступна")
+except Exception as e:
+st.info("📊 Статистика кэша недоступна")
+logger.warning(f"Ошибка получения статистики кэша: {e}")
+
+st.divider()
+
+Дополнительная информация
+with st.expander("ℹ️ Как это работает"):
+st.markdown("""
+Архитектура AI обновления тарифов:
+
+Извлечение документации
+
+Система загружает страницу с тарифами маркетплейса
+
+Используется библиотека requests для получения HTML
+
+AI анализ
+
+DeepSeek анализирует текст документации
+
+Извлекает числовые значения тарифов
+
+Структурирует данные в JSON формат
+
+Прогнозирование
+
+Учитывает сезонность (зимой дороже)
+
+Учитывает инфляцию (~7% в год)
+
+Анализирует тренды изменения
+
+Кэширование
+
+Результаты сохраняются на 24 часа
+
+Уменьшает количество запросов к API
+
+Экономит средства на API вызовах
+
+Fallback механизм
+
+Если AI не может получить тарифы
+
+Используются базовые тарифы из конфигурации
+
+Система продолжает работать
+""")
+
+Пример использования
+with st.expander("💡 Пример использования", expanded=False):
+st.markdown("""
+Пример работы с AI тарифами:
+
+python
+from deepseek_rates import DeepSeekRateUpdater
+
+# Инициализация
+updater = DeepSeekRateUpdater(api_key="sk-...")
+
+# Получение тарифов для Ozon
+rates, source, forecast = updater.get_rates_from_ai(
+    marketplace="Ozon",
+    include_forecast=True
+)
+
+print(f"Комиссия: {rates['commission_rate']*100:.1f}%")
+print(f"Прогноз на месяц 1: {forecast['month_1']['commission_rate']*100:.1f}%")
+print(f"Тренд: {forecast['trend']}")
+Результат:
+
+text
+Комиссия: 15.0%
+Прогноз на месяц 1: 16.0%
+Тренд: up
+""")
 
 # ============================================================================
 # 🆕 БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА
@@ -11189,6 +11184,7 @@ def show_api_tariffs_interface():
 print("✅ Блоки 22, 23, 24 загружены: UI функции для категорий, AI тарифов и API тарифов")
 logger.info("✅ Блоки 22-24 загружены: show_category_dimensions_interface(), show_ai_tariffs_interface(), show_api_tariffs_interface()")
 
+
 # ============================================================================
 # 🆕 БЛОК 25: СИСТЕМА СОХРАНЕНИЯ И ЗАГРУЗКИ ДАННЫХ (v100.16)
 # ============================================================================
@@ -11205,6 +11201,16 @@ print("🔄 Загрузка Блока 25: Система сохранения 
 
 # === ИМПОРТЫ ДЛЯ БЛОКА 25 ===
 import tempfile as _tempfile_module
+import shutil
+from datetime import datetime
+import zipfile
+import json
+import time
+import logging
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+import pandas as pd
+import streamlit as st
 
 # === КОНСТАНТЫ ===
 # BACKUPS_DIR и MAX_BACKUPS уже определены в Блоке 0
@@ -11537,7 +11543,7 @@ def show_data_save_load_interface():
 - 🔄 **Восстановление** — полное восстановление из ZIP-архива
 - 🗑️ **Управление бэкапами** — просмотр и удаление старых бэкапов
 
- **СОВЕТ:** Регулярно создавайте бэкапы перед важными операциями!
+💡 **СОВЕТ:** Регулярно создавайте бэкапы перед важными операциями!
 """)
     
     # Инициализация
@@ -11582,7 +11588,7 @@ def show_data_save_load_interface():
                     st.warning("⚠️ Каталог не инициализирован")
         
         with save_col2:
-            st.markdown("#### ️ Настройки")
+            st.markdown("#### ⚙️ Настройки")
             st.caption("Экспорт правил и конфигураций в JSON")
             
             if st.button("⚙️ Экспорт настроек", use_container_width=True):
@@ -11634,8 +11640,8 @@ def show_data_save_load_interface():
     # ====================================================================
     # ВКЛАДКА 2: ЗАГРУЗКА
     # ====================================================================
-    elif tab_choice == " Загрузка":
-        st.subheader(" Загрузка данных")
+    elif tab_choice == "📥 Загрузка":
+        st.subheader("📥 Загрузка данных")
         
         load_col1, load_col2 = st.columns(2)
         
@@ -11651,9 +11657,9 @@ def show_data_save_load_interface():
             )
             
             if db_file is not None:
-                st.info(f" Выбран файл: {db_file.name} ({db_file.size / 1024:.1f} КБ)")
+                st.info(f"📄 Выбран файл: {db_file.name} ({db_file.size / 1024:.1f} КБ)")
                 
-                if st.button(" Загрузить базу", type="primary", use_container_width=True):
+                if st.button("📥 Загрузить базу", type="primary", use_container_width=True):
                     # Сохраняем во временный файл
                     temp_path = Path(_tempfile_module.gettempdir()) / f"temp_{int(time.time())}.duckdb"
                     
@@ -11688,7 +11694,7 @@ def show_data_save_load_interface():
             if settings_file is not None:
                 st.info(f"📄 Выбран файл: {settings_file.name}")
                 
-                if st.button("️ Импорт настроек", type="primary", use_container_width=True):
+                if st.button("⚙️ Импорт настроек", type="primary", use_container_width=True):
                     temp_path = Path(_tempfile_module.gettempdir()) / f"temp_{int(time.time())}.json"
                     
                     with open(temp_path, "wb") as f:
@@ -11750,7 +11756,7 @@ def show_data_save_load_interface():
     # ====================================================================
     # ВКЛАДКА 3: УПРАВЛЕНИЕ БЭКАПАМИ
     # ====================================================================
-    elif tab_choice == "️ Бэкапы":
+    elif tab_choice == "🗂️ Бэкапы":
         st.subheader("🗂️ Управление бэкапами")
         
         backups = manager.list_backups()
@@ -11765,7 +11771,7 @@ def show_data_save_load_interface():
             for backup in backups:
                 backup_data.append({
                     "Название": backup['name'],
-                    "Размер": f"{backup['size_mb']} МБ",
+                    "Размер": f"{backup['size_mb']:.2f} МБ",
                     "Создан": backup['created_str']
                 })
             
@@ -11830,7 +11836,7 @@ def show_data_save_load_interface():
                 key="keep_backups_count"
             )
             
-            if st.button(" Удалить старые бэкапы", use_container_width=True):
+            if st.button("🧹 Удалить старые бэкапы", use_container_width=True):
                 deleted = manager.cleanup_old_backups(keep_count)
                 st.success(f"✅ Удалено старых бэкапов: {deleted}")
                 st.rerun()
@@ -11841,7 +11847,7 @@ def show_data_save_load_interface():
     elif tab_choice == "⚙️ Настройки":
         st.subheader("⚙️ Настройки сохранения")
         
-        st.markdown("####  Пути сохранения")
+        st.markdown("#### 📁 Пути сохранения")
         
         col_path1, col_path2 = st.columns(2)
         
@@ -11876,7 +11882,7 @@ def show_data_save_load_interface():
                     parts_count = manager.catalog.get_statistics().get('parts', 0)
                     st.metric("📊 Записей в базе", f"{parts_count:,}")
                 except Exception:
-                    st.metric(" Записей в базе", "Н/Д")
+                    st.metric("📊 Записей в базе", "Н/Д")
             else:
                 st.metric("📊 Записей в базе", "Н/Д")
         
@@ -11897,6 +11903,9 @@ def show_data_save_load_interface():
 # ============================================================================
 print("✅ Блок 25: Система сохранения и загрузки данных загружена успешно")
 logger.info("✅ Блок 25 загружен: DataManager и show_data_save_load_interface()")
+
+
+
 # ============================================================================
 # ИНТЕГРАЦИЯ В ГЛАВНОЕ МЕНЮ
 # ============================================================================
