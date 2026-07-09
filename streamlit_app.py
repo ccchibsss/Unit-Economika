@@ -8916,7 +8916,11 @@ def show_catalog_calculation_parallel():
 def show_catalog_grouping_interface():
     """
     🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
-    ✅ ИСПРАВЛЕНО: Используется get_high_volume_catalog() с кэшированием
+    ✅ ИСПРАВЛЕНО v100.11:
+    - Добавлена статистика после загрузки
+    - Добавлена кнопка скачивания обработанных данных
+    - Улучшена обратная связь с пользователем
+    - Исправлены ошибки чтения Excel файлов
     """
     st.header("🗂️ Шаг 3: Каталог для группировки")
     st.info("""
@@ -8929,6 +8933,7 @@ def show_catalog_grouping_interface():
 - ✅ Поиск и фильтрация товаров
 - ✅ Экспорт в Excel, CSV, Parquet
 - ✅ Статистика и аналитика
+- 🆕 **Скачивание обработанных данных сразу после загрузки**
 """)
     
     if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
@@ -8944,6 +8949,9 @@ def show_catalog_grouping_interface():
     if not catalog.conn:
         st.error("❌ Ошибка подключения к базе данных")
         return
+    
+    # ✅ УЛУЧШЕНИЕ: Показываем текущую статистику базы данных
+    _show_catalog_current_stats(catalog)
     
     st.sidebar.title("🧭 Меню каталога")
     option = st.sidebar.radio(
@@ -8964,8 +8972,30 @@ def show_catalog_grouping_interface():
         show_catalog_management(catalog)
 
 
+def _show_catalog_current_stats(catalog):
+    """🆕 v100.11: Показывает текущую статистику базы данных"""
+    try:
+        stats = catalog.get_statistics()
+        if stats:
+            st.markdown("### 📊 Текущее состояние базы данных")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📦 Товаров", f"{stats.get('unique_parts', 0):,}")
+            with col2:
+                st.metric("🏷️ Брендов", f"{stats.get('brands', 0):,}")
+            with col3:
+                st.metric("💰 Цен", f"{stats.get('prices', 0):,}")
+            with col4:
+                st.metric("🔗 Кросс-ссылок", f"{stats.get('cross', 0):,}")
+            
+            if stats.get('avg_price', 0) > 0:
+                st.info(f"💵 Средняя цена: **{stats.get('avg_price', 0):,.2f} ₽**")
+    except Exception as e:
+        logger.warning(f"Не удалось получить статистику: {e}")
+
+
 def show_catalog_upload(catalog):
-    """Загрузка данных в каталог"""
+    """🆕 v100.11: Загрузка данных в каталог с улучшенной обратной связью"""
     st.subheader("📥 Загрузка данных")
     st.info("""
 📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
@@ -8975,54 +9005,217 @@ def show_catalog_upload(catalog):
 - **Габариты:** `artikul`, `brand`, `length`, `width`, `height`, `weight`, `dimensions_str`
 - **Изображения:** `artikul`, `brand`, `image_url`
 - **Цены:** `artikul`, `brand`, `price`, `currency`
+
+💡 **После загрузки вы сможете:**
+- ✅ Скачать обработанные данные
+- ✅ Посмотреть статистику
+- ✅ Найти товары по артикулу/OE
 """)
     
     col1, col2 = st.columns(2)
     with col1:
-        oe_file = st.file_uploader("📄 Основные данные (OE)", type=['xlsx'], key="hv_oe")
-        cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
-        barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
+        oe_file = st.file_uploader("📄 Основные данные (OE)", type=['xlsx', 'xls'], key="hv_oe")
+        cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx', 'xls'], key="hv_cross")
+        barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx', 'xls'], key="hv_barcode")
     
     with col2:
-        dims_file = st.file_uploader("📏 Габариты", type=['xlsx'], key="hv_dims")
-        images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
-        prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
+        dims_file = st.file_uploader("📏 Габариты", type=['xlsx', 'xls'], key="hv_dims")
+        images_file = st.file_uploader("🖼️ Изображения", type=['xlsx', 'xls'], key="hv_images")
+        prices_file = st.file_uploader("💰 Цены", type=['xlsx', 'xls'], key="hv_prices")
     
     uploaded_files = {
         'oe': oe_file, 'cross': cross_file, 'barcode': barcode_file,
         'dimensions': dims_file, 'images': images_file, 'prices': prices_file
     }
     
-    if st.button("🚀 Обработать и загрузить", key="hv_load"):
-        saved_paths = {}
+    # ✅ ИСПРАВЛЕНИЕ: Показываем информацию о загруженных файлах
+    uploaded_count = sum(1 for f in uploaded_files.values() if f is not None)
+    if uploaded_count > 0:
+        st.success(f"✅ Загружено файлов: **{uploaded_count}**")
         for key, file in uploaded_files.items():
             if file:
-                path = catalog.data_dir / f"{key}_{int(time.time())}.xlsx"
-                with open(path, "wb") as f:
-                    f.write(file.getbuffer())
-                saved_paths[key] = str(path)
+                st.caption(f"  • {key}: {file.name} ({file.size / 1024:.1f} KB)")
+    
+    if st.button("🚀 Обработать и загрузить", key="hv_load", type="primary"):
+        saved_paths = {}
+        
+        # ✅ ИСПРАВЛЕНИЕ: Сохраняем файлы во временную директорию
+        for key, file in uploaded_files.items():
+            if file:
+                # Используем временную директорию вместо data_dir
+                temp_path = TEMP_DIR / f"{key}_{int(time.time())}_{file.name}"
+                try:
+                    with open(temp_path, "wb") as f:
+                        f.write(file.getbuffer())
+                    saved_paths[key] = str(temp_path)
+                    logger.info(f"✅ Файл {key} сохранён: {temp_path}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка сохранения файла {key}: {e}")
+                    st.error(f"❌ Не удалось сохранить файл {key}: {e}")
         
         if saved_paths:
-            with st.spinner("Обработка файлов..."):
-                dataframes = catalog.merge_all_data_parallel(saved_paths)
-            
-            with st.spinner("Загрузка данных в базу..."):
-                catalog.process_and_load_data(dataframes)
-            
-            st.success("✅ Данные успешно загружены!")
+            try:
+                with st.spinner("🔄 Обработка файлов..."):
+                    # ✅ ИСПРАВЛЕНИЕ: Используем улучшенный метод чтения
+                    dataframes = catalog.merge_all_data_parallel_v2(saved_paths)
+                
+                if not dataframes:
+                    st.error("❌ Не удалось прочитать ни один файл. Проверьте формат данных.")
+                    return
+                
+                with st.spinner("💾 Загрузка данных в базу..."):
+                    catalog.process_and_load_data(dataframes)
+                
+                # ✅ ИСПРАВЛЕНИЕ: Получаем статистику после загрузки
+                stats_after = catalog.get_statistics()
+                
+                st.success(f"""
+✅ **Данные успешно загружены в базу данных!**
+
+📍 **Местоположение базы:** `{catalog.db_path}`
+
+📊 **Статистика после загрузки:**
+- 📦 Уникальных товаров: **{stats_after.get('unique_parts', 0):,}**
+- 🏷️ Брендов: **{stats_after.get('brands', 0):,}**
+- 🔗 Кросс-ссылок: **{stats_after.get('cross', 0):,}**
+- 💰 Ценовых записей: **{stats_after.get('prices', 0):,}**
+""")
+                
+                # ✅ ИСПРАВЛЕНИЕ: Показываем топ брендов
+                if 'top_brands' in stats_after and not stats_after['top_brands'].empty:
+                    st.subheader("🏆 Топ-10 брендов")
+                    st.dataframe(stats_after['top_brands'], use_container_width=True)
+                
+                # ✅ ИСПРАВЛЕНИЕ: Добавляем кнопку скачивания обработанных данных
+                _show_download_processed_data(catalog, stats_after)
+                
+                # ✅ Очищаем временные файлы
+                for path in saved_paths.values():
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить временный файл {path}: {e}")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка обработки данных: {e}")
+                st.error(f"❌ Ошибка при обработке данных: {str(e)}")
+                with st.expander("📋 Подробности ошибки"):
+                    st.code(traceback.format_exc())
         else:
             st.warning("⚠️ Загрузите хотя бы один файл")
+
+
+def _show_download_processed_data(catalog, stats):
+    """🆕 v100.11: Показывает кнопки скачивания обработанных данных"""
+    st.markdown("### 📥 Скачать обработанные данные")
+    st.info("""
+💡 **Выберите формат для скачивания:**
+- 🟢 **Excel** — с форматированием и несколькими листами
+- 🔵 **CSV** — универсальный формат для импорта в 1С
+- 🟣 **Parquet** — для больших объёмов данных
+""")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📥 Скачать Excel", key="download_excel_after_upload", use_container_width=True):
+            try:
+                with st.spinner("Генерация Excel файла..."):
+                    output_path = TEMP_DIR / f"catalog_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    success = catalog.export_to_excel_optimized(
+                        str(output_path),
+                        selected_columns=None,
+                        include_prices=True,
+                        apply_markup=True
+                    )
+                    
+                    if success and output_path.exists():
+                        with open(output_path, "rb") as f:
+                            file_data = f.read()
+                        
+                        st.download_button(
+                            label="⬇️ Скачать Excel файл",
+                            data=file_data,
+                            file_name=output_path.name,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_excel_file",
+                            use_container_width=True
+                        )
+                        st.success("✅ Excel файл готов!")
+                    else:
+                        st.error("❌ Не удалось создать Excel файл")
+            except Exception as e:
+                st.error(f"❌ Ошибка: {str(e)}")
+    
+    with col2:
+        if st.button("📥 Скачать CSV", key="download_csv_after_upload", use_container_width=True):
+            try:
+                with st.spinner("Генерация CSV файла..."):
+                    output_path = TEMP_DIR / f"catalog_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    success = catalog.export_to_csv_optimized(
+                        str(output_path),
+                        selected_columns=None,
+                        include_prices=True,
+                        apply_markup=True
+                    )
+                    
+                    if success and output_path.exists():
+                        with open(output_path, "rb") as f:
+                            file_data = f.read()
+                        
+                        st.download_button(
+                            label="⬇️ Скачать CSV файл",
+                            data=file_data,
+                            file_name=output_path.name,
+                            mime="text/csv; charset=utf-8",
+                            key="download_csv_file",
+                            use_container_width=True
+                        )
+                        st.success("✅ CSV файл готов!")
+                    else:
+                        st.error("❌ Не удалось создать CSV файл")
+            except Exception as e:
+                st.error(f"❌ Ошибка: {str(e)}")
+    
+    with col3:
+        if st.button("📥 Скачать Parquet", key="download_parquet_after_upload", use_container_width=True):
+            try:
+                with st.spinner("Генерация Parquet файла..."):
+                    output_path = TEMP_DIR / f"catalog_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+                    success = catalog.export_to_parquet(
+                        str(output_path),
+                        selected_columns=None,
+                        include_prices=True,
+                        apply_markup=True
+                    )
+                    
+                    if success and output_path.exists():
+                        with open(output_path, "rb") as f:
+                            file_data = f.read()
+                        
+                        st.download_button(
+                            label="⬇️ Скачать Parquet файл",
+                            data=file_data,
+                            file_name=output_path.name,
+                            mime="application/octet-stream",
+                            key="download_parquet_file",
+                            use_container_width=True
+                        )
+                        st.success("✅ Parquet файл готов!")
+                    else:
+                        st.error("❌ Не удалось создать Parquet файл")
+            except Exception as e:
+                st.error(f"❌ Ошибка: {str(e)}")
 
 
 def show_catalog_search(catalog):
     """Поиск и фильтрация в каталоге"""
     st.subheader("🔍 Поиск и фильтрация")
-    
     col1, col2 = st.columns(2)
     with col1:
         search_artikul = st.text_input("🔢 Артикул", key="search_artikul")
         search_brand = st.text_input("🏷️ Бренд", key="search_brand")
-    
     with col2:
         search_oe = st.text_input("🔗 OE номер", key="search_oe")
         search_category = st.text_input("📂 Категория", key="search_category")
@@ -9041,10 +9234,10 @@ def show_catalog_search(catalog):
         
         if search_oe:
             query_parts.append("""
-            artikul_norm IN (
-                SELECT artikul_norm FROM cross_references
-                WHERE oe_number_norm LIKE ?
-            )
+                artikul_norm IN (
+                    SELECT artikul_norm FROM cross_references
+                    WHERE oe_number_norm LIKE ?
+                )
             """)
             params.append(f"%{search_oe}%")
         
@@ -9066,7 +9259,6 @@ def show_catalog_search(catalog):
 def show_catalog_statistics(catalog):
     """✅ ИСПРАВЛЕНИЕ 4: Статистика каталога с использованием get_statistics()"""
     st.subheader("📊 Статистика каталога")
-    
     # ✅ ИСПРАВЛЕНИЕ 4: Вызываем метод класса, который уже рисует UI
     catalog.show_statistics()
 
@@ -9074,10 +9266,10 @@ def show_catalog_statistics(catalog):
 def show_catalog_export(catalog):
     """Экспорт каталога"""
     st.subheader("📤 Экспорт каталога")
-    
     total = catalog.conn.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
     ).fetchone()[0]
+    
     st.info(f"📊 Всего записей: {total:,}")
     
     if total == 0:
@@ -9090,6 +9282,7 @@ def show_catalog_export(catalog):
         "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
         "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
     ])
+    
     include_prices = st.checkbox("Включить цены", value=True)
     apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
     
@@ -9125,6 +9318,7 @@ def show_catalog_export(catalog):
         if success and output_path.exists():
             with open(output_path, "rb") as f:
                 file_data = f.read()
+            
             st.download_button(
                 label="⬇️ Скачать файл",
                 data=file_data,
@@ -9173,6 +9367,126 @@ def show_catalog_management(catalog):
         catalog.show_category_mapping()
     elif management_option == "Облачная синхронизация":
         catalog.show_cloud_sync()
+
+
+# ============================================================================
+# 🆕 v100.11: УЛУЧШЕННЫЕ МЕТОДЫ ЧТЕНИЯ ФАЙЛОВ
+# ============================================================================
+def merge_all_data_parallel_v2(self, file_paths: Dict[str, str], max_workers: int = 4) -> Dict[str, pl.DataFrame]:
+    """
+    🆕 v100.11: Улучшенная версия чтения файлов с обработкой ошибок
+    """
+    results = {}
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for key, path in file_paths.items():
+            if path and os.path.exists(path):
+                futures[executor.submit(
+                    self.read_and_prepare_file_v2, path, key)] = key
+        
+        for fut in as_completed(futures):
+            key = futures[fut]
+            try:
+                df = fut.result()
+                if not df.is_empty():
+                    results[key] = df
+                    logger.info(f"✅ Обработан {key}: {len(df)} строк")
+                else:
+                    logger.warning(f"⚠️ Файл {key} пуст или не содержит данных")
+            except Exception as e:
+                logger.error(f"❌ Ошибка обработки {key}: {e}")
+    
+    return results
+
+
+def read_and_prepare_file_v2(self, file_path: str, file_type: str) -> pl.DataFrame:
+    """
+    🆕 v100.11: Улучшенное чтение файлов с множественными движками
+    """
+    logger.info(f"📖 Обработка файла: {file_type} ({file_path})")
+    
+    try:
+        if not os.path.exists(file_path):
+            logger.error(f"❌ Файл не найден: {file_path}")
+            return pl.DataFrame()
+        
+        # ✅ ИСПРАВЛЕНИЕ: Пробуем разные движки для чтения Excel
+        df = None
+        engines_to_try = ['calamine', 'openpyxl', 'xlsx2csv']
+        
+        for engine in engines_to_try:
+            try:
+                df = pl.read_excel(file_path, engine=engine)
+                if df is not None and not df.is_empty():
+                    logger.info(f"✅ Файл прочитан с движком: {engine}")
+                    break
+            except Exception as e:
+                logger.warning(f"⚠️ Движок {engine} не сработал: {e}")
+                continue
+        
+        # ✅ Если Polars не смог, пробуем через Pandas
+        if df is None or df.is_empty():
+            try:
+                import pandas as pd
+                pdf = pd.read_excel(file_path)
+                df = pl.from_pandas(pdf)
+                logger.info("✅ Файл прочитан через Pandas → Polars")
+            except Exception as e:
+                logger.error(f"❌ Не удалось прочитать файл через Pandas: {e}")
+                return pl.DataFrame()
+        
+        if df is None or df.is_empty():
+            logger.warning(f"⚠️ Пустой файл: {file_path}")
+            return pl.DataFrame()
+        
+        # Определяем схему для типа файла
+        schemas = {
+            'oe': ['oe_number', 'artikul', 'brand', 'name', 'applicability'],
+            'cross': ['oe_number', 'artikul', 'brand'],
+            'barcode': ['artikul', 'brand', 'barcode', 'multiplicity'],
+            'dimensions': ['artikul', 'brand', 'length', 'width', 'height', 'weight', 'dimensions_str'],
+            'images': ['artikul', 'brand', 'image_url'],
+            'prices': ['artikul', 'brand', 'price', 'currency']
+        }
+        
+        expected_cols = schemas.get(file_type, [])
+        column_mapping = self.detect_columns(df.columns, expected_cols)
+        
+        if not column_mapping:
+            logger.warning(
+                f"⚠️ Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
+            return pl.DataFrame()
+        
+        df = df.rename(column_mapping)
+        
+        # Очищаем ключевые колонки
+        for col in ['artikul', 'brand', 'oe_number']:
+            if col in df.columns:
+                df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
+        
+        # Удаляем дубликаты
+        key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
+        if key_cols:
+            df = df.unique(subset=key_cols, keep='first')
+        
+        # Нормализуем ключевые колонки
+        for col in ['artikul', 'brand', 'oe_number']:
+            if col in df.columns:
+                df = df.with_columns(self.normalize_key(
+                    pl.col(col)).alias(f"{col}_norm"))
+        
+        logger.info(f"✅ Файл {file_type} обработан: {len(df)} строк")
+        return df
+        
+    except Exception as e:
+        logger.exception(f"❌ Ошибка чтения файла {file_path}: {e}")
+        return pl.DataFrame()
+
+
+# Добавляем новые методы в класс HighVolumeAutoPartsCatalog
+HighVolumeAutoPartsCatalog.merge_all_data_parallel_v2 = merge_all_data_parallel_v2
+HighVolumeAutoPartsCatalog.read_and_prepare_file_v2 = read_and_prepare_file_v2
 # ============================================================================
 # 🆕 БЛОК 18: AI ТАРИФЫ - БЕЗ ИЗМЕНЕНИЙ
 # ============================================================================
