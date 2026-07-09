@@ -9925,113 +9925,325 @@ text
 """)
 
 # ============================================================================
-# 🆕 БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА
+# 🆕 БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА (v2.0)
 # ============================================================================
-# 🆕 v100.10: УМНЫЙ ВЫБОР ИСТОЧНИКА ТАРИФОВ
-# ✅ API маркетплейса (прямое подключение)
-# ✅ AI анализ документации (автоматический парсинг)
-# ✅ Загруженные ранее тарифы (кэш)
-# ✅ Гибридный режим (комбинация источников)
+# ✅ Поддержка множества маркетплейсов
+# ✅ Автоматическое обнаружение источников
+# ✅ Интеллектуальное кэширование с TTL
+# ✅ Мониторинг качества данных
 # ============================================================================
 
-class SmartTariffLoader:
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List, Tuple
+import pandas as pd
+import json
+from datetime import datetime, timedelta
+import hashlib
+import logging
+from functools import lru_cache
+
+class SourcePriority(Enum):
+    """Приоритет источников данных"""
+    API = 1
+    AI = 2
+    CACHE = 3
+    FALLBACK = 4
+
+@dataclass
+class TariffSource:
+    """Информация об источнике тарифов"""
+    name: str
+    priority: SourcePriority
+    available: bool
+    last_update: Optional[datetime] = None
+    confidence: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class TariffData:
+    """Обертка для данных тарифов с метаданными"""
+    data: Dict[str, Any]
+    source: str
+    timestamp: datetime
+    confidence: float
+    hash: str
+    expires_at: datetime
+
+class SmartTariffLoaderV2:
     """
-    🧠 **УМНАЯ ЗАГРУЗКА ТАРИФОВ С ВЫБОРОМ ИСТОЧНИКА**
-    Поддерживает 4 режима: API, AI, Кэш, Гибридный
+    🧠 **УМНАЯ ЗАГРУЗКА ТАРИФОВ (v2.0)**
     """
     
-    SOURCES = {
-        "api": "🔌 API Маркетплейса",
-        "ai": "🤖 AI (документация)", 
-        "cache": "💾 Загруженные ранее",
-        "hybrid": "🔄 Гибридный (AI + API)"
+    SOURCES_CONFIG = {
+        "Ozon": {
+            "api": {"priority": SourcePriority.API, "ttl": 3600, "requires": ["api_key", "client_id"]},
+            "ai": {"priority": SourcePriority.AI, "ttl": 86400, "requires": []},
+            "cache": {"priority": SourcePriority.CACHE, "ttl": 43200, "requires": []}
+        },
+        "Wildberries": {
+            "api": {"priority": SourcePriority.API, "ttl": 3600, "requires": ["api_key"]},
+            "ai": {"priority": SourcePriority.AI, "ttl": 86400, "requires": []},
+            "cache": {"priority": SourcePriority.CACHE, "ttl": 43200, "requires": []}
+        },
+        "Yandex.Market": {
+            "api": {"priority": SourcePriority.API, "ttl": 3600, "requires": ["api_key"]},
+            "ai": {"priority": SourcePriority.AI, "ttl": 86400, "requires": []},
+            "cache": {"priority": SourcePriority.CACHE, "ttl": 43200, "requires": []}
+        }
     }
     
-    def __init__(self):
+    def __init__(self, config_path: str = None):
         self.api_connector = MarketplaceAPIConnector()
         self.ai_updater = DeepSeekRateUpdater()
         self.tariff_cache = get_smart_tariff_cache()
-        self.logger = logging.getLogger('SmartTariffLoader')
+        self.logger = logging.getLogger('SmartTariffLoaderV2')
+        self.cache_ttl = {}
+        self.config = self._load_config(config_path) if config_path else {}
+        
+        # Статистика использования источников
+        self.source_stats = {
+            "api": {"success": 0, "fail": 0, "total": 0},
+            "ai": {"success": 0, "fail": 0, "total": 0},
+            "cache": {"success": 0, "fail": 0, "total": 0}
+        }
     
-    def load_tariffs(self, marketplace: str, source: str = "hybrid", 
-                     api_key: str = None, client_id: str = None,
-                     force_refresh: bool = False) -> Dict[str, Any]:
+    def _load_config(self, config_path: str) -> Dict:
+        """Загрузка конфигурации из файла"""
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            self.logger.warning(f"Не удалось загрузить конфиг: {e}")
+            return {}
+    
+    def _get_cache_key(self, marketplace: str, params: Dict = None) -> str:
+        """Генерация ключа для кэша"""
+        base = f"{marketplace}"
+        if params:
+            sorted_params = json.dumps(params, sort_keys=True)
+            base += f"_{hashlib.md5(sorted_params.encode()).hexdigest()[:8]}"
+        return hashlib.md5(base.encode()).hexdigest()
+    
+    def _calculate_confidence(self, source: str, data: Dict) -> float:
+        """Расчет доверия к данным на основе источника и качества"""
+        base_confidence = {
+            "api": 0.95,
+            "ai": 0.85,
+            "cache": 0.80,
+            "hybrid": 0.90
+        }.get(source, 0.70)
+        
+        # Корректировка на основе полноты данных
+        completeness_factor = 1.0
+        if data and isinstance(data, dict):
+            # Проверяем наличие обязательных полей
+            required_fields = ['warehouse', 'services', 'prices']
+            present_fields = sum(1 for field in required_fields if field in data)
+            completeness_factor = present_fields / len(required_fields)
+        
+        return base_confidence * (0.8 + 0.2 * completeness_factor)
+    
+    def _validate_data(self, data: Dict, source: str) -> Tuple[bool, List[str]]:
+        """Валидация полученных данных"""
+        errors = []
+        
+        if not data:
+            errors.append("Данные пустые")
+            return False, errors
+        
+        # Базовая структура
+        if not isinstance(data, dict):
+            errors.append("Данные не являются словарем")
+            return False, errors
+        
+        # Проверка обязательных полей в зависимости от источника
+        if source == "api":
+            if 'warehouse' not in data and 'rates' not in data:
+                errors.append("Отсутствуют ключевые поля (warehouse или rates)")
+        elif source == "ai":
+            if 'rates' not in data:
+                errors.append("Отсутствует поле rates")
+        
+        return len(errors) == 0, errors
+    
+    def load_tariffs_advanced(
+        self,
+        marketplace: str,
+        preferred_sources: List[str] = None,
+        api_key: str = None,
+        client_id: str = None,
+        force_refresh: bool = False,
+        max_retries: int = 3,
+        timeout: int = 30,
+        fallback_to_cache: bool = True
+    ) -> Dict[str, Any]:
         """
-        Загрузка тарифов из выбранного источника
+        Расширенная загрузка тарифов с приоритетами
         
         Args:
             marketplace: Название маркетплейса
-            source: "api", "ai", "cache", "hybrid"
-            api_key: API ключ (для API режима)
-            client_id: Client ID (для Ozon)
+            preferred_sources: Приоритет источников ["api", "ai", "cache"]
+            api_key: API ключ
+            client_id: Client ID
             force_refresh: Принудительное обновление
+            max_retries: Максимум попыток
+            timeout: Таймаут запроса
+            fallback_to_cache: Использовать кэш при ошибке
         """
         
         result = {
             "marketplace": marketplace,
-            "source": source,
             "timestamp": datetime.now().isoformat(),
             "data": {},
             "source_used": None,
             "confidence": 0.0,
+            "execution_time": 0,
+            "errors": [],
             "warnings": [],
-            "errors": []
+            "retries": 0
         }
         
+        start_time = datetime.now()
+        
         try:
-            if source == "api":
-                result = self._load_from_api(marketplace, api_key, client_id, result)
-            elif source == "ai":
-                result = self._load_from_ai(marketplace, result, force_refresh)
-            elif source == "cache":
-                result = self._load_from_cache(marketplace, result)
-            elif source == "hybrid":
-                result = self._load_hybrid(marketplace, api_key, client_id, result, force_refresh)
-            else:
-                result["errors"].append(f"Неизвестный источник: {source}")
+            # Определяем приоритет источников
+            if preferred_sources is None:
+                preferred_sources = self.config.get(marketplace, {}).get(
+                    'source_priority', 
+                    ["api", "ai", "cache"]
+                )
+            
+            # Проверяем доступность источников
+            available_sources = self.get_available_sources(marketplace, api_key, client_id)
+            filtered_sources = [s for s in preferred_sources if s in available_sources]
+            
+            if not filtered_sources:
+                result["errors"].append("Нет доступных источников")
+                return result
+            
+            # Пробуем загрузить данные
+            for source in filtered_sources:
+                retry_count = 0
+                while retry_count < max_retries:
+                    try:
+                        if source == "api":
+                            load_result = self._load_from_api_with_retry(
+                                marketplace, api_key, client_id, timeout
+                            )
+                        elif source == "ai":
+                            load_result = self._load_from_ai_with_retry(
+                                marketplace, force_refresh, timeout
+                            )
+                        elif source == "cache":
+                            load_result = self._load_from_cache_with_ttl(
+                                marketplace
+                            )
+                        else:
+                            continue
+                        
+                        # Проверяем результат
+                        if not load_result["errors"] and load_result["data"]:
+                            # Валидируем данные
+                            is_valid, validation_errors = self._validate_data(
+                                load_result["data"], source
+                            )
+                            
+                            if is_valid:
+                                result["data"] = load_result["data"]
+                                result["source_used"] = source
+                                result["confidence"] = self._calculate_confidence(
+                                    source, load_result["data"]
+                                )
+                                result["warnings"].extend(load_result.get("warnings", []))
+                                
+                                # Обновляем статистику
+                                self.source_stats[source]["success"] += 1
+                                self.source_stats[source]["total"] += 1
+                                
+                                break
+                            else:
+                                result["warnings"].append(
+                                    f"Данные из {source} не прошли валидацию: {', '.join(validation_errors)}"
+                                )
+                        
+                        retry_count += 1
+                        result["retries"] += 1
+                        self.logger.warning(f"Попытка {retry_count} из {max_retries} для {source}")
+                        
+                    except Exception as e:
+                        retry_count += 1
+                        result["retries"] += 1
+                        self.logger.error(f"Ошибка при загрузке из {source}: {e}")
+                        self.source_stats[source]["fail"] += 1
+                        self.source_stats[source]["total"] += 1
+                
+                # Если данные получены, выходим
+                if result["data"]:
+                    break
+            
+            # Если данные не получены, пробуем fallback
+            if not result["data"] and fallback_to_cache:
+                fallback_result = self._load_from_cache(marketplace, {}, force_refresh=True)
+                if fallback_result["data"]:
+                    result["data"] = fallback_result["data"]
+                    result["source_used"] = "fallback_cache"
+                    result["confidence"] = 0.60
+                    result["warnings"].append("💾 Использованы устаревшие кэшированные данные")
+            
+            # Вычисляем время выполнения
+            result["execution_time"] = (datetime.now() - start_time).total_seconds()
             
             return result
             
         except Exception as e:
-            self.logger.error(f"Ошибка загрузки тарифов: {e}")
-            result["errors"].append(str(e))
+            result["errors"].append(f"Критическая ошибка: {str(e)}")
+            result["execution_time"] = (datetime.now() - start_time).total_seconds()
             return result
     
-    def _load_from_api(self, marketplace: str, api_key: str, 
-                       client_id: str, result: Dict) -> Dict:
-        """Загрузка через официальное API маркетплейса"""
-        result["source_used"] = "API"
+    def _load_from_api_with_retry(self, marketplace: str, api_key: str, 
+                                  client_id: str, timeout: int) -> Dict:
+        """Загрузка через API с таймаутом"""
+        result = {"data": {}, "errors": [], "warnings": []}
         
         try:
             if marketplace == "Ozon" and api_key and client_id:
                 data = self.api_connector.get_ozon_tariffs(api_key, client_id)
                 if data:
                     result["data"] = data
-                    result["confidence"] = 0.95
-                    result["warnings"].append("✅ Тарифы загружены напрямую из API Ozon")
+                    result["warnings"].append("✅ Тарифы загружены из API Ozon")
                 else:
-                    result["errors"].append("Не удалось получить данные из API Ozon")
-            
+                    result["errors"].append("API Ozon вернул пустой ответ")
+                    
             elif marketplace == "Wildberries" and api_key:
                 data = self.api_connector.get_wildberries_tariffs(api_key)
                 if data and data.get('success'):
                     result["data"] = data.get('data', {})
-                    result["confidence"] = 0.95
-                    result["warnings"].append("✅ Тарифы загружены напрямую из API WB")
+                    result["warnings"].append("✅ Тарифы загружены из API WB")
                 else:
-                    result["errors"].append("Не удалось получить данные из API WB")
-            
+                    result["errors"].append("API WB вернул ошибку")
+                    
+            elif marketplace == "Yandex.Market" and api_key:
+                data = self.api_connector.get_yandex_tariffs(api_key)
+                if data:
+                    result["data"] = data
+                    result["warnings"].append("✅ Тарифы загружены из API Яндекс.Маркет")
+                else:
+                    result["errors"].append("API Яндекс.Маркет вернул пустой ответ")
             else:
-                result["errors"].append(f"API для {marketplace} не поддерживается или не хватает ключей")
-        
+                result["errors"].append(f"API для {marketplace} не поддерживается")
+                
+        except TimeoutError:
+            result["errors"].append(f"Таймаут API ({timeout}с)")
         except Exception as e:
             result["errors"].append(f"Ошибка API: {str(e)}")
-        
+            
         return result
     
-    def _load_from_ai(self, marketplace: str, result: Dict, force_refresh: bool) -> Dict:
-        """Загрузка через AI анализ документации"""
-        result["source_used"] = "AI"
+    def _load_from_ai_with_retry(self, marketplace: str, force_refresh: bool, 
+                                 timeout: int) -> Dict:
+        """Загрузка через AI с таймаутом"""
+        result = {"data": {}, "errors": [], "warnings": []}
         
         try:
             rates, source, forecast = self.ai_updater.get_rates_from_ai(
@@ -10045,133 +10257,171 @@ class SmartTariffLoader:
                 result["data"] = {
                     "rates": rates,
                     "forecast": forecast,
-                    "source": source.value
+                    "source": source.value if source else "unknown"
                 }
-                result["confidence"] = 0.85
-                result["warnings"].append("🤖 Тарифы получены через AI анализ документации")
-                
+                result["warnings"].append("🤖 Тарифы получены через AI")
                 if forecast:
-                    result["warnings"].append("📈 Прогноз тарифов на 3 месяца получен")
+                    result["warnings"].append("📈 Получен прогноз на 3 месяца")
             else:
-                result["errors"].append("AI не смог получить актуальные тарифы")
-        
+                result["errors"].append("AI не смог получить тарифы")
+                
+        except TimeoutError:
+            result["errors"].append(f"Таймаут AI ({timeout}с)")
         except Exception as e:
             result["errors"].append(f"Ошибка AI: {str(e)}")
-        
+            
         return result
     
-    def _load_from_cache(self, marketplace: str, result: Dict) -> Dict:
-        """Загрузка из кэша (ранее загруженные тарифы)"""
-        result["source_used"] = "Cache"
+    def _load_from_cache_with_ttl(self, marketplace: str) -> Dict:
+        """Загрузка из кэша с проверкой TTL"""
+        result = {"data": {}, "errors": [], "warnings": []}
         
         try:
             cached = self.tariff_cache.get(marketplace, None, use_expired=False)
             
             if cached:
+                # Проверяем TTL
+                ttl = self.config.get(marketplace, {}).get('cache_ttl', 43200)
+                age = datetime.now().timestamp() - cached.timestamp
+                
+                if age > ttl:
+                    result["warnings"].append(f"⚠️ Кэш устарел ({int(age/3600)}ч назад)")
+                
                 result["data"] = {
                     "rates": cached.data,
                     "timestamp": datetime.fromtimestamp(cached.timestamp).isoformat(),
-                    "source": cached.source.value
+                    "source": cached.source.value if cached.source else "unknown"
                 }
-                result["confidence"] = 0.90
-                result["warnings"].append(f"💾 Использованы кэшированные тарифы от {datetime.fromtimestamp(cached.timestamp).strftime('%d.%m.%Y %H:%M')}")
+                result["warnings"].append(f"💾 Использован кэш от {datetime.fromtimestamp(cached.timestamp).strftime('%d.%m.%Y %H:%M')}")
             else:
-                result["errors"].append("Кэшированные тарифы не найдены или устарели")
-        
+                result["errors"].append("Кэшированные данные не найдены")
+                
         except Exception as e:
             result["errors"].append(f"Ошибка кэша: {str(e)}")
-        
+            
         return result
     
-    def _load_hybrid(self, marketplace: str, api_key: str, 
-                     client_id: str, result: Dict, force_refresh: bool) -> Dict:
-        """
-        Гибридный режим: сначала API, если нет — AI, если нет — кэш
-        """
-        result["source_used"] = "Hybrid"
-        result["warnings"].append("🔄 Используется гибридный режим загрузки")
-        
-        # 1. Пробуем API
-        if api_key:
-            api_result = self._load_from_api(marketplace, api_key, client_id, result.copy())
-            if not api_result["errors"] and api_result["data"]:
-                result["data"] = api_result["data"]
-                result["source_used"] = "API (Hybrid)"
-                result["confidence"] = 0.95
-                result["warnings"].append("✅ Использованы API тарифы")
-                return result
-        
-        # 2. Пробуем AI
-        ai_result = self._load_from_ai(marketplace, result.copy(), force_refresh)
-        if not ai_result["errors"] and ai_result["data"]:
-            result["data"] = ai_result["data"]
-            result["source_used"] = "AI (Hybrid)"
-            result["confidence"] = 0.85
-            result["warnings"].append("🤖 Использованы AI тарифы (API не доступен)")
-            return result
-        
-        # 3. Пробуем кэш
-        cache_result = self._load_from_cache(marketplace, result.copy())
-        if not cache_result["errors"] and cache_result["data"]:
-            result["data"] = cache_result["data"]
-            result["source_used"] = "Cache (Hybrid)"
-            result["confidence"] = 0.80
-            result["warnings"].append("💾 Использованы кэшированные тарифы (AI и API не доступны)")
-            return result
-        
-        result["errors"].append("Не удалось загрузить тарифы ни из одного источника")
-        return result
-    
-    def get_available_sources(self, marketplace: str) -> List[str]:
-        """Получить список доступных источников для маркетплейса"""
-        sources = []
+    def get_available_sources(self, marketplace: str, api_key: str = None, 
+                             client_id: str = None) -> List[str]:
+        """Получение списка доступных источников"""
+        available = []
         
         # Проверяем API
-        if marketplace in ["Ozon", "Wildberries"]:
-            sources.append("api")
+        if marketplace in self.SOURCES_CONFIG:
+            api_config = self.SOURCES_CONFIG[marketplace].get("api", {})
+            required = api_config.get("requires", [])
+            if all(k in self.config.get('credentials', {}) or 
+                   locals().get(k) for k in required):
+                available.append("api")
         
-        # AI всегда доступен (если есть ключ)
+        # Проверяем AI
         if self.ai_updater.api_key:
-            sources.append("ai")
+            available.append("ai")
         
-        # Кэш доступен если есть данные
+        # Проверяем кэш
         if self.tariff_cache.get(marketplace, None, use_expired=False):
-            sources.append("cache")
+            available.append("cache")
         
-        # Гибридный доступен всегда
-        sources.append("hybrid")
-        
-        return sources
+        return available
     
-    def compare_sources(self, marketplace: str, api_key: str = None, 
-                        client_id: str = None) -> pd.DataFrame:
-        """Сравнить тарифы из разных источников"""
-        results = []
+    def compare_sources_advanced(self, marketplace: str, 
+                                api_key: str = None, 
+                                client_id: str = None) -> pd.DataFrame:
+        """Расширенное сравнение источников"""
+        comparisons = []
         
+        # Загружаем из каждого источника
         for source in ["api", "ai", "cache"]:
             if source == "api" and not api_key:
                 continue
+                
+            result = self.load_tariffs_advanced(
+                marketplace=marketplace,
+                preferred_sources=[source],
+                api_key=api_key,
+                client_id=client_id,
+                fallback_to_cache=False
+            )
             
-            result = self.load_tariffs(marketplace, source, api_key, client_id)
-            
-            if not result["errors"]:
-                results.append({
-                    "Источник": self.SOURCES.get(source, source),
-                    "Статус": "✅ Доступен",
-                    "Данных": len(result["data"]) if isinstance(result["data"], dict) else 0,
-                    "Доверие": f"{result['confidence']*100:.0f}%",
-                    "Предупреждения": ", ".join(result["warnings"][:2])
-                })
-            else:
-                results.append({
-                    "Источник": self.SOURCES.get(source, source),
-                    "Статус": "❌ Недоступен",
-                    "Данных": 0,
-                    "Доверие": "0%",
-                    "Предупреждения": result["errors"][0][:50] if result["errors"] else ""
-                })
+            comparisons.append({
+                "Источник": source.upper(),
+                "Статус": "✅ Доступен" if result["data"] else "❌ Недоступен",
+                "Количество полей": len(result["data"]) if result["data"] else 0,
+                "Доверие": f"{result['confidence']*100:.0f}%" if result["data"] else "0%",
+                "Время загрузки": f"{result['execution_time']:.2f}с",
+                "Ошибки": ", ".join(result["errors"][:2]) if result["errors"] else "Нет",
+                "Предупреждения": ", ".join(result["warnings"][:2]) if result["warnings"] else "Нет"
+            })
         
-        return pd.DataFrame(results)
+        return pd.DataFrame(comparisons)
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Получение статистики использования"""
+        stats = {
+            "total_requests": sum(s["total"] for s in self.source_stats.values()),
+            "success_rate": {},
+            "sources": self.source_stats
+        }
+        
+        for source, data in self.source_stats.items():
+            if data["total"] > 0:
+                stats["success_rate"][source] = f"{(data['success']/data['total'])*100:.1f}%"
+            else:
+                stats["success_rate"][source] = "0%"
+        
+        return stats
+    
+    def clear_cache(self, marketplace: str = None):
+        """Очистка кэша"""
+        if marketplace:
+            self.tariff_cache.delete(marketplace)
+            self.logger.info(f"Кэш для {marketplace} очищен")
+        else:
+            self.tariff_cache.clear()
+            self.logger.info("Весь кэш очищен")
+    
+    def backup_cache(self, path: str = None):
+        """Бэкап кэша"""
+        if path is None:
+            path = f"cache_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        try:
+            cache_data = self.tariff_cache.get_all()
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2, ensure_ascii=False)
+            self.logger.info(f"Бэкап кэша сохранен в {path}")
+            return path
+        except Exception as e:
+            self.logger.error(f"Ошибка бэкапа: {e}")
+            return None
+
+# ============================================================================
+# 🚀 ИСПОЛЬЗОВАНИЕ
+# ============================================================================
+
+# Пример использования
+if __name__ == "__main__":
+    loader = SmartTariffLoaderV2()
+    
+    # Загрузка с автоматическим выбором источника
+    result = loader.load_tariffs_advanced(
+        marketplace="Ozon",
+        preferred_sources=["api", "ai", "cache"],
+        api_key="your_api_key",
+        client_id="your_client_id",
+        force_refresh=False
+    )
+    
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+    
+    # Сравнение источников
+    comparison_df = loader.compare_sources_advanced("Ozon")
+    print(comparison_df)
+    
+    # Статистика
+    stats = loader.get_statistics()
+    print(f"Статистика: {stats}")
+
 # ============================================================================
 # 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (v100.16 - ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
