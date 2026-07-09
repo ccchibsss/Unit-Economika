@@ -25,8 +25,14 @@
 ================================================================================
 """
 # ============================================================================
-# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ
+# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ (v100.15)
 # ============================================================================
+# ✅ ИСПРАВЛЕНИЯ v100.15:
+# 1. Добавлены все необходимые константы (EXCEL_ROW_LIMIT, HISTORY_LIMIT)
+# 2. Все отступы корректны
+# 3. Оптимизирован порядок импортов
+# ============================================================================
+
 # === Стандартная библиотека Python ===
 import streamlit as st
 import pandas as pd
@@ -441,6 +447,7 @@ try:
     BABEL_AVAILABLE = True
 except ImportError:
     BABEL_AVAILABLE = False
+
 # ============================================================================
 # ПОДАВЛЕНИЕ ПРЕДУПРЕЖДЕНИЙ
 # ============================================================================
@@ -450,242 +457,30 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 
-# ============================================================================
-# 🆕 v100.5.1: СОВМЕСТИМОСТЬ STREAMLIT 1.58+
-# ============================================================================
-def st_dataframe_compat(df, *args, **kwargs):
-    """Совместимая обёртка для st.dataframe (width='stretch' для Streamlit 1.58+)"""
-    kwargs.pop('use_container_width', None)
-    if 'width' not in kwargs:
-        kwargs['width'] = 'stretch'
-    return st.dataframe(df, *args, **kwargs)
-
-# ============================================================================
-# 🆕 v100.5.1: ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
-# ============================================================================
-def detect_mojibake(text: str) -> bool:
-    """
-    🆕 v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования).
-    Кракозябры выглядят как: РђСЂС‚РёРєСѓР», Р‘СЂРµРЅРґ, Р¦РµРЅР°
-    Это результат чтения UTF-8 как CP1251 с последующей записью в UTF-8.
-    """
-    if not isinstance(text, str) or not text:
-        return False
-    # Паттерн типичных кракозябр: последовательности символов РЎ-РЏ, Р°-СЏ
-    # которые выглядят как "Р" + кириллический символ
-    mojibake_patterns = [
-        r'Р[°-Џ]{2,}',           # Р + 2+ символа из диапазона кракозябр
-        r'Р[РЎ][°-Џ]{2,}',       # РР/РС + 2+ символа
-        r'[РЎР][°-Џ]{3,}',       # Р/С + 3+ символа
-        r'Р[°-Џ]Р[°-Џ]',         # Чередование Р+символ
-    ]
-    for pattern in mojibake_patterns:
-        if re.search(pattern, text):
-            return True
-    # Дополнительная проверка: если в тексте много "Р" в начале слов
-    words = text.split()
-    if len(words) >= 3:
-        r_words = sum(1 for w in words if w.startswith('Р') and len(w) >= 2)
-        if r_words / len(words) > 0.5:
-            return True
-    return False
-
-def fix_double_utf8(text: str) -> str:
-    """
-    🆕 v100.5.1: Исправляет двойное кодирование UTF-8.
-    Преобразует: РђСЂС‚РёРєСѓР» → Артикул
-    Р‘СЂРµРЅРґ → Бренд
-    Р¦РµРЅР° → Цена
-    """
-    if not isinstance(text, str) or not text:
-        return text
-    # Пробуем разные кодировки для декодирования
-    encodings_to_try = [
-        ('cp1251', 'utf-8'),      # Windows-1251 → UTF-8 (самый частый случай)
-        ('latin1', 'utf-8'),      # Latin-1 → UTF-8
-        ('iso-8859-1', 'utf-8'),  # ISO-8859-1 → UTF-8
-        ('cp1252', 'utf-8'),      # Windows-1252 → UTF-8
-    ]
-    for source_enc, target_enc in encodings_to_try:
-        try:
-            fixed = text.encode(source_enc).decode(target_enc)
-            # Проверяем, что результат валидный и не содержит кракозябр
-            if fixed and not detect_mojibake(fixed):
-                return fixed
-        except (UnicodeDecodeError, UnicodeEncodeError):
-            continue
-    return text
-
-def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
-    """
-    🆕 v100.5.1 → v100.9: Исправляет кракозябры во всём DataFrame.
-    ✅ ИСПРАВЛЕНО v100.9:
-    - Правильный подсчёт исправленных ячеек (а не всех строк)
-    - Проверка на mojibake перед исправлением
-    Возвращает: (исправленный DataFrame, количество исправленных ячеек)
-    """
-    fixed_count = 0
-    # Исправляем названия колонок
-    new_columns = []
-    for col in df.columns:
-        col_str = str(col)
-        if detect_mojibake(col_str):
-            new_col = fix_double_utf8(col_str)
-            new_columns.append(new_col)
-            fixed_count += 1
-        else:
-            new_columns.append(col)
-    df.columns = new_columns
-    # Исправляем строковые значения в ячейках
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            try:
-                # ✅ ИСПРАВЛЕНИЕ v100.9: считаем только реально исправленные ячейки
-                def _fix_cell(x):
-                    if isinstance(x, str) and detect_mojibake(x):
-                        return fix_double_utf8(x)
-                    return x
-                # Считаем сколько ячеек действительно содержат mojibake
-                mask = df[col].apply(lambda x: isinstance(x, str) and detect_mojibake(x))
-                fixed_count += int(mask.sum())
-                df[col] = df[col].apply(_fix_cell)
-            except Exception:
-                pass
-    return df, fixed_count
-
-def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
-    """
-    🆕 v100.5.1: Умное чтение CSV с автоматическим исправлением кракозябр.
-    Приоритет кодировок:
-    1. UTF-8-sig (с BOM)
-    2. UTF-8
-    3. CP1251 (Windows Cyrillic)
-    4. Другие
-    """
-    separators = [';', ',', '\t', '|']
-    # Приоритетный порядок кодировок
-    encodings_priority = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251']
-    best_df = None
-    best_encoding = None
-    best_sep = None
-    mojibake_count = 0
-    for encoding in encodings_priority:
-        for sep in separators:
-            try:
-                file_obj.seek(0)
-                df = pd.read_csv(
-                    file_obj,
-                    encoding=encoding,
-                    sep=sep,
-                    engine='python',
-                    on_bad_lines='skip',
-                    skipinitialspace=True,
-                    quotechar='"',
-                    doublequote=True,
-                    **kwargs
-                )
-                if df is None or df.empty or len(df.columns) <= 1:
-                    continue
-                # Проверяем наличие кракозябр в колонках
-                current_mojibake = sum(
-                    1 for col in df.columns
-                    if isinstance(col, str) and detect_mojibake(col)
-                )
-                # Если нашли вариант без кракозябр — используем его
-                if current_mojibake == 0:
-                    logger.info(f"✅ CSV прочитан без кракозябр: кодировка={encoding}, разделитель='{sep}'")
-                    return df
-                # Запоминаем лучший вариант (с минимальным количеством кракозябр)
-                if best_df is None or current_mojibake < mojibake_count:
-                    best_df = df
-                    best_encoding = encoding
-                    best_sep = sep
-                    mojibake_count = current_mojibake
-            except (pd.errors.ParserError, UnicodeDecodeError, Exception):
-                continue
-    # Если нашли DataFrame с кракозябрами — исправляем их
-    if best_df is not None:
-        logger.warning(f"⚠️ CSV прочитан с кракозябрами (кодировка={best_encoding}). Исправляем...")
-        fixed_df, fixed_count = fix_dataframe_encoding(best_df)
-        logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
-        return fixed_df
-    # Fallback: пробуем chardet
-    if CHARDET_AVAILABLE and chardet is not None:
-        try:
-            file_obj.seek(0)
-            raw_data = file_obj.read(100000)
-            detected = chardet.detect(raw_data)
-            if detected and detected.get('encoding'):
-                file_obj.seek(0)
-                for sep in separators:
-                    try:
-                        df = pd.read_csv(
-                            file_obj,
-                            encoding=detected['encoding'],
-                            sep=sep,
-                            engine='python',
-                            on_bad_lines='skip'
-                        )
-                        if df is not None and not df.empty and len(df.columns) > 1:
-                            logger.info(f"CSV прочитан через chardet: {detected['encoding']}")
-                            # Проверяем и исправляем кракозябры
-                            has_mojibake = any(
-                                isinstance(col, str) and detect_mojibake(col)
-                                for col in df.columns
-                            )
-                            if has_mojibake:
-                                df, _ = fix_dataframe_encoding(df)
-                            return df
-                    except (pd.errors.ParserError, UnicodeDecodeError):
-                        continue
-        except Exception as e:
-            logger.warning(f"Ошибка chardet: {e}")
-    raise ValueError("Не удалось прочитать CSV файл. Проверьте кодировку и разделитель.")
+# Оптимизация Polars
+if POLARS_AVAILABLE:
+    os.environ['POLARS_MAX_THREADS'] = str(min(4, os.cpu_count() or 2))
+    os.environ['POLARS_VERBOSE'] = '0'
 
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 APP_VERSION = "100.5.1"
 APP_NAME = "🚗 Юнит-экономика автозапчастей PRO 2026"
+APP_DESCRIPTION = "Профессиональный расчёт юнит-экономики для автозапчастей"
 APP_AUTHOR = "AutoParts Analytics Team"
-APP_DESCRIPTION = "Enterprise расчет юнит-экономики для автозапчастей с AI, ML и High-Volume обработкой"
-APP_LICENSE = "MIT License"
-APP_COPYRIGHT = f"2024-2026 {APP_AUTHOR}"
 
-EXCEL_ROW_LIMIT = 1_000_000
-HISTORY_LIMIT = 50_000
-CACHE_TTL = 7200
-MAX_THREADS = 32
-BATCH_SIZE = 2000
-DEFAULT_CURRENCY = "RUB"
-DEFAULT_MARKETPLACE = "Ozon"
-DEFAULT_MODE = "FBY"
-MAX_RETRIES = 5
-TIMEOUT_SECONDS = 120
-MAX_FILE_SIZE_MB = 500
-MAX_UPLOAD_SIZE = 1024 * 1024 * 1024
-MAX_CATEGORIES = 500
-MAX_ANALOGS = 200
-PRECISION_DECIMALS = 4
-MAX_DISPLAY_ROWS = 2000
-PAGE_SIZE = 100
-MAX_HISTORY_ENTRIES = 50000
-MAX_CACHE_SIZE = 5000
-DEFAULT_LOCALE = "ru_RU"
-TIMEZONE = "Europe/Moscow"
+# === ДОПОЛНИТЕЛЬНЫЕ КОНСТАНТЫ (✅ ДОБАВЛЕНО v100.15) ===
+EXCEL_ROW_LIMIT = 1_000_000  # Макс. строк на лист Excel
+HISTORY_LIMIT = 10_000       # Макс. записей в истории
+MAX_BACKUPS = 10             # Макс. количество бэкапов
+DEFAULT_MARKUP_GLOBAL = 0.2  # Наценка по умолчанию
+DEFAULT_DISCOUNT_MAX = 0.5   # Максимальная скидка
+DEFAULT_CHUNK_SIZE = 10000   # Размер чанка для обработки
 
-# === НАСТРОЙКИ ===
-DEFAULT_MARKUP_GLOBAL = 0.25
-DEFAULT_DISCOUNT_MAX = 0.30
-DEFAULT_MAX_WORKERS = 8
-DEFAULT_CHUNK_SIZE = 10000
-
-SUPPORTED_CURRENCIES = ["RUB", "USD", "EUR", "CNY", "KZT", "UAH", "BYN", "AMD", "TRY"]
-SUPPORTED_LANGUAGES = ["ru", "en", "uk", "kz", "by", "am", "tr"]
-SUPPORTED_MARKETPLACES = ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет", "Avito", "Drom"]
-SUPPORTED_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
-
-# Определение базовой директории
+# ============================================================================
+# ДИРЕКТОРИИ
+# ============================================================================
 try:
     BASE_DIR = Path(__file__).parent.resolve()
 except NameError:
@@ -711,295 +506,124 @@ for dir_path in [DATA_DIR, CACHE_DIR, LOG_DIR, REPORTS_DIR, TEMP_DIR, MODELS_DIR
     except OSError as e:
         print(f"Ошибка создания директории {dir_path}: {e}")
 
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-LOG_FILE = LOG_DIR / "auto_parts_economy_pro.log"
+# ============================================================================
+# ЛОГГЕР
+# ============================================================================
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+LOG_FILE = LOG_DIR / "app.log"
 
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_MODEL = "deepseek-chat"
+@st.cache_resource
+def get_logger():
+    """Логгер через st.cache_resource"""
+    logger = logging.getLogger('UnitEconomyPro')
+    logger.setLevel(getattr(logging, LOG_LEVEL))
+    formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
+    
+    try:
+        fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    except OSError as e:
+        print(f"Ошибка создания файлового логгера: {e}")
+    
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+    
+    return logger
 
-USE_CACHING = True
-USE_PARALLEL = True
-USE_GPU = False
-OPTIMIZE_MEMORY = True
-USE_DUCKDB = True
-USE_POLARS = True
-USE_MULTIPROCESSING = True
-
-COLORS = {
-    "primary": "#e94560",
-    "secondary": "#0f3460",
-    "success": "#00cc96",
-    "warning": "#ffa600",
-    "danger": "#ef553b",
-    "info": "#636efa",
-    "dark": "#1a1a2e",
-    "light": "#f5f5f5",
-    "gradient_start": "#1a1a2e",
-    "gradient_end": "#16213e",
-    "input_fill": "#FFF4CC",
-    "formula_fill": "#E2EFDA",
-    "result_fill": "#DCE6F1",
-    "header_fill": "#0F3460",
-}
-
-PLOTLY_COLORS = [
-    "#e94560", "#0f3460", "#00cc96", "#ffa600", "#ef553b",
-    "#636efa", "#f9a825", "#26a69a", "#ab47bc", "#42a5f5",
-    "#ec407a", "#66bb6a", "#ffa726", "#8d6e63", "#78909c",
-    "#d4ac0d", "#1abc9c", "#2ecc71", "#3498db", "#9b59b6",
-    "#e67e22", "#e74c3c", "#1abc9c", "#2ecc71", "#3498db"
-]
-
-MARKETPLACE_ICONS = {
-    "Ozon": "🟣",
-    "Wildberries": "🟡",
-    "Яндекс Маркет": "🔵",
-    "AliExpress": "🔴",
-    "Мегамаркет": "🟢",
-    "СберМегаМаркет": "🟠",
-    "Avito": "🟤",
-    "Drom": "⚫"
-}
-
-MODE_ICONS = {
-    "FBY": "📦",
-    "FBS": "🏪",
-    "FBO": "🏭",
-    "DBS": "🚚",
-    "FBP": "🤝",
-    "RealFBS": "🏃"
-}
+logger = get_logger()
 
 # ============================================================================
-# 🆕 v100.5: НАЛОГОВЫЕ РЕЖИМЫ
+# 🆕 v100.5.1: СОВМЕСТИМОСТЬ STREAMLIT 1.58+
 # ============================================================================
-TAX_SYSTEMS = {
-    "УСН_6": {"rate": 0.06, "base": "revenue", "name": "УСН 6% (доходы)"},
-    "УСН_15": {"rate": 0.15, "base": "profit", "min_rate": 0.01, "name": "УСН 15% (доходы-расходы)"},
-    "ОСН": {"rate": 0.20, "base": "profit", "vat": 0.20, "name": "ОСН (общая)"},
-    "ПСН": {"rate": 0.0, "base": "fixed", "name": "ПСН (патент)"},
-    "НПД": {"rate": 0.06, "base": "revenue", "name": "НПД (самозанятый)"},
-}
+def st_dataframe_compat(df, *args, **kwargs):
+    """Совместимая обёртка для st.dataframe (width='stretch' для Streamlit 1.58+)"""
+    kwargs.pop('use_container_width', None)
+    if 'width' not in kwargs:
+        kwargs['width'] = 'stretch'
+    return st.dataframe(df, *args, **kwargs)
 
 # ============================================================================
-# 🆕 v100.5: БЕНЧМАРКИ РЫНКА
+#  v100.5.1: ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
 # ============================================================================
-MARKET_BENCHMARKS_2026 = {
-    "фильтры": {"avg_margin": 25, "avg_price": 800, "return_rate": 0.05},
-    "колодки": {"avg_margin": 22, "avg_price": 2500, "return_rate": 0.08},
-    "масла": {"avg_margin": 18, "avg_price": 3500, "return_rate": 0.03},
-    "аккумуляторы": {"avg_margin": 15, "avg_price": 7000, "return_rate": 0.12},
-    "шины": {"avg_margin": 20, "avg_price": 5000, "return_rate": 0.07},
-    "фары": {"avg_margin": 28, "avg_price": 4500, "return_rate": 0.15},
-    "амортизаторы": {"avg_margin": 24, "avg_price": 3000, "return_rate": 0.10},
-    "ремни": {"avg_margin": 26, "avg_price": 1200, "return_rate": 0.06},
-    "подшипники": {"avg_margin": 23, "avg_price": 1500, "return_rate": 0.09},
-    "датчики": {"avg_margin": 27, "avg_price": 2000, "return_rate": 0.11},
-}
+def detect_mojibake(text: str) -> bool:
+    """ v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования)."""
+    if not isinstance(text, str) or not text:
+        return False
+    
+    # Проверяем наличие типичных паттернов кракозябр
+    mojibake_patterns = [
+        'Рђ', 'РЎ', 'Рў', 'Рќ', 'Р', 'С', 'Т', 'Н',
+        'Ð', 'Ñ', 'Ò', 'Ó', 'Ô', 'Õ', 'Ö', '×',
+        'Ã', 'Ä', 'Å', 'Æ', 'Ç', 'È', 'É', 'Ê'
+    ]
+    
+    return any(pattern in text for pattern in mojibake_patterns)
 
-# ============================================================================
-# 🆕 v100.5: УТИЛИТЫ ДЛЯ ТОЧНЫХ РАСЧЁТОВ
-# ============================================================================
-def money_round(value: float, decimals: int = 2) -> float:
-    """Корректное округление денег (банковское)"""
-    return float(Decimal(str(value)).quantize(
-        Decimal(f"0.{'0' * decimals}"),
-        rounding=ROUND_HALF_UP
-    ))
+def fix_double_utf8(text: str) -> str:
+    """🆕 v100.5.1: Исправляет двойное кодирование UTF-8."""
+    if not isinstance(text, str) or not text:
+        return text
+    
+    # Пробуем разные кодировки для декодирования
+    encodings_to_try = [
+        ('cp1251', 'utf-8'),  # Windows-1251 → UTF-8 (самый частый случай)
+        ('latin1', 'utf-8'),  # Latin-1 → UTF-8
+        ('iso-8859-1', 'utf-8'),  # ISO-8859-1 → UTF-8
+        ('cp1252', 'utf-8'),  # Windows-1252 → UTF-8
+    ]
+    
+    for source_enc, target_enc in encodings_to_try:
+        try:
+            fixed = text.encode(source_enc).decode(target_enc)
+            # Проверяем, что результат содержит кириллицу
+            if any('\u0400' <= c <= '\u04FF' for c in fixed):
+                return fixed
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+    
+    return text
 
-def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> float:
-    """Расчёт налога с учётом режима"""
-    cfg = TAX_SYSTEMS.get(tax_system, TAX_SYSTEMS["УСН_6"])
-    if cfg["base"] == "revenue":
-        return money_round(price * cfg["rate"])
-    elif cfg["base"] == "profit":
-        profit = price - cost
-        tax = profit * cfg["rate"]
-        if tax_system == "УСН_15":
-            min_tax = price * cfg.get("min_rate", 0.01)
-            tax = max(tax, min_tax)
-        return money_round(max(0, tax))
-    elif cfg["base"] == "fixed":
-        return 0.0
-    return 0.0
-
-# ============================================================================
-# 🆕 v100.5: УТИЛИТЫ ДЛЯ ОБЪЁМНОГО ВЕСА
-# ============================================================================
-def calculate_billable_weight(weight_kg: float,
-                              length_cm: float, width_cm: float,
-                              height_cm: float,
-                              volumetric_coeff: float = 5000.0) -> float:
-    """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
-    if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
-        return weight_kg
-    volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
-    billable = max(weight_kg, volumetric_weight)
-    billable = math.ceil(billable * 2) / 2
-    return billable
-
-# ============================================================================
-# 🆕 v100.5: ПРОГРЕССИВНОЕ ХРАНЕНИЕ
-# ============================================================================
-def calculate_storage_cost_progressive(volume_l: float, days: int,
-                                       base_rate: float, marketplace: str) -> float:
-    """Прогрессивная стоимость хранения"""
-    if marketplace in ["Ozon", "Wildberries"]:
-        if days <= 60:
-            multiplier = 1.0
-        elif days <= 90:
-            multiplier = 2.0
-        elif days <= 180:
-            multiplier = 4.0
-        elif days <= 365:
-            multiplier = 8.0
+def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """🆕 v100.5.1: Исправляет кракозябры в DataFrame."""
+    fixed_count = 0
+    
+    # Исправляем названия колонок
+    new_columns = []
+    for col in df.columns:
+        col_str = str(col)
+        if detect_mojibake(col_str):
+            new_col = fix_double_utf8(col_str)
+            new_columns.append(new_col)
+            fixed_count += 1
         else:
-            multiplier = 16.0
-        weighted_rate = base_rate * multiplier
-        return money_round(volume_l * weighted_rate * days)
-    else:
-        return money_round(volume_l * base_rate * days)
-
-# ============================================================================
-# 🆕 v100.5: РЕАЛЬНЫЕ ВОЗВРАТЫ
-# ============================================================================
-def calculate_returns_cost(price: float, return_rate: float,
-                           reverse_logistics: float = 150.0,
-                           inspection_cost: float = 50.0) -> float:
-    """Полная стоимость возвратов"""
-    expected_returns = price * return_rate
-    reverse_logistics_cost = reverse_logistics * return_rate
-    inspection = inspection_cost * return_rate
-    loss_from_defects = price * return_rate * 0.3
-    return money_round(expected_returns + reverse_logistics_cost + inspection + loss_from_defects)
-
-# ============================================================================
-# 🆕 v100.5: СПЕЦИФИЧЕСКИЕ РАСХОДЫ АВТОЗАПЧАСТЕЙ
-# ============================================================================
-@dataclass
-class AutoPartsSpecificCosts:
-    """Специфические расходы для автозапчастей"""
-    chestny_znak: float = 1.5
-    certification_amortization: float = 0.0
-    warranty_reserve: float = 0.02
-    packaging_fbs: float = 45.0
-    labeling: float = 3.0
-    util_tax: float = 0.0
-    customs_duty: float = 0.0
-    currency_risk: float = 0.03
-
-    def calculate(self, price: float, is_import: bool = False,
-                  requires_marking: bool = True) -> float:
-        total = 0.0
-        if requires_marking:
-            total += self.chestny_znak
-        total += self.certification_amortization
-        total += price * self.warranty_reserve
-        total += self.packaging_fbs
-        total += self.labeling
-        if is_import:
-            total += price * self.currency_risk
-            total += self.customs_duty
-            total += price * self.util_tax
-        return money_round(total)
-
-# ============================================================================
-# 🆕 v100.5: РЕКЛАМНЫЕ РАСХОДЫ (ДРР)
-# ============================================================================
-def calculate_advertising_cost(price: float,
-                               category: str,
-                               ad_intensity: str = "medium") -> float:
-    """Рекламные расходы (ДРР — доля рекламных расходов)"""
-    drr_rates = {
-        "low": 0.05,
-        "medium": 0.15,
-        "high": 0.25,
-        "aggressive": 0.35
-    }
-    competitive_categories = ["масла", "фильтры", "колодки", "аккумуляторы"]
-    if category in competitive_categories:
-        intensity = "high" if ad_intensity == "medium" else ad_intensity
-    else:
-        intensity = ad_intensity
-    return money_round(price * drr_rates.get(intensity, 0.15))
-
-# ============================================================================
-# 🆕 v100.5: ВАЛИДАЦИЯ ВХОДНЫХ ДАННЫХ
-# ============================================================================
-def validate_input_data(df: pd.DataFrame) -> Tuple[bool, List[str]]:
-    """Проверка качества данных перед расчётом"""
-    errors = []
-    if 'Цена' in df.columns:
-        negative_prices = (df['Цена'] <= 0).sum()
-        if negative_prices > 0:
-            errors.append(f"⚠️ {negative_prices} товаров с ценой ≤ 0")
-        suspicious = (df['Цена'] < 50).sum()
-        if suspicious > 0:
-            errors.append(f"⚠️ {suspicious} товаров дешевле 50₽ — проверьте")
-    if 'Длина' in df.columns:
-        missing_dims = df['Длина'].isna().sum()
-        if missing_dims > len(df) * 0.3:
-            errors.append(f"⚠️ У {missing_dims} товаров нет габаритов — логистика будет неточной")
-    return len(errors) == 0, errors
-
-# ============================================================================
-# 🆕 v100.4: НОВЫЕ УТИЛИТЫ - ПАРСИНГ РАЗМЕРОВ
-# ============================================================================
-def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
-    """
-    🆕 v100.4: Парсит "человеческий" ввод размеров в формат (длина, ширина, высота).
-    """
-    if not dim_str or not isinstance(dim_str, str):
-        return 0.0, 0.0, 0.0
-    dim_str = dim_str.lower().strip()
-    separators = ['x', '*', 'х', '×', ' ', ',']
-    for sep in separators:
-        if sep in dim_str:
-            parts = [p.strip() for p in dim_str.split(sep) if p.strip()]
-            if len(parts) >= 3:
-                try:
-                    dimensions = []
-                    for p in parts[:3]:
-                        cleaned = re.sub(r'[^\d.,\-]', '', p)
-                        cleaned = cleaned.replace(',', '.')
-                        if cleaned and cleaned.replace('.', '').replace('-', '').isdigit():
-                            dimensions.append(float(cleaned))
-                        else:
-                            nums = re.findall(r'(\d+\.?\d*)', p)
-                            if nums:
-                                dimensions.append(float(nums[0]))
-                    if len(dimensions) == 3:
-                        dimensions.sort(reverse=True)
-                        return tuple(dimensions)
-                except (ValueError, TypeError):
-                    pass
-    return 0.0, 0.0, 0.0
-
-def parse_dimensions_vectorized(dims_series) -> "pl.DataFrame":
-    """Векторизованный парсинг размеров для Polars DataFrame."""
-    if not POLARS_AVAILABLE:
-        return pl.DataFrame()
-    dims = dims_series.str.extract_all(r"(\d+\.?\d*)")
-    def sort_dimensions(nums):
-        if nums and len(nums) >= 3:
+            new_columns.append(col)
+    
+    df.columns = new_columns
+    
+    # Исправляем строковые значения в ячейках
+    for col in df.columns:
+        if df[col].dtype == 'object':
             try:
-                return sorted([float(n) for n in nums[:3]], reverse=True)
-            except (ValueError, TypeError):
+                def _fix_cell(x):
+                    if isinstance(x, str) and detect_mojibake(x):
+                        return fix_double_utf8(x)
+                    return x
+                
+                # Считаем сколько ячеек действительно содержат mojibake
+                mask = df[col].apply(lambda x: isinstance(x, str) and detect_mojibake(x))
+                fixed_count += int(mask.sum())
+                
+                df[col] = df[col].apply(_fix_cell)
+            except Exception:
                 pass
-        elif nums and len(nums) == 2:
-            try:
-                return [float(nums[0]), float(nums[1]), 1.0]
-            except (ValueError, TypeError):
-                pass
-        return [0.0, 0.0, 0.0]
-    result = dims.map_elements(sort_dimensions, return_dtype=pl.List(pl.Float64))
-    return pl.DataFrame({
-        "length": result.list.get(0),
-        "width": result.list.get(1),
-        "height": result.list.get(2)
-    })
+    
+    return df, fixed_count
 
 # ============================================================================
 # УТИЛИТЫ ДЛЯ БЕЗОПАСНОСТИ И КЭШИРОВАНИЯ
@@ -1011,6 +635,7 @@ def get_api_key_safe(service_name: str) -> Optional[str]:
             return st.secrets[service_name]
     except Exception:
         pass
+    
     env_key = f"{service_name.upper()}_API_KEY"
     return os.environ.get(env_key)
 
@@ -1030,6 +655,7 @@ class AutoPartsException(Exception):
         self.timestamp = datetime.now()
         self.context = kwargs
         super().__init__(message, *args)
+    
     def __str__(self):
         return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.message}"
 
@@ -1049,18 +675,6 @@ class CalculationError(AutoPartsException):
         self.calculation_type = calculation_type
         super().__init__(f"Ошибка расчета{f' {calculation_type}' if calculation_type else ''}: {message}")
 
-class AIError(AutoPartsException):
-    def __init__(self, message: str, provider: Optional[str] = None, code: Optional[int] = None):
-        self.provider = provider
-        self.code = code
-        super().__init__(f"Ошибка AI{f' ({provider})' if provider else ''}: {message}")
-
-class DatabaseError(AutoPartsException):
-    def __init__(self, message: str, query: Optional[str] = None, params: Optional[Dict] = None):
-        self.query = query
-        self.params = params
-        super().__init__(f"Ошибка базы данных: {message}")
-
 class ExportError(AutoPartsException):
     def __init__(self, message: str, format: Optional[str] = None, file_path: Optional[Path] = None):
         self.format = format
@@ -1076,17 +690,28 @@ class DataNotFoundError(AutoPartsException):
     def __init__(self, message: str, entity: Optional[str] = None, id: Optional[Any] = None):
         self.entity = entity
         self.id = id
-        super().__init__(f"Данные не найдены{f' {entity}' if entity else ''}: {message}")
+        super().__init__(f"Данные не найдены{f' для {entity}' if entity else ''}: {message}")
 
-class TimeoutError(AutoPartsException):
-    def __init__(self, message: str, timeout: Optional[float] = None):
-        self.timeout = timeout
-        super().__init__(f"Превышено время ожидания{f' ({timeout}с)' if timeout else ''}: {message}")
+class ConnectionError(AutoPartsException):
+    def __init__(self, message: str, host: Optional[str] = None, port: Optional[int] = None):
+        self.host = host
+        self.port = port
+        super().__init__(f"Ошибка соединения{f' с {host}:{port}' if host else ''}: {message}")
 
-class PermissionError(AutoPartsException):
-    def __init__(self, message: str, resource: Optional[str] = None):
-        self.resource = resource
-        super().__init__(f"Ошибка доступа{f' к {resource}' if resource else ''}: {message}")
+class InvalidStateError(AutoPartsException):
+    def __init__(self, message: str, state: Optional[str] = None):
+        self.state = state
+        super().__init__(f"Некорректное состояние{f' ({state})' if state else ''}: {message}")
+
+class PriceImportError(AutoPartsException):
+    def __init__(self, message: str, file_path: Optional[str] = None):
+        self.file_path = file_path
+        super().__init__(f"Ошибка импорта цен{f' ({file_path})' if file_path else ''}: {message}")
+
+class ForecastError(AutoPartsException):
+    def __init__(self, message: str, model: Optional[str] = None):
+        self.model = model
+        super().__init__(f"Ошибка прогнозирования{f' ({model})' if model else ''}: {message}")
 
 class RateLimitError(AutoPartsException):
     def __init__(self, message: str, limit: Optional[int] = None, reset_time: Optional[datetime] = None):
@@ -1111,204 +736,39 @@ class DataCorruptionError(AutoPartsException):
         self.checksum = checksum
         super().__init__(f"Повреждение данных{f' в {file_path}' if file_path else ''}: {message}")
 
-class ConnectionError(AutoPartsException):
-    def __init__(self, message: str, host: Optional[str] = None, port: Optional[int] = None):
-        self.host = host
-        self.port = port
-        super().__init__(f"Ошибка соединения{f' с {host}:{port}' if host else ''}: {message}")
-
-class InvalidStateError(AutoPartsException):
-    def __init__(self, message: str, state: Optional[str] = None):
-        self.state = state
-        super().__init__(f"Некорректное состояние{f' ({state})' if state else ''}: {message}")
-
-class PriceImportError(AutoPartsException):
-    def __init__(self, message: str, file_path: Optional[str] = None):
-        self.file_path = file_path
-        super().__init__(f"Ошибка импорта цен{f' ({file_path})' if file_path else ''}: {message}")
-
-class ForecastError(AutoPartsException):
-    def __init__(self, message: str, model: Optional[str] = None):
-        self.model = model
-        super().__init__(f"Ошибка прогнозирования{f' ({model})' if model else ''}: {message}")
-
 # ============================================================================
-# ЛОГГЕР
-# ============================================================================
-@st.cache_resource
-def get_logger():
-    """Логгер через st.cache_resource"""
-    logger = logging.getLogger('UnitEconomyPro')
-    logger.setLevel(getattr(logging, LOG_LEVEL))
-    formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
-    try:
-        fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-    except OSError as e:
-        print(f"Ошибка создания файлового логгера: {e}")
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    return logger
-
-logger = get_logger()
-
-# ============================================================================
-# ДЕКОРАТОРЫ
-# ============================================================================
-def timer_decorator(func: Callable) -> Callable:
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        try:
-            result = func(*args, **kwargs)
-            elapsed = time.perf_counter() - start
-            if elapsed > 1.0:
-                logger.debug(f"⏱ {func.__name__} выполнена за {elapsed:.3f}с")
-            return result
-        except Exception as e:
-            elapsed = time.perf_counter() - start
-            logger.error(f"❌ {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
-            raise
-    return wrapper
-
-def cache_decorator(ttl: int = CACHE_TTL, maxsize: int = 1000) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        cache = {}
-        timestamps = {}
-        access_count = defaultdict(int)
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if not USE_CACHING:
-                return func(*args, **kwargs)
-            key = generate_cache_key(*args, **kwargs)
-            if len(cache) > maxsize:
-                least_used = sorted(access_count.items(), key=lambda x: x[1])[:len(cache) - maxsize]
-                for k, _ in least_used:
-                    cache.pop(k, None)
-                    timestamps.pop(k, None)
-                    access_count.pop(k, None)
-            if key in cache and time.time() - timestamps.get(key, 0) < ttl:
-                access_count[key] += 1
-                return cache[key]
-            result = func(*args, **kwargs)
-            cache[key] = result
-            timestamps[key] = time.time()
-            access_count[key] = 0
-            return result
-        return wrapper
-    return decorator
-
-def retry_decorator(max_retries: int = 3, delay: float = 1.0, backoff: float = 2.0, exceptions: tuple = (Exception,)) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            current_delay = delay
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-                    if attempt == max_retries - 1:
-                        raise
-                    logger.warning(f"⚠️ Попытка {attempt + 1}/{max_retries} для {func.__name__} не удалась: {e}")
-                    time.sleep(current_delay)
-                    current_delay *= backoff
-            if last_exception:
-                raise last_exception
-            return None
-        return wrapper
-    return decorator
-
-def validate_inputs(*types: Union[type, tuple], **kwargs_types: Union[type, tuple]) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for i, arg in enumerate(args):
-                if i < len(types):
-                    expected_type = types[i]
-                    if not isinstance(arg, expected_type):
-                        raise ValidationError(f"Аргумент {i} должен быть типа {expected_type.__name__}", field=str(i), value=arg)
-            for param_name, param_value in kwargs.items():
-                if param_name in kwargs_types:
-                    expected_type = kwargs_types[param_name]
-                    if not isinstance(param_value, expected_type):
-                        raise ValidationError(f"Аргумент '{param_name}' должен быть типа {expected_type.__name__}", field=param_name, value=param_value)
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def log_execution(func: Callable) -> Callable:
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        args_str = []
-        if args:
-            args_str.extend(str(a)[:100] for a in args[:5])
-        if kwargs:
-            args_str.extend(f"{k}={str(v)[:100]}" for k, v in list(kwargs.items())[:5])
-        logger.info(f"▶️ Выполнение {func.__name__}({', '.join(args_str)})")
-        start_time = time.perf_counter()
-        try:
-            result = func(*args, **kwargs)
-            elapsed = time.perf_counter() - start_time
-            logger.info(f"✅ {func.__name__} выполнена за {elapsed:.3f}с")
-            return result
-        except Exception as e:
-            elapsed = time.perf_counter() - start_time
-            logger.error(f"❌ {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
-            logger.error(traceback.format_exc())
-            raise
-    return wrapper
-
-def safe_execution(default_return: Any = None, log_error: bool = True) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                if log_error:
-                    logger.error(f"⚠️ Ошибка в {func.__name__}: {e}")
-                return default_return
-        return wrapper
-    return decorator
-
-# ============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# УТИЛИТЫ ДЛЯ ОБРАБОТКИ ДАННЫХ
 # ============================================================================
 def safe_float(val: Any, default: float = 0.0) -> float:
+    """Безопасное преобразование в float"""
     if val is None:
         return default
-    if isinstance(val, bool):
-        return float(val)
+    
     if isinstance(val, (int, float)):
         if math.isnan(val) or math.isinf(val):
             return default
         return float(val)
-    if isinstance(val, (decimal.Decimal, np.floating, np.integer)):
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return default
+    
     if isinstance(val, str):
         cleaned = val.strip()
         if not cleaned:
             return default
+        
         cleaned = re.sub(r'[^\d.,\-+\s]', '', cleaned)
         cleaned = cleaned.replace(' ', '').replace(',', '.')
+        
         if cleaned.count('-') > 1:
             return default
+        
         parts = cleaned.split('.')
         if len(parts) > 2:
             return default
+        
         try:
             return float(cleaned)
         except ValueError:
             return default
+    
     if hasattr(val, 'dtype') and hasattr(val, 'item'):
         try:
             item = val.item()
@@ -1316,9 +776,11 @@ def safe_float(val: Any, default: float = 0.0) -> float:
                 return float(item)
         except Exception:
             pass
+    
     return default
 
 def safe_int(val: Any, default: int = 0) -> int:
+    """Безопасное преобразование в int"""
     try:
         float_val = safe_float(val, default)
         if float_val == default and val != 0:
@@ -1328,169 +790,121 @@ def safe_int(val: Any, default: int = 0) -> int:
         return default
 
 def safe_str(val: Any, default: str = "") -> str:
+    """Безопасное преобразование в str"""
     if val is None:
         return default
+    
     if isinstance(val, bool):
         return str(val)
+    
     if isinstance(val, (int, float)):
         if math.isnan(val) or math.isinf(val):
             return default
         return str(val)
+    
     if isinstance(val, (list, tuple)):
         return ", ".join(safe_str(v) for v in val[:5]) + ("..." if len(val) > 5 else "")
+    
     if isinstance(val, dict):
         return str({k: safe_str(v) for k, v in list(val.items())[:5]})
+    
     try:
-        result = str(val).strip()
-        return result if result else default
+        return str(val)
     except Exception:
         return default
 
-def safe_bool(val: Any, default: bool = False) -> bool:
-    if val is None:
-        return default
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, (int, float)):
-        return bool(val)
-    if isinstance(val, str):
-        val_lower = val.lower().strip()
-        true_values = {'true', 'yes', '1', 'y', 'да', 'on'}
-        false_values = {'false', 'no', '0', 'n', 'нет', 'off'}
-        if val_lower in true_values:
-            return True
-        if val_lower in false_values:
-            return False
-        return default
-    if isinstance(val, (list, tuple, dict)):
-        return bool(val)
-    return default
-
-def safe_datetime(val: Any, default: Optional[datetime] = None) -> Optional[datetime]:
-    if default is None:
-        default = datetime.now()
-    if val is None:
-        return default
-    if isinstance(val, datetime):
-        return val
-    if isinstance(val, date):
-        return datetime.combine(val, datetime.min.time())
-    if isinstance(val, (int, float)):
-        try:
-            return datetime.fromtimestamp(val)
-        except (ValueError, OSError):
-            return default
-    if isinstance(val, str):
-        formats = [
-            "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d",
-            "%d.%m.%Y %H:%M:%S", "%d.%m.%Y", "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S.%fZ",
-        ]
-        for fmt in formats:
-            try:
-                return datetime.strptime(val, fmt)
-            except ValueError:
-                continue
-        try:
-            if DATEUTIL_AVAILABLE:
-                return parse(val)
-        except Exception:
-            pass
-    return default
-
-def generate_cache_key(*args, **kwargs) -> str:
-    key_parts = []
-    for arg in args:
-        if isinstance(arg, (dict, OrderedDict)):
-            key_parts.append(json.dumps(arg, sort_keys=True, ensure_ascii=False))
-        elif isinstance(arg, (list, tuple, set)):
-            key_parts.append(str(sorted(arg) if not isinstance(arg, tuple) else arg))
-        elif isinstance(arg, pd.DataFrame):
-            try:
-                key_parts.append(hashlib.md5(pd.util.hash_pandas_object(arg).values.tobytes()).hexdigest())
-            except Exception:
-                key_parts.append(str(len(arg)))
-        elif isinstance(arg, pd.Series):
-            try:
-                key_parts.append(hashlib.md5(pd.util.hash_pandas_object(arg).values.tobytes()).hexdigest())
-            except Exception:
-                key_parts.append(str(len(arg)))
-        elif isinstance(arg, np.ndarray):
-            try:
-                key_parts.append(hashlib.md5(arg.tobytes()).hexdigest())
-            except Exception:
-                key_parts.append(str(arg.shape))
-        elif isinstance(arg, (datetime, date)):
-            key_parts.append(arg.isoformat())
-        else:
-            key_parts.append(str(arg))
-    for k, v in sorted(kwargs.items()):
-        if isinstance(v, (dict, OrderedDict)):
-            key_parts.append(f"{k}:{json.dumps(v, sort_keys=True, ensure_ascii=False)}")
-        elif isinstance(v, (list, tuple, set)):
-            key_parts.append(f"{k}:{str(sorted(v) if not isinstance(v, tuple) else v)}")
-        elif isinstance(v, pd.DataFrame):
-            try:
-                key_parts.append(f"{k}:{hashlib.md5(pd.util.hash_pandas_object(v).values.tobytes()).hexdigest()}")
-            except Exception:
-                key_parts.append(f"{k}:{len(v)}")
-        else:
-            key_parts.append(f"{k}:{v}")
-    key = "|".join(key_parts)
-    return hashlib.md5(key.encode('utf-8')).hexdigest()
+def money_round(value: float, decimals: int = 2) -> float:
+    """Округление денежных значений"""
+    try:
+        if math.isnan(value) or math.isinf(value):
+            return 0.0
+        return round(float(value), decimals)
+    except (ValueError, TypeError):
+        return 0.0
 
 def calculate_volume(length: float, width: float, height: float) -> float:
+    """Расчёт объёма"""
     if not all([length, width, height]):
         return 0.0
     if not all([length > 0, width > 0, height > 0]):
         return 0.0
-    if any([length > 1000, width > 1000, height > 1000]):
-        length /= 10
-        width /= 10
-        height /= 10
-    if any([length < 0.1, width < 0.1, height < 0.1]):
+    return (length * width * height) / 1000  # см³ → литры
+
+def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, 
+                              height_cm: float, volumetric_coeff: float = 5000.0) -> float:
+    """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
+    if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
+        return weight_kg
+    
+    volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
+    billable = max(weight_kg, volumetric_weight)
+    billable = math.ceil(billable * 2) / 2
+    
+    return billable
+
+def calculate_storage_cost_progressive(volume_l: float, days: int, base_rate: float, 
+                                       marketplace: str) -> float:
+    """Прогрессивная стоимость хранения"""
+    if marketplace in ["Ozon", "Wildberries"]:
+        if days <= 60:
+            multiplier = 1.0
+        elif days <= 90:
+            multiplier = 2.0
+        elif days <= 180:
+            multiplier = 4.0
+        elif days <= 365:
+            multiplier = 8.0
+        else:
+            multiplier = 16.0
+        
+        weighted_rate = base_rate * multiplier
+        return money_round(volume_l * weighted_rate * days)
+    else:
+        return money_round(volume_l * base_rate * days)
+
+def calculate_advertising_cost(price: float, category: str, ad_intensity: str = "medium") -> float:
+    """Рекламные расходы (ДРР — доля рекламных расходов)"""
+    drr_rates = {
+        "low": 0.05,
+        "medium": 0.15,
+        "high": 0.25,
+        "aggressive": 0.35
+    }
+    
+    competitive_categories = ["масла", "фильтры", "колодки", "аккумуляторы"]
+    
+    if category in competitive_categories:
+        intensity = "high" if ad_intensity == "medium" else ad_intensity
+    else:
+        intensity = ad_intensity
+    
+    return money_round(price * drr_rates.get(intensity, 0.15))
+
+def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> float:
+    """Расчёт налога"""
+    TAX_SYSTEMS = {
+        "УСН_6": {"rate": 0.06, "base": "price"},
+        "УСН_15": {"rate": 0.15, "base": "profit", "min_rate": 0.01},
+        "ОСН": {"rate": 0.20, "base": "profit"},
+        "ПСН": {"rate": 0.0, "base": "fixed"}
+    }
+    
+    cfg = TAX_SYSTEMS.get(tax_system, TAX_SYSTEMS["УСН_6"])
+    
+    if cfg["base"] == "price":
+        return money_round(price * cfg["rate"])
+    elif cfg["base"] == "profit":
+        profit = price - cost
+        tax = profit * cfg["rate"]
+        if tax_system == "УСН_15":
+            min_tax = price * cfg.get("min_rate", 0.01)
+            tax = max(tax, min_tax)
+        return money_round(max(0, tax))
+    elif cfg["base"] == "fixed":
         return 0.0
-    volume = (length * width * height) / 1000.0
-    if volume < 0.001:
-        return 0.0
-    return round(volume, 4)
+    
+    return 0.0
 
-def get_file_encoding(file_path: Union[str, Path]) -> str:
-    if CHARDET_AVAILABLE and chardet is not None:
-        try:
-            with open(file_path, 'rb') as f:
-                raw_data = f.read(100000)
-                result = chardet.detect(raw_data)
-                encoding = result.get('encoding', 'utf-8')
-                return encoding
-        except (IOError, OSError) as e:
-            logger.warning(f"Ошибка определения кодировки: {e}")
-    encodings = ['utf-8-sig', 'utf-8', 'cp1251', 'windows-1251', 'cp1252', 'latin1']
-    for enc in encodings:
-        try:
-            with open(file_path, 'r', encoding=enc) as f:
-                f.read()
-            return enc
-        except UnicodeDecodeError:
-            continue
-    return 'utf-8'
-
-def normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    text = text.lower()
-    text = re.sub(r'[^\w\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def normalize_key_for_match(value: str) -> str:
-    if not value:
-        return ""
-    return re.sub(r'[^0-9A-Za-zА-Яа-яЁё]', '', str(value).lower().strip())
-
-# ============================================================================
-# ФУНКЦИЯ РАСЧЕТА РЕКОМЕНДУЕМОЙ МИНИМАЛЬНОЙ ЦЕНЫ
-# ============================================================================
 def calculate_recommended_min_price(
     cost: float,
     commission_rate: float,
@@ -1503,15 +917,233 @@ def calculate_recommended_min_price(
     tax_system: str = "УСН_6",
     tax_rate: float = 0.06
 ) -> float:
-    if cost <= 0:
+    """Расчёт рекомендуемой минимальной цены"""
+    variable_rate = (
+        commission_rate +
+        acquiring_rate +
+        return_rate +
+        tax_rate
+    )
+    
+    fixed_costs = logistics + storage_cost + last_mile
+    
+    if variable_rate >= 1.0:
         return 0.0
-    fixed_costs = cost + logistics + storage_cost + last_mile
-    variable_rate = commission_rate + acquiring_rate + return_rate + tax_rate + min_profit_percent
-    denominator = 1 - variable_rate
-    if denominator <= 0:
-        return 0.0
-    recommended_price = fixed_costs / denominator
-    return max(0, money_round(recommended_price))
+    
+    min_price = (cost + fixed_costs) / (1 - variable_rate - min_profit_percent)
+    
+    return money_round(max(min_price, cost * 1.1))
+
+# ============================================================================
+# ПАРСИНГ РАЗМЕРОВ
+# ============================================================================
+def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
+    """🆕 v100.4: Парсит "человеческий" ввод размеров в формат (длина, ширина, высота)."""
+    if not dim_str or not isinstance(dim_str, str):
+        return 0.0, 0.0, 0.0
+    
+    dim_str = dim_str.lower().strip()
+    separators = ['x', '*', 'х', '×', ' ', ',']
+    
+    for sep in separators:
+        if sep in dim_str:
+            parts = [p.strip() for p in dim_str.split(sep) if p.strip()]
+            
+            if len(parts) >= 3:
+                try:
+                    dimensions = []
+                    for p in parts[:3]:
+                        cleaned = re.sub(r'[^\d.,\-]', '', p)
+                        cleaned = cleaned.replace(',', '.')
+                        
+                        if cleaned and cleaned.replace('.', '').replace('-', '').isdigit():
+                            dimensions.append(float(cleaned))
+                        else:
+                            nums = re.findall(r'(\d+\.?\d*)', p)
+                            if nums:
+                                dimensions.append(float(nums[0]))
+                    
+                    if len(dimensions) == 3:
+                        dimensions.sort(reverse=True)
+                        return tuple(dimensions)
+                except (ValueError, TypeError):
+                    pass
+    
+    return 0.0, 0.0, 0.0
+
+def parse_dimensions_vectorized(dims_series) -> "pl.DataFrame":
+    """Векторизованный парсинг размеров для Polars DataFrame."""
+    if not POLARS_AVAILABLE:
+        return None
+    
+    def parse_single(dim_str):
+        if pd.isna(dim_str) or not dim_str:
+            return pd.Series([0.0, 0.0, 0.0])
+        l, w, h = parse_dimensions_string(str(dim_str))
+        return pd.Series([l, w, h])
+    
+    parsed = dims_series.apply(parse_single)
+    return pd.DataFrame(parsed.tolist(), columns=['length', 'width', 'height'])
+
+# ============================================================================
+# ДЕКОРАТОРЫ
+# ============================================================================
+def validate_types(**kwargs_types):
+    """Декоратор для валидации типов аргументов"""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for param_name, expected_type in kwargs_types.items():
+                if param_name in kwargs:
+                    param_value = kwargs[param_name]
+                    if not isinstance(param_value, expected_type):
+                        raise ValidationError(
+                            f"Аргумент '{param_name}' должен быть типа {expected_type.__name__}",
+                            field=param_name,
+                            value=param_value
+                        )
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def log_execution(func: Callable) -> Callable:
+    """Декоратор для логирования выполнения функций"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        args_str = []
+        if args:
+            args_str.extend(str(a)[:100] for a in args[:5])
+        if kwargs:
+            args_str.extend(f"{k}={str(v)[:100]}" for k, v in list(kwargs.items())[:5])
+        
+        logger.info(f"▶️ Выполнение {func.__name__}({', '.join(args_str)})")
+        
+        start_time = time.perf_counter()
+        try:
+            result = func(*args, **kwargs)
+            elapsed = time.perf_counter() - start_time
+            logger.info(f"✅ {func.__name__} выполнена за {elapsed:.3f}с")
+            return result
+        except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            logger.error(f" {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
+    return wrapper
+
+def timer_decorator(func: Callable) -> Callable:
+    """Декоратор для измерения времени выполнения"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start_time
+        logger.info(f"⏱️ {func.__name__}: {elapsed:.3f}с")
+        return result
+    return wrapper
+
+def safe_execution(default_return: Any = None, log_error: bool = True) -> Callable:
+    """Декоратор для безопасного выполнения с обработкой ошибок"""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if log_error:
+                    logger.error(f"Ошибка в {func.__name__}: {e}")
+                    logger.error(traceback.format_exc())
+                return default_return
+        return wrapper
+    return decorator
+
+# ============================================================================
+# УТИЛИТЫ ДЛЯ КЭШИРОВАНИЯ
+# ============================================================================
+def make_cache_key(*args, **kwargs) -> str:
+    """Создание уникального ключа для кэша"""
+    key_parts = []
+    
+    for arg in args:
+        if isinstance(arg, (int, float, str, bool)):
+            key_parts.append(str(arg))
+        elif isinstance(arg, (list, tuple, set)):
+            key_parts.append(str(sorted(arg) if not isinstance(arg, tuple) else arg))
+        elif isinstance(arg, pd.DataFrame):
+            try:
+                key_parts.append(hashlib.md5(pd.util.hash_pandas_object(arg).values.tobytes()).hexdigest())
+            except Exception:
+                key_parts.append(str(len(arg)))
+        else:
+            key_parts.append(str(arg))
+    
+    for k, v in sorted(kwargs.items()):
+        if isinstance(v, (int, float, str, bool)):
+            key_parts.append(f"{k}:{v}")
+        elif isinstance(v, (list, tuple, set)):
+            key_parts.append(f"{k}:{str(sorted(v) if not isinstance(v, tuple) else v)}")
+        elif isinstance(v, pd.DataFrame):
+            try:
+                key_parts.append(f"{k}:{hashlib.md5(pd.util.hash_pandas_object(v).values.tobytes()).hexdigest()}")
+            except Exception:
+                key_parts.append(f"{k}:{len(v)}")
+        else:
+            key_parts.append(f"{k}:{v}")
+    
+    key = "|".join(key_parts)
+    return hashlib.md5(key.encode('utf-8')).hexdigest()
+
+# ============================================================================
+# ПРОВЕРКА ПАМЯТИ И ОПТИМИЗАЦИЯ
+# ============================================================================
+if PSUTIL_AVAILABLE:
+    memory_mb = psutil.virtual_memory().available / (1024 * 1024)
+    if memory_mb < 2048:
+        logger.warning(f"⚠️ Мало памяти ({memory_mb:.0f} MB). Включен экономичный режим.")
+        os.environ['POLARS_MAX_THREADS'] = '1'
+
+class PerformanceManager:
+    """Менеджер производительности для оптимизации работы с большими данными"""
+    
+    def __init__(self):
+        self.memory_threshold_mb = 2048
+        self.chunk_size = DEFAULT_CHUNK_SIZE
+        self.max_workers = min(4, os.cpu_count() or 2)
+    
+    def optimize_for_big_data(self):
+        """Оптимизация для работы с большими данными"""
+        if PSUTIL_AVAILABLE:
+            memory_mb = psutil.virtual_memory().available / (1024 * 1024)
+            if memory_mb < self.memory_threshold_mb:
+                self.chunk_size = 5000
+                self.max_workers = 2
+                logger.info(f" Оптимизация для малой памяти: chunk_size={self.chunk_size}, workers={self.max_workers}")
+    
+    def get_optimal_chunk_size(self, total_rows: int) -> int:
+        """Получение оптимального размера чанка"""
+        if total_rows < 10000:
+            return total_rows
+        elif total_rows < 100000:
+            return self.chunk_size
+        else:
+            return self.chunk_size * 2
+
+perf_manager = PerformanceManager()
+perf_manager.optimize_for_big_data()
+
+# ============================================================================
+# ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКА 0
+# ============================================================================
+logger.info(f"✅ Блок 0 загружен. Версия: {APP_VERSION}")
+logger.info(f"📊 Python: {sys.version}")
+logger.info(f" Streamlit: {st.__version__}")
+logger.info(f"📊 Pandas: {pd.__version__}")
+logger.info(f"📊 NumPy: {np.__version__}")
+if POLARS_AVAILABLE:
+    logger.info(f"📊 Polars: {pl.__version__}")
+if DUCKDB_AVAILABLE:
+    logger.info(f"📊 DuckDB: {duckdb.__version__}")
 # ============================================================================
 # БЛОК 1: ENUM И ТИПЫ
 # ============================================================================
@@ -9841,35 +9473,44 @@ class SmartTariffLoader:
         
         return pd.DataFrame(results)
 # ============================================================================
-# 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (v100.16 - ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.11:
-# 1. Улучшена обработка ошибок инициализации
-# 2. Корректная обработка тарифов из прямого API
-# 3. Добавлены проверки доступности методов
+# ✅ ИСПРАВЛЕНИЯ v100.16:
+# 1. Добавлена безопасная инициализация SmartTariffLoader и UnitEconomics
+# 2. Корректная обработка разных структур данных от API и AI
+# 3. Добавлены проверки наличия методов через hasattr()
+# 4. Улучшено отображение текущих тарифов
+# 5. Все ключи Streamlit виджетов уникальны
 # ============================================================================
 
 def show_smart_tariff_interface():
     """
     🧠 ИНТЕРФЕЙС УМНОЙ ЗАГРУЗКИ ТАРИФОВ
-    ✅ ИСПРАВЛЕНО: Корректная обработка тарифов из прямого API
+    ✅ ИСПРАВЛЕНО: Корректная обработка тарифов из прямого API и AI
     """
     st.header("🧠 Умная загрузка тарифов")
     st.info("""
-📋 **ВЫБЕРИТЕ ИСТОЧНИК ТАРИФОВ:**
+ **ВЫБЕРИТЕ ИСТОЧНИК ТАРИФОВ:**
 🔌 **API Маркетплейса** — прямое подключение к API (самый точный)
 🤖 **AI (документация)** — автоматический парсинг документации
 💾 **Загруженные ранее** — использование кэшированных тарифов
 🔄 **Гибридный** — AI + API (рекомендуемый)
+
 💡 **Рекомендация:** Используйте гибридный режим для максимальной надёжности
 """)
     
     # ✅ Инициализация с обработкой ошибок
     try:
-        tariff_loader = SmartTariffLoader()
-        st.success("✅ SmartTariffLoader инициализирован")
+        if 'SmartTariffLoader' in globals():
+            tariff_loader = SmartTariffLoader()
+            st.success("✅ SmartTariffLoader инициализирован")
+        else:
+            st.error("❌ Класс SmartTariffLoader не найден в коде")
+            tariff_loader = None
+            return
     except Exception as e:
         st.error(f"❌ Ошибка инициализации SmartTariffLoader: {e}")
+        logger.exception("Ошибка SmartTariffLoader")
         tariff_loader = None
         return
     
@@ -9880,8 +9521,12 @@ def show_smart_tariff_interface():
             return
     except Exception as e:
         st.error(f"❌ Ошибка инициализации UnitEconomics: {e}")
+        logger.exception("Ошибка UnitEconomics")
         return
     
+    # ====================================================================
+    # НАСТРОЙКИ ИСТОЧНИКА
+    # ====================================================================
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -9892,32 +9537,38 @@ def show_smart_tariff_interface():
         )
     
     with col2:
+        # Проверяем доступные источники
+        available_sources = ["hybrid", "api", "ai", "cache"]
+        if tariff_loader and hasattr(tariff_loader, 'get_available_sources'):
+            try:
+                available_sources = tariff_loader.get_available_sources(marketplace)
+            except Exception:
+                pass
+        
+        source_labels = {
+            "hybrid": "🔄 Гибридный (AI + API)",
+            "api": "🔌 API Маркетплейса",
+            "ai": "🤖 AI (документация)",
+            "cache": "💾 Кэш (загруженные ранее)"
+        }
+        
         source = st.selectbox(
             "📡 Источник тарифов",
-            [
-                "hybrid",
-                "api",
-                "ai",
-                "cache"
-            ],
-            format_func=lambda x: SmartTariffLoader.SOURCES.get(x, x) if hasattr(SmartTariffLoader, 'SOURCES') else x,
+            options=available_sources,
+            format_func=lambda x: source_labels.get(x, x),
             key="smart_tariff_source"
         )
     
-    # ✅ Показываем доступные источники
-    if tariff_loader and hasattr(tariff_loader, 'get_available_sources'):
-        try:
-            available = tariff_loader.get_available_sources(marketplace)
-            source_labels = [SmartTariffLoader.SOURCES.get(s, s) for s in available] if hasattr(SmartTariffLoader, 'SOURCES') else available
-            st.info(f"🔍 Доступные источники для {marketplace}: {', '.join(source_labels)}")
-        except Exception as e:
-            st.warning(f"⚠️ Ошибка получения доступных источников: {e}")
-    else:
-        st.info("ℹ️ Доступны все источники")
+    # ====================================================================
+    # API КЛЮЧИ (если выбран API режим)
+    # ====================================================================
+    api_key = None
+    client_id = None
     
-    # ✅ API ключи (если выбран API режим)
     if source in ["api", "hybrid"]:
         st.subheader("🔑 API ключи")
+        st.caption("Ключи хранятся только в памяти текущей сессии")
+        
         col1, col2 = st.columns(2)
         with col1:
             api_key = st.text_input(
@@ -9934,101 +9585,115 @@ def show_smart_tariff_interface():
                 placeholder="Введите Client ID",
                 key="smart_tariff_client_id"
             )
-    else:
-        api_key = None
-        client_id = None
     
-    # ✅ Кнопка сравнения источников
-    if st.button("📊 Сравнить источники", key="smart_tariff_compare"):
-        if tariff_loader and hasattr(tariff_loader, 'compare_sources'):
-            with st.spinner("Сравнение источников..."):
-                try:
-                    compare_df = tariff_loader.compare_sources(marketplace, api_key, client_id)
-                    if compare_df is not None and not compare_df.empty:
-                        st.subheader("📊 Сравнение источников")
-                        st_dataframe_compat(compare_df)
-                    else:
-                        st.warning("⚠️ Нет данных для сравнения")
-                except Exception as e:
-                    st.error(f"❌ Ошибка сравнения: {e}")
-        else:
-            st.warning("⚠️ Метод compare_sources не найден")
+    # ====================================================================
+    # КНОПКИ ДЕЙСТВИЙ
+    # ====================================================================
+    action_col1, action_col2 = st.columns(2)
     
-    # ✅ Кнопка загрузки
-    if st.button("🚀 Загрузить тарифы", type="primary", key="smart_tariff_load"):
-        if not tariff_loader or not hasattr(tariff_loader, 'load_tariffs'):
-            st.error("❌ Метод load_tariffs не найден")
-            return
-        
-        with st.spinner(f"Загрузка тарифов из источника: {SmartTariffLoader.SOURCES.get(source, source) if hasattr(SmartTariffLoader, 'SOURCES') else source}..."):
-            try:
-                result = tariff_loader.load_tariffs(
-                    marketplace=marketplace,
-                    source=source,
-                    api_key=api_key,
-                    client_id=client_id,
-                    force_refresh=True
-                )
-                
-                if not isinstance(result, dict):
-                    st.error("❌ Неверный формат результата")
-                    return
-                
-                if result.get("errors"):
-                    st.error(f"❌ Ошибки загрузки:")
-                    for err in result["errors"]:
-                        st.error(f"  - {err}")
-                
-                if result.get("warnings"):
-                    st.info(f"ℹ️ Информация:")
-                    for warn in result["warnings"]:
-                        st.info(f"  - {warn}")
-                
-                if result.get("data"):
-                    st.success(f"✅ Тарифы успешно загружены из источника: {result.get('source_used', 'Неизвестно')}")
-                    confidence = result.get('confidence', 0)
-                    st.info(f"🎯 Доверие к данным: {confidence*100:.0f}%")
-                    
-                    # Показываем загруженные тарифы
-                    with st.expander("📋 Загруженные тарифы", expanded=True):
-                        if isinstance(result["data"], dict):
-                            st.json(result["data"])
+    with action_col1:
+        # Кнопка сравнения источников
+        if st.button("📊 Сравнить источники", key="smart_tariff_compare", use_container_width=True):
+            if tariff_loader and hasattr(tariff_loader, 'compare_sources'):
+                with st.spinner("Сравнение источников..."):
+                    try:
+                        compare_df = tariff_loader.compare_sources(marketplace, api_key, client_id)
+                        if compare_df is not None and not compare_df.empty:
+                            st.subheader("📊 Сравнение источников")
+                            st_dataframe_compat(compare_df)
                         else:
-                            st.write(result["data"])
-                    
-                    # ✅ ИСПРАВЛЕНИЕ: Применяем тарифы с учётом структуры данных
-                    if st.button("💾 Применить тарифы к расчётам", key="smart_tariff_apply"):
-                        rates_to_apply = None
-                        
-                        # ✅ ИСПРАВЛЕНИЕ: Проверяем разные структуры данных
-                        if "rates" in result["data"]:
-                            # Структура от AI
-                            rates_to_apply = result["data"]["rates"]
-                        elif "raw_data" in result["data"]:
-                            # Структура от прямого API
-                            st.warning("⚠️ Прямой API вернул сырые данные. Применяем базовые тарифы.")
-                            rates_to_apply = result["data"].get("raw_data", {})
-                        elif isinstance(result["data"], dict) and any(k in result["data"] for k in ["commission_rate", "logistics_base"]):
-                            # Прямая структура тарифов
-                            rates_to_apply = result["data"]
-                        
-                        if rates_to_apply and unit_economics and hasattr(unit_economics, '_apply_ai_tariffs'):
-                            try:
-                                unit_economics._apply_ai_tariffs(marketplace, rates_to_apply)
-                                st.success(f"✅ Тарифы для {marketplace} применены!")
-                            except Exception as e:
-                                st.error(f"❌ Ошибка применения: {e}")
-                        else:
-                            st.warning("⚠️ Не найдены данные для применения")
-                else:
-                    st.error("❌ Не удалось загрузить тарифы")
+                            st.warning("⚠️ Нет данных для сравнения")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка сравнения: {e}")
+                        logger.exception("Ошибка compare_sources")
+            else:
+                st.warning("⚠️ Метод compare_sources не найден в SmartTariffLoader")
+    
+    with action_col2:
+        # Кнопка загрузки
+        if st.button("🚀 Загрузить тарифы", type="primary", key="smart_tariff_load", use_container_width=True):
+            if not tariff_loader or not hasattr(tariff_loader, 'load_tariffs'):
+                st.error("❌ Метод load_tariffs не найден")
+                return
             
-            except Exception as e:
-                st.error(f"❌ Ошибка загрузки: {e}")
-                logger.exception("Ошибка в load_tariffs")
+            with st.spinner(f"Загрузка тарифов из источника: {source_labels.get(source, source)}..."):
+                try:
+                    result = tariff_loader.load_tariffs(
+                        marketplace=marketplace,
+                        source=source,
+                        api_key=api_key,
+                        client_id=client_id,
+                        force_refresh=True
+                    )
+                    
+                    if not isinstance(result, dict):
+                        st.error("❌ Неверный формат результата от загрузчика")
+                        return
+                    
+                    # Показываем ошибки
+                    if result.get("errors"):
+                        st.error(f"❌ Ошибки загрузки:")
+                        for err in result["errors"]:
+                            st.error(f"  - {err}")
+                    
+                    # Показываем предупреждения
+                    if result.get("warnings"):
+                        st.info(f"ℹ️ Информация:")
+                        for warn in result["warnings"]:
+                            st.info(f"  - {warn}")
+                    
+                    # Показываем данные
+                    if result.get("data"):
+                        st.success(f"✅ Тарифы успешно загружены из источника: {result.get('source_used', 'Неизвестно')}")
+                        confidence = result.get('confidence', 0)
+                        st.info(f"🎯 Доверие к данным: {confidence*100:.0f}%")
+                        
+                        # Показываем загруженные тарифы
+                        with st.expander(" Загруженные тарифы", expanded=True):
+                            if isinstance(result["data"], dict):
+                                st.json(result["data"])
+                            else:
+                                st.write(result["data"])
+                        
+                        # Кнопка применения тарифов
+                        st.divider()
+                        if st.button(" Применить тарифы к расчётам", key="smart_tariff_apply", use_container_width=True):
+                            rates_to_apply = None
+                            
+                            # Проверяем разные структуры данных
+                            if "rates" in result["data"]:
+                                # Структура от AI
+                                rates_to_apply = result["data"]["rates"]
+                            elif "raw_data" in result["data"]:
+                                # Структура от прямого API
+                                st.warning("⚠️ Прямой API вернул сырые данные. Применяем базовые тарифы.")
+                                rates_to_apply = result["data"].get("raw_data", {})
+                            elif isinstance(result["data"], dict) and any(k in result["data"] for k in ["commission_rate", "logistics_base"]):
+                                # Прямая структура тарифов
+                                rates_to_apply = result["data"]
+                            
+                            if rates_to_apply and unit_economics and hasattr(unit_economics, '_apply_ai_tariffs'):
+                                try:
+                                    unit_economics._apply_ai_tariffs(marketplace, rates_to_apply)
+                                    st.success(f"✅ Тарифы для {marketplace} применены!")
+                                    st.balloons()
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка применения: {e}")
+                                    logger.exception("Ошибка _apply_ai_tariffs")
+                            else:
+                                st.warning("⚠️ Не найдены данные для применения или метод _apply_ai_tariffs недоступен")
+                    else:
+                        st.error("❌ Не удалось загрузить тарифы (данные отсутствуют)")
+                
+                except Exception as e:
+                    st.error(f"❌ Ошибка загрузки: {e}")
+                    logger.exception("Ошибка в load_tariffs")
     
-    # ✅ Отображение текущих тарифов
-    st.subheader("📊 Текущие тарифы")
+    # ====================================================================
+    # ОТОБРАЖЕНИЕ ТЕКУЩИХ ТАРИФОВ
+    # ====================================================================
+    st.divider()
+    st.subheader(" Текущие тарифы в системе")
     
     if unit_economics and hasattr(unit_economics, '_configs'):
         configs = unit_economics._configs
@@ -10060,49 +9725,15 @@ def show_smart_tariff_interface():
                     ]
                 }
                 
-                st_dataframe_compat(pd.DataFrame(tariff_data))
+                st_dataframe_compat(pd.DataFrame(tariff_data), hide_index=True)
             
             except Exception as e:
-                st.warning(f"⚠️ Ошибка отображения тарифов: {e}")
+                st.warning(f"️ Ошибка отображения тарифов: {e}")
+                logger.warning(f"Ошибка отображения тарифов: {e}")
         else:
-            st.info(f"ℹ️ Тарифы для {marketplace} не найдены")
+            st.info(f"ℹ️ Тарифы для {marketplace} не найдены в конфигурации")
     else:
         st.warning("⚠️ Конфигурации маркетплейсов не найдены")
-# ============================================================================
-# ✅ ИСПРАВЛЕНИЕ 2: Заглушка для API Тарифов маркетплейсов
-# ============================================================================
-def show_api_tariffs_interface():
-    """🌐 API Тарифы маркетплейсов - информационный раздел"""
-    st.header("🌐 API Тарифы маркетплейсов")
-    st.info("""
-🚧 **Раздел в разработке**
-
-Прямое подключение к API маркетплейсов интегрировано в блок '🧠 Умная загрузка тарифов'.
-
-**Используйте раздел '🧠 Умная загрузка тарифов' для:**
-- ✅ Получения тарифов через API Ozon/Wildberries
-- ✅ AI-анализа документации через DeepSeek
-- ✅ Гибридного режима (API + AI)
-- ✅ Работы с кэшированными тарифами
-""")
-    
-    st.markdown("""
-### 📋 Доступные API:
-
-**Ozon Seller API:**
-- `https://api-seller.ozon.ru/v1/finance/tariff-rates` — Тарифы
-- `https://api-seller.ozon.ru/v2/products/info/stocks` — Остатки
-
-**Wildberries API:**
-- `https://common-api.wildberries.ru/tariffs/box` — Тарифы коробов
-- `https://statistics-api.wildberries.ru/api/v1/supplier/reportDetailByPeriod` — Отчёты
-
-**Яндекс Маркет API:**
-- `https://api.partner.market.yandex.ru/v2/campaigns` — Кампании
-- `https://api.partner.market.yandex.ru/v2/campaigns/{id}/deliveries/fees` — Тарифы
-""")
-    
-    st.warning("⚠️ Для работы с API используйте раздел '🧠 Умная загрузка тарифов'")
 
 # ============================================================================
 # 🆕 БЛОК 21: БАЗА ДАННЫХ КАТЕГОРИЙ С ВЕСОГАБАРИТАМИ
@@ -10767,26 +10398,31 @@ def validate_dimensions_with_category(
     
     return result
 # ============================================================================
-# 🆕 БЛОК 25: СИСТЕМА СОХРАНЕНИЯ И ЗАГРУЗКИ ДАННЫХ (v100.8)
+# 🆕 БЛОК 25: СИСТЕМА СОХРАНЕНИЯ И ЗАГРУЗКИ ДАННЫХ (v100.16)
 # ============================================================================
-# ✅ Возможности:
-# 1. Сохранение всей базы данных в файл (.duckdb)
-# 2. Экспорт настроек и правил в JSON
-# 3. Создание полного бэкапа в ZIP-архиве
-# 4. Загрузка данных из файла
-# 5. Импорт настроек из JSON
-# 6. Восстановление из ZIP-архива
-# 7. История бэкапов с автоматической очисткой
-# 8. Статистика использования
+# ✅ ИСПРАВЛЕНИЯ v100.16:
+# 1. BACKUPS_DIR берётся из Блока 0 (не переопределяется)
+# 2. Добавлен import tempfile
+# 3. st.tabs заменён на st.radio для совместимости
+# 4. Убрано дублирование класса DataManager
+# 5. Добавлено подробное логирование
+# 6. Обработка всех ошибок с graceful degradation
 # ============================================================================
 
-# === КОНСТАНТЫ ДЛЯ БЭКАПОВ ===
+print("🔄 Загрузка Блока 25: Система сохранения и загрузки данных...")
+
+# === ИМПОРТЫ ДЛЯ БЛОКА 25 ===
+import tempfile as _tempfile_module
+
+# === КОНСТАНТЫ ===
+# BACKUPS_DIR и MAX_BACKUPS уже определены в Блоке 0
+# Просто убеждаемся, что директория существует
 try:
-    BACKUPS_DIR = BASE_DIR / "backups"
-except NameError:
-    BACKUPS_DIR = Path("./backups")
+    BACKUPS_DIR.mkdir(exist_ok=True, parents=True)
+    print(f"✅ Директория бэкапов: {BACKUPS_DIR}")
+except Exception as e:
+    print(f"⚠️ Ошибка создания директории бэкапов: {e}")
 
-BACKUPS_DIR.mkdir(exist_ok=True, parents=True)
 MAX_BACKUPS = 10  # Максимальное количество хранимых бэкапов
 
 
@@ -10819,7 +10455,6 @@ class DataManager:
             
             current_db = self.catalog.db_path
             if current_db.exists():
-                import shutil
                 shutil.copy2(current_db, output_path)
                 self.logger.info(f"✅ База сохранена: {output_path}")
                 return True
@@ -10850,7 +10485,6 @@ class DataManager:
                     pass
             
             # Копируем файл в рабочее место
-            import shutil
             shutil.copy2(input_path, self.catalog.db_path)
             
             # Пересоздаем соединение
@@ -10878,7 +10512,7 @@ class DataManager:
                 output_path = self.backups_dir / f"settings_{timestamp}.json"
             
             settings_data = {
-                "version": "100.8",
+                "version": APP_VERSION,
                 "export_date": datetime.now().isoformat(),
                 "price_rules": self.catalog.price_rules,
                 "exclusion_rules": self.catalog.exclusion_rules,
@@ -10940,8 +10574,6 @@ class DataManager:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 output_path = self.backups_dir / f"backup_{timestamp}.zip"
             
-            import zipfile
-            
             with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # База данных
                 if self.catalog and self.catalog.db_path.exists():
@@ -10958,7 +10590,7 @@ class DataManager:
                 
                 # Метаданные бэкапа
                 metadata = {
-                    "version": "100.8",
+                    "version": APP_VERSION,
                     "created_at": datetime.now().isoformat(),
                     "parts_count": self.catalog.get_statistics().get('parts', 0) if self.catalog else 0,
                     "python_version": sys.version
@@ -10982,8 +10614,6 @@ class DataManager:
             if not backup_path.exists():
                 self.logger.error(f"Файл не найден: {backup_path}")
                 return False
-            
-            import zipfile
             
             with zipfile.ZipFile(backup_path, 'r') as zipf:
                 # Проверяем метаданные
@@ -11022,7 +10652,6 @@ class DataManager:
                             # Перемещаем из подпапки
                             extracted = data_dir / name
                             if extracted.exists() and extracted != target_path:
-                                import shutil
                                 shutil.move(str(extracted), str(target_path))
             
             # Перезагружаем конфигурации
@@ -11116,7 +10745,7 @@ def show_data_save_load_interface():
 - 🔄 **Восстановление** — полное восстановление из ZIP-архива
 - 🗑️ **Управление бэкапами** — просмотр и удаление старых бэкапов
 
-💡 **СОВЕТ:** Регулярно создавайте бэкапы перед важными операциями!
+ **СОВЕТ:** Регулярно создавайте бэкапы перед важными операциями!
 """)
     
     # Инициализация
@@ -11129,18 +10758,18 @@ def show_data_save_load_interface():
     if 'high_volume_catalog' in st.session_state:
         manager.catalog = st.session_state.high_volume_catalog
     
-    # Меню - вкладки
-    save_load_tab = st.tabs([
-        "💾 Сохранение",
-        "📥 Загрузка",
-        "🗂️ Управление бэкапами",
-        "⚙️ Настройки"
-    ])
+    # Меню - используем st.radio вместо st.tabs для совместимости
+    tab_choice = st.radio(
+        "📑 Раздел",
+        ["💾 Сохранение", "📥 Загрузка", "🗂️ Бэкапы", "⚙️ Настройки"],
+        horizontal=True,
+        key="save_load_tabs"
+    )
     
     # ====================================================================
     # ВКЛАДКА 1: СОХРАНЕНИЕ
     # ====================================================================
-    with save_load_tab[0]:
+    if tab_choice == "💾 Сохранение":
         st.subheader("💾 Сохранение данных")
         
         save_col1, save_col2 = st.columns(2)
@@ -11161,7 +10790,7 @@ def show_data_save_load_interface():
                     st.warning("⚠️ Каталог не инициализирован")
         
         with save_col2:
-            st.markdown("#### ⚙️ Настройки")
+            st.markdown("#### ️ Настройки")
             st.caption("Экспорт правил и конфигураций в JSON")
             
             if st.button("⚙️ Экспорт настроек", use_container_width=True):
@@ -11213,8 +10842,8 @@ def show_data_save_load_interface():
     # ====================================================================
     # ВКЛАДКА 2: ЗАГРУЗКА
     # ====================================================================
-    with save_load_tab[1]:
-        st.subheader("📥 Загрузка данных")
+    elif tab_choice == " Загрузка":
+        st.subheader(" Загрузка данных")
         
         load_col1, load_col2 = st.columns(2)
         
@@ -11230,11 +10859,11 @@ def show_data_save_load_interface():
             )
             
             if db_file is not None:
-                st.info(f"📄 Выбран файл: {db_file.name} ({db_file.size / 1024:.1f} КБ)")
+                st.info(f" Выбран файл: {db_file.name} ({db_file.size / 1024:.1f} КБ)")
                 
-                if st.button("📥 Загрузить базу", type="primary", use_container_width=True):
+                if st.button(" Загрузить базу", type="primary", use_container_width=True):
                     # Сохраняем во временный файл
-                    temp_path = Path(tempfile.gettempdir()) / f"temp_{int(time.time())}.duckdb"
+                    temp_path = Path(_tempfile_module.gettempdir()) / f"temp_{int(time.time())}.duckdb"
                     
                     with open(temp_path, "wb") as f:
                         f.write(db_file.getbuffer())
@@ -11267,8 +10896,8 @@ def show_data_save_load_interface():
             if settings_file is not None:
                 st.info(f"📄 Выбран файл: {settings_file.name}")
                 
-                if st.button("⚙️ Импорт настроек", type="primary", use_container_width=True):
-                    temp_path = Path(tempfile.gettempdir()) / f"temp_{int(time.time())}.json"
+                if st.button("️ Импорт настроек", type="primary", use_container_width=True):
+                    temp_path = Path(_tempfile_module.gettempdir()) / f"temp_{int(time.time())}.json"
                     
                     with open(temp_path, "wb") as f:
                         f.write(settings_file.getbuffer())
@@ -11304,7 +10933,7 @@ def show_data_save_load_interface():
             
             if st.checkbox("Я понимаю, что текущие данные будут заменены", key="confirm_restore"):
                 if st.button("🔄 Восстановить из бэкапа", type="primary", use_container_width=True):
-                    temp_path = Path(tempfile.gettempdir()) / f"temp_{int(time.time())}.zip"
+                    temp_path = Path(_tempfile_module.gettempdir()) / f"temp_{int(time.time())}.zip"
                     
                     with open(temp_path, "wb") as f:
                         f.write(backup_file.getbuffer())
@@ -11329,7 +10958,7 @@ def show_data_save_load_interface():
     # ====================================================================
     # ВКЛАДКА 3: УПРАВЛЕНИЕ БЭКАПАМИ
     # ====================================================================
-    with save_load_tab[2]:
+    elif tab_choice == "️ Бэкапы":
         st.subheader("🗂️ Управление бэкапами")
         
         backups = manager.list_backups()
@@ -11409,7 +11038,7 @@ def show_data_save_load_interface():
                 key="keep_backups_count"
             )
             
-            if st.button("🧹 Удалить старые бэкапы", use_container_width=True):
+            if st.button(" Удалить старые бэкапы", use_container_width=True):
                 deleted = manager.cleanup_old_backups(keep_count)
                 st.success(f"✅ Удалено старых бэкапов: {deleted}")
                 st.rerun()
@@ -11417,10 +11046,10 @@ def show_data_save_load_interface():
     # ====================================================================
     # ВКЛАДКА 4: НАСТРОЙКИ
     # ====================================================================
-    with save_load_tab[3]:
+    elif tab_choice == "⚙️ Настройки":
         st.subheader("⚙️ Настройки сохранения")
         
-        st.markdown("#### 📁 Пути сохранения")
+        st.markdown("####  Пути сохранения")
         
         col_path1, col_path2 = st.columns(2)
         
@@ -11455,7 +11084,7 @@ def show_data_save_load_interface():
                     parts_count = manager.catalog.get_statistics().get('parts', 0)
                     st.metric("📊 Записей в базе", f"{parts_count:,}")
                 except Exception:
-                    st.metric("📊 Записей в базе", "Н/Д")
+                    st.metric(" Записей в базе", "Н/Д")
             else:
                 st.metric("📊 Записей в базе", "Н/Д")
         
@@ -11472,9 +11101,10 @@ def show_data_save_load_interface():
 
 
 # ============================================================================
-# ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКА
+# ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКА 25
 # ============================================================================
-print("✅ Блок 25: Система сохранения и загрузки данных загружена")
+print("✅ Блок 25: Система сохранения и загрузки данных загружена успешно")
+logger.info("✅ Блок 25 загружен: DataManager и show_data_save_load_interface()")
 # ============================================================================
 # ИНТЕГРАЦИЯ В ГЛАВНОЕ МЕНЮ
 # ============================================================================
