@@ -3797,7 +3797,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
     return categories
 
 # ============================================================================
-# БЛОК 6: AI ПРОГНОЗИРОВАНИЕ ТАРИФОВ
+# БЛОК 6: AI ПРОГНОЗИРОВАНИЕ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
 class DeepSeekRateUpdater:
     """Класс для обновления тарифов через DeepSeek AI с прогнозированием"""
@@ -5711,14 +5711,13 @@ class MarketplaceUnitEconomics:
 # ============================================================================
 # БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
-
-# ✅ ИСПРАВЛЕНИЕ: Функция-фабрика с кэшированием для Streamlit
+# ============================================================================
+# ✅ ИСПРАВЛЕНИЕ: Функция-фабрика с кэшированием для HighVolumeAutoPartsCatalog
+# ============================================================================
 @st.cache_resource
 def get_high_volume_catalog():
-    """✅ ИСПРАВЛЕНИЕ: Создание каталога через st.cache_resource для корректной работы с DuckDB"""
+    """Создание каталога через st.cache_resource для корректной работы с DuckDB"""
     return HighVolumeAutoPartsCatalog()
-
-
 class HighVolumeAutoPartsCatalog:
     def __init__(self):
         self.data_dir = Path("./auto_parts_data")
@@ -9179,15 +9178,14 @@ def show_catalog_calculation_parallel():
     else:
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 # ============================================================================
-# 🆕 БЛОК 17: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI) - БЕЗ ИЗМЕНЕНИЙ
+# 🆕 БЛОК 17: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI) - ИСПРАВЛЕННАЯ ВЕРСИЯ
 # ============================================================================
 def show_catalog_grouping_interface():
     """
     🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
-    High-Volume каталог с поддержкой 10M+ записей
+    ✅ ИСПРАВЛЕНО: Используется get_high_volume_catalog() с кэшированием
     """
     st.header("🗂️ Шаг 3: Каталог для группировки")
-    
     st.info("""
 📋 **О РАЗДЕЛЕ:**
 Этот раздел предназначен для работы с большими каталогами товаров.
@@ -9204,6 +9202,7 @@ def show_catalog_grouping_interface():
         st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
         return
     
+    # ✅ ИСПРАВЛЕНИЕ: Используем функцию-фабрику с кэшированием
     if 'high_volume_catalog' not in st.session_state:
         st.session_state.high_volume_catalog = get_high_volume_catalog()
     
@@ -9214,7 +9213,6 @@ def show_catalog_grouping_interface():
         return
     
     st.sidebar.title("🧭 Меню каталога")
-    
     option = st.sidebar.radio(
         "Выберите раздел",
         ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", "🔧 Управление"],
@@ -9236,7 +9234,6 @@ def show_catalog_grouping_interface():
 def show_catalog_upload(catalog):
     """Загрузка данных в каталог"""
     st.subheader("📥 Загрузка данных")
-    
     st.info("""
 📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
 - **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
@@ -9248,7 +9245,6 @@ def show_catalog_upload(catalog):
 """)
     
     col1, col2 = st.columns(2)
-    
     with col1:
         oe_file = st.file_uploader("📄 Основные данные (OE)", type=['xlsx'], key="hv_oe")
         cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
@@ -9266,7 +9262,6 @@ def show_catalog_upload(catalog):
     
     if st.button("🚀 Обработать и загрузить", key="hv_load"):
         saved_paths = {}
-        
         for key, file in uploaded_files.items():
             if file:
                 path = catalog.data_dir / f"{key}_{int(time.time())}.xlsx"
@@ -9291,7 +9286,6 @@ def show_catalog_search(catalog):
     st.subheader("🔍 Поиск и фильтрация")
     
     col1, col2 = st.columns(2)
-    
     with col1:
         search_artikul = st.text_input("🔢 Артикул", key="search_artikul")
         search_brand = st.text_input("🏷️ Бренд", key="search_brand")
@@ -9314,10 +9308,10 @@ def show_catalog_search(catalog):
         
         if search_oe:
             query_parts.append("""
-                artikul_norm IN (
-                    SELECT artikul_norm FROM cross_references
-                    WHERE oe_number_norm LIKE ?
-                )
+            artikul_norm IN (
+                SELECT artikul_norm FROM cross_references
+                WHERE oe_number_norm LIKE ?
+            )
             """)
             params.append(f"%{search_oe}%")
         
@@ -9337,30 +9331,11 @@ def show_catalog_search(catalog):
 
 
 def show_catalog_statistics(catalog):
-    """Статистика каталога"""
+    """✅ ИСПРАВЛЕНИЕ: Статистика каталога с использованием get_statistics()"""
     st.subheader("📊 Статистика каталога")
     
-    stats = catalog.get_statistics()
-    
-    if stats:
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("📦 Уникальных товаров", f"{stats.get('unique_parts', 0):,}")
-        
-        with col2:
-            st.metric("🏷️ Брендов", f"{stats.get('brands', 0):,}")
-        
-        with col3:
-            st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
-        
-        if 'category_stats' in stats and not stats['category_stats'].empty:
-            st.subheader("📊 Распределение по категориям")
-            st_dataframe_compat(stats['category_stats'])
-        
-        if 'top_brands' in stats and not stats['top_brands'].empty:
-            st.subheader("🏆 Топ 10 брендов")
-            st_dataframe_compat(stats['top_brands'])
+    # ✅ ИСПРАВЛЕНИЕ: Вызываем метод класса, который уже рисует UI
+    catalog.show_statistics()
 
 
 def show_catalog_export(catalog):
@@ -9370,7 +9345,6 @@ def show_catalog_export(catalog):
     total = catalog.conn.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
     ).fetchone()[0]
-    
     st.info(f"📊 Всего записей: {total:,}")
     
     if total == 0:
@@ -9378,13 +9352,11 @@ def show_catalog_export(catalog):
         return
     
     format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"])
-    
     selected_columns = st.multiselect("Колонки", [
         "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
         "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
         "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
     ])
-    
     include_prices = st.checkbox("Включить цены", value=True)
     apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
     
@@ -9416,26 +9388,24 @@ def show_catalog_export(catalog):
             else:
                 st.warning("Неподдерживаемый формат")
                 return
-            
-            if success and output_path.exists():
-                with open(output_path, "rb") as f:
-                    file_data = f.read()
-                
-                st.download_button(
-                    label="⬇️ Скачать файл",
-                    data=file_data,
-                    file_name=output_path.name,
-                    mime="text/csv; charset=utf-8" if format_choice == "CSV" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="catalog_download"
-                )
-            else:
-                st.error("❌ Ошибка при экспорте")
+        
+        if success and output_path.exists():
+            with open(output_path, "rb") as f:
+                file_data = f.read()
+            st.download_button(
+                label="⬇️ Скачать файл",
+                data=file_data,
+                file_name=output_path.name,
+                mime="text/csv; charset=utf-8" if format_choice == "CSV" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="catalog_download"
+            )
+        else:
+            st.error("❌ Ошибка при экспорте")
 
 
 def show_catalog_management(catalog):
     """Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
-    
     st.warning("⚠️ Операции необратимы!")
     
     management_option = st.radio(
@@ -9470,8 +9440,6 @@ def show_catalog_management(catalog):
         catalog.show_category_mapping()
     elif management_option == "Облачная синхронизация":
         catalog.show_cloud_sync()
-
-
 # ============================================================================
 # 🆕 БЛОК 18: AI ТАРИФЫ - БЕЗ ИЗМЕНЕНИЙ
 # ============================================================================
@@ -10052,21 +10020,19 @@ def show_smart_tariff_interface():
     else:
         st.warning("⚠️ Конфигурации маркетплейсов не найдены")
 # ============================================================================
-# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# ✅ ИСПРАВЛЕНИЕ: Заглушка для API Тарифов маркетплейсов
 # ============================================================================
-
-# ✅ ИСПРАВЛЕНИЕ: Добавлена заглушка для отсутствующей функции
 def show_api_tariffs_interface():
-    """✅ ИСПРАВЛЕНИЕ: Заглушка для API тарифов"""
+    """🌐 API Тарифы маркетплейсов - информационный раздел"""
     st.header("🌐 API Тарифы маркетплейсов")
     st.info("""
 🚧 **Раздел в разработке**
 
 Прямое подключение к API маркетплейсов интегрировано в блок '🧠 Умная загрузка тарифов'.
 
-**Используйте раздел 'Умная загрузка тарифов' для:**
+**Используйте раздел '🧠 Умная загрузка тарифов' для:**
 - ✅ Получения тарифов через API Ozon/Wildberries
-- ✅ AI-анализа документации
+- ✅ AI-анализа документации через DeepSeek
 - ✅ Гибридного режима (API + AI)
 - ✅ Работы с кэшированными тарифами
 """)
@@ -10074,20 +10040,25 @@ def show_api_tariffs_interface():
     st.markdown("""
 ### 📋 Доступные API:
 
-**Ozon:**
+**Ozon Seller API:**
 - `https://api-seller.ozon.ru/v1/finance/tariff-rates` — Тарифы
 - `https://api-seller.ozon.ru/v2/products/info/stocks` — Остатки
 
-**Wildberries:**
-- `https://common-api.wildberries.ru/tariffs/box` — Тарифы
+**Wildberries API:**
+- `https://common-api.wildberries.ru/tariffs/box` — Тарифы коробов
 - `https://statistics-api.wildberries.ru/api/v1/supplier/reportDetailByPeriod` — Отчёты
 
-**Яндекс Маркет:**
+**Яндекс Маркет API:**
 - `https://api.partner.market.yandex.ru/v2/campaigns` — Кампании
 - `https://api.partner.market.yandex.ru/v2/campaigns/{id}/deliveries/fees` — Тарифы
 """)
+    
+    st.warning("⚠️ Для работы с API используйте раздел '🧠 Умная загрузка тарифов'")
 
 
+# ============================================================================
+# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# ============================================================================
 def main():
     """Главная функция приложения"""
     st.set_page_config(
