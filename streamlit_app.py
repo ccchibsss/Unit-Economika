@@ -3796,248 +3796,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
     
     return categories
 
-# ============================================================================
-# БЛОК 6: AI ПРОГНОЗИРОВАНИЕ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-# ============================================================================
-class DeepSeekRateUpdater:
-    """Класс для обновления тарифов через DeepSeek AI с прогнозированием"""
-    
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or get_api_key_safe('deepseek')
-        self.api_url = DEEPSEEK_API_URL
-        self.session = requests.Session()
-        self._logger = logging.getLogger('DeepSeekRateUpdater')
-        self.cache = get_smart_tariff_cache()
-        
-        if self.api_key:
-            self.session.headers.update({
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            })
-            self._logger.info("DeepSeek клиент инициализирован")
-        else:
-            self._logger.warning("DeepSeek API ключ не найден")
-    
-    def _build_prompt(self, marketplace: str, category: str = None, include_forecast: bool = False) -> str:
-        current_date = datetime.now().strftime("%d.%m.%Y")
-        prompt = (
-            f"Ты - эксперт по юнит-экономике маркетплейсов России. Текущая дата: {current_date}. "
-            f"Предоставь АКТУАЛЬНЫЕ на {current_date} тарифы для маркетплейса {marketplace}. "
-        )
-        
-        if include_forecast:
-            prompt += (
-                f"Также предоставь ПРОГНОЗ на 3 месяца вперед с разбивкой по месяцам. "
-                f"Учти сезонность, инфляцию и рыночные тренды. "
-            )
-        
-        prompt += (
-            "ВАЖНО: Ответ должен быть ТОЛЬКО в формате JSON. Никакого текста до или после JSON. "
-            "Структура JSON для текущих тарифов: "
-            "{ "
-            "  \"commission_rate\": float (доля, например 0.15), "
-            "  \"min_commission\": float (руб), "
-            "  \"logistics_base\": float (руб), "
-            "  \"logistics_per_kg\": float (руб), "
-            "  \"logistics_per_liter\": float (руб), "
-            "  \"storage_per_day\": float (руб/л), "
-            "  \"return_fee\": float (доля), "
-            "  \"acquiring_fee\": float (доля), "
-            "  \"last_mile_fee\": float (руб), "
-            "  \"hazardous_surcharge\": float (доля), "
-            "  \"fragile_surcharge\": float (доля), "
-            "  \"oversized_surcharge\": float (доля) "
-            "}"
-        )
-        
-        if include_forecast:
-            prompt += (
-                ", \"forecast\": { "
-                "  \"month_1\": { \"commission_rate\": float, \"logistics_base\": float, ... }, "
-                "  \"month_2\": { ... }, "
-                "  \"month_3\": { ... } "
-                "} "
-            )
-        
-        if category:
-            prompt += f"Учти специфику категории '{category}'. "
-        
-        return prompt
-    
-    def _call_deepseek_api(self, prompt: str) -> Dict[str, Any]:
-        """✅ ИСПРАВЛЕНО: Улучшен парсинг JSON с очисткой от markdown"""
-        if not self.api_key:
-            raise AIError("API ключ DeepSeek не указан", provider="DeepSeek")
-        
-        try:
-            payload = {
-                "model": DEEPSEEK_MODEL,
-                "messages": [
-                    {"role": "system", "content": "Ты - эксперт по маркетплейсам и автозапчастям. Отвечай только JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 2000
-            }
-            
-            response = self.session.post(self.api_url, json=payload, timeout=60)
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
-                
-                # ✅ ИСПРАВЛЕНИЕ: Очистка от markdown блоков ```json ... ```
-                content = content.strip()
-                content = re.sub(r'^```json\s*', '', content, flags=re.MULTILINE)
-                content = re.sub(r'\s*```\s*$', '', content, flags=re.MULTILINE)
-                content = re.sub(r'^```\s*', '', content, flags=re.MULTILINE)
-                content = re.sub(r'\s*```\s*$', '', content, flags=re.MULTILINE)
-                
-                # ✅ ИСПРАВЛЕНИЕ: Более надёжный поиск JSON объекта
-                json_match = re.search(r'\{[\s\S]*\}', content)
-                if json_match:
-                    try:
-                        return json.loads(json_match.group())
-                    except json.JSONDecodeError as e:
-                        self._logger.error(f"Ошибка парсинга JSON: {e}")
-                        self._logger.debug(f"Содержимое: {content[:500]}")
-                        return {}
-                return {}
-            else:
-                raise AIError(
-                    f"DeepSeek API вернул код {response.status_code}",
-                    provider="DeepSeek",
-                    code=response.status_code
-                )
-        
-        except requests.exceptions.Timeout:
-            raise AIError("Превышено время ожидания ответа DeepSeek", provider="DeepSeek")
-        except requests.exceptions.RequestException as e:
-            raise AIError(f"Ошибка вызова DeepSeek API: {e}", provider="DeepSeek")
-    
-    def get_rates_from_ai(
-        self,
-        marketplace: str,
-        category: str = None,
-        force_refresh: bool = False,
-        use_cache: bool = True,
-        include_forecast: bool = False
-    ) -> Tuple[Dict[str, Any], TariffSource, Optional[Dict[str, Any]]]:
-        """Получение тарифов с прогнозом"""
-        if use_cache and not force_refresh:
-            cached = self.cache.get(marketplace, category, use_expired=False)
-            if cached:
-                self._logger.info(f"📥 Использованы кэшированные тарифы для {marketplace}")
-                forecast = self.cache.get_forecast(marketplace, category)
-                return cached.data, cached.source, forecast
-        
-        if not self.api_key:
-            self._logger.warning("API ключ не указан, используются хардкод-тарифы")
-            return {}, TariffSource.HARDCODED, None
-        
-        try:
-            prompt = self._build_prompt(marketplace, category, include_forecast)
-            result = self._call_deepseek_api(prompt)
-            
-            if result:
-                forecast_data = result.get('forecast', {}) if include_forecast else None
-                rates = {k: v for k, v in result.items() if k != 'forecast'}
-                
-                self.cache.set(
-                    marketplace=marketplace,
-                    category=category,
-                    data=rates,
-                    source=TariffSource.AI_LIVE,
-                    ttl_seconds=86400,
-                    notes=f"Получено от DeepSeek {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                    forecast_data=forecast_data
-                )
-                
-                if forecast_data:
-                    self.cache.set_forecast(marketplace, category, forecast_data)
-                
-                self._logger.info(f"✅ Тарифы для {marketplace} обновлены через DeepSeek AI")
-                return rates, TariffSource.AI_LIVE, forecast_data
-            
-            return {}, TariffSource.HARDCODED, None
-        
-        except AIError as e:
-            self._logger.error(f"Ошибка DeepSeek: {e}")
-            if use_cache:
-                cached = self.cache.get(marketplace, category, use_expired=True)
-                if cached:
-                    self._logger.warning(f"⚠️ Использованы устаревшие кэшированные тарифы для {marketplace}")
-                    forecast = self.cache.get_forecast(marketplace, category)
-                    return cached.data, cached.source, forecast
-            return {}, TariffSource.HARDCODED, None
-    
-    def get_tariff_forecast(
-        self,
-        marketplace: str,
-        category: str = None,
-        months_ahead: int = 3,
-        force_refresh: bool = False
-    ) -> Optional[Dict[str, Any]]:
-        """Получение прогноза тарифов"""
-        if not force_refresh:
-            cached_forecast = self.cache.get_forecast(marketplace, category)
-            if cached_forecast:
-                return cached_forecast
-        
-        _, _, forecast = self.get_rates_from_ai(
-            marketplace=marketplace,
-            category=category,
-            force_refresh=force_refresh,
-            include_forecast=True
-        )
-        return forecast
-    
-    def update_all_marketplaces(
-        self,
-        force_refresh: bool = False,
-        include_forecast: bool = False,
-        progress_callback: Optional[Callable] = None
-    ) -> Dict[str, Tuple[Dict[str, Any], TariffSource, Optional[Dict[str, Any]]]]:
-        """Обновление всех маркетплейсов"""
-        results = {}
-        marketplaces = ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"]
-        total = len(marketplaces)
-        
-        for i, mp in enumerate(marketplaces):
-            try:
-                rates, source, forecast = self.get_rates_from_ai(
-                    marketplace=mp,
-                    force_refresh=force_refresh,
-                    use_cache=True,
-                    include_forecast=include_forecast
-                )
-                results[mp] = (rates, source, forecast)
-            except Exception as e:
-                self._logger.error(f"Ошибка обновления тарифов для {mp}: {e}")
-                results[mp] = ({}, TariffSource.HARDCODED, None)
-            
-            if progress_callback:
-                progress_callback((i + 1) / total)
-        
-        return results
-    
-    def get_cache_statistics(self) -> Dict[str, Any]:
-        return self.cache.get_statistics()
-    
-    def get_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
-        return self.cache.get_history(limit)
-    
-    def export_cache(self, file_path: Union[str, Path]) -> bool:
-        return self.cache.export_to_file(file_path)
-    
-    def import_cache(self, file_path: Union[str, Path]) -> int:
-        return self.cache.import_from_file(file_path)
-    
-    def clear_cache(self) -> int:
-        return self.cache.clear_all()
-    
-    def clear_expired_cache(self) -> int:
-        return self.cache.clear_expired()
+
 # ============================================================================
 # БЛОК 7: ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
 # ============================================================================
@@ -5712,7 +5471,7 @@ class MarketplaceUnitEconomics:
 # БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЕ: Функция-фабрика с кэшированием для HighVolumeAutoPartsCatalog
+# ✅ ИСПРАВЛЕНИЕ 1: Функция-фабрика с кэшированием
 # ============================================================================
 @st.cache_resource
 def get_high_volume_catalog():
@@ -5733,7 +5492,7 @@ class HighVolumeAutoPartsCatalog:
         self.conn = duckdb.connect(database=str(self.db_path))
         self.setup_database()
         
-        # ✅ ИСПРАВЛЕНИЕ: Удалён st.set_page_config() отсюда!
+        # ✅ ИСПРАВЛЕНИЕ 3: Удалён st.set_page_config() отсюда!
         # Он должен быть только в main() и вызываться ПЕРВЫМ
     
     # --- Конфигурации ---
@@ -6048,7 +5807,7 @@ class HighVolumeAutoPartsCatalog:
     
     # --- Загрузка и обновление в базе ---
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
-        """✅ ИСПРАВЛЕНО: Использован JOIN вместо кортежей для совместимости со всеми версиями DuckDB"""
+        """✅ ИСПРАВЛЕНИЕ 5: Использован JOIN вместо кортежей для совместимости со всеми версиями DuckDB"""
         if df.is_empty():
             return
         
@@ -6066,7 +5825,7 @@ class HighVolumeAutoPartsCatalog:
         try:
             pk_list = pk
             
-            # ✅ ИСПРАВЛЕНИЕ: Используем EXISTS + JOIN вместо (col1, col2) IN (SELECT...)
+            # ✅ ИСПРАВЛЕНИЕ 5: Используем EXISTS + JOIN вместо (col1, col2) IN (SELECT...)
             join_conditions = " AND ".join([
                 f"{table_name}.\"{c}\" = temp.\"{c}\"" for c in pk_list
             ])
@@ -6121,7 +5880,7 @@ class HighVolumeAutoPartsCatalog:
             self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """✅ ИСПРАВЛЕНО: Защита от пустого списка в pl.concat"""
+        """✅ ИСПРАВЛЕНИЕ 6: Защита от пустого списка в pl.concat"""
         st.info("🔄 Начало загрузки и обновления данных в базе...")
         
         steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
@@ -6176,14 +5935,14 @@ class HighVolumeAutoPartsCatalog:
         progress_bar.progress(step_counter / (num_steps + 1),
                               text=f"({step_counter}/{num_steps}) Сборка и обновление данных по артикулам...")
         
-        # ✅ ИСПРАВЛЕНИЕ: Защита от пустого списка в pl.concat
+        # ✅ ИСПРАВЛЕНИЕ 6: Защита от пустого списка в pl.concat
         parts_df = None
         file_priority = ['oe', 'barcode', 'images', 'dimensions']
         key_files = {ftype: df for ftype,
                      df in dataframes.items() if ftype in file_priority}
         
         if key_files:
-            # ✅ ИСПРАВЛЕНИЕ: Собираем только непустые DataFrame с нужными колонками
+            # ✅ ИСПРАВЛЕНИЕ 6: Собираем только непустые DataFrame с нужными колонками
             parts_to_concat = [
                 df.select(['artikul', 'artikul_norm', 'brand', 'brand_norm'])
                 for df in key_files.values()
@@ -6687,9 +6446,9 @@ ORDER BY r.brand, r.artikul
             logger.error(f"Error deleting by artikul {artikul_norm}: {e}")
             raise
     
-    # ✅ ИСПРАВЛЕНИЕ: Добавлен метод get_statistics()
+    # ✅ ИСПРАВЛЕНИЕ 4: Добавлен метод get_statistics()
     def get_statistics(self) -> Dict[str, Any]:
-        """✅ ИСПРАВЛЕНИЕ: Новый метод для получения статистики"""
+        """✅ ИСПРАВЛЕНИЕ 4: Новый метод для получения статистики"""
         stats = {}
         try:
             stats['parts'] = self.conn.execute(
@@ -6963,7 +6722,7 @@ ORDER BY r.brand, r.artikul
             self.save_cloud_config()
     
     def show_statistics(self):
-        """✅ ИСПРАВЛЕНО: Использует новый метод get_statistics()"""
+        """✅ ИСПРАВЛЕНИЕ 4: Использует новый метод get_statistics()"""
         st.header("📈 Статистика")
         
         stats = self.get_statistics()
@@ -9331,10 +9090,10 @@ def show_catalog_search(catalog):
 
 
 def show_catalog_statistics(catalog):
-    """✅ ИСПРАВЛЕНИЕ: Статистика каталога с использованием get_statistics()"""
+    """✅ ИСПРАВЛЕНИЕ 4: Статистика каталога с использованием get_statistics()"""
     st.subheader("📊 Статистика каталога")
     
-    # ✅ ИСПРАВЛЕНИЕ: Вызываем метод класса, который уже рисует UI
+    # ✅ ИСПРАВЛЕНИЕ 4: Вызываем метод класса, который уже рисует UI
     catalog.show_statistics()
 
 
@@ -9962,7 +9721,6 @@ def show_smart_tariff_interface():
                         elif "raw_data" in result["data"]:
                             # Структура от прямого API
                             st.warning("⚠️ Прямой API вернул сырые данные. Применяем базовые тарифы.")
-                            # Здесь можно добавить парсер сырого ответа Ozon/WB
                             rates_to_apply = result["data"].get("raw_data", {})
                         elif isinstance(result["data"], dict) and any(k in result["data"] for k in ["commission_rate", "logistics_base"]):
                             # Прямая структура тарифов
@@ -10020,7 +9778,7 @@ def show_smart_tariff_interface():
     else:
         st.warning("⚠️ Конфигурации маркетплейсов не найдены")
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЕ: Заглушка для API Тарифов маркетплейсов
+# ✅ ИСПРАВЛЕНИЕ 2: Заглушка для API Тарифов маркетплейсов
 # ============================================================================
 def show_api_tariffs_interface():
     """🌐 API Тарифы маркетплейсов - информационный раздел"""
