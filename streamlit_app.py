@@ -8794,20 +8794,14 @@ def show_catalog_calculation_parallel():
     else:
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 # ============================================================================
-# 🆕 БЛОК 17: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI) - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ
-# ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.11:
-# - Отображение пути к базе данных после загрузки
-# - Показ размера БД и количества записей
-# - Кнопки быстрого скачивания (CSV/Excel/Parquet) после загрузки
-# - Навигация после загрузки (Перейти к поиску/Экспорту/Статистике)
-# - Скачивание результатов поиска
-# - Скачивание статистики и топ брендов
+# 🆕 БЛОК 17: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI) - С ПОЛНЫМИ ИЗМЕНЕНИЯМИ
 # ============================================================================
 def show_catalog_grouping_interface():
     """
     🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
     ✅ ИСПРАВЛЕНО: Используется get_high_volume_catalog() с кэшированием
+    ✅ ДОБАВЛЕНО: Отображение пути к БД и размера
+    ✅ ДОБАВЛЕНО: Статистика загруженных данных
     """
     st.header("🗂️ Шаг 3: Каталог для группировки")
     st.info("""
@@ -8823,7 +8817,7 @@ def show_catalog_grouping_interface():
 """)
     
     if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
-        st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
+        st.warning("️ Для работы с большими каталогами установите: `pip install polars duckdb`")
         return
     
     # ✅ ИСПРАВЛЕНИЕ: Используем функцию-фабрику с кэшированием
@@ -8836,7 +8830,7 @@ def show_catalog_grouping_interface():
         st.error("❌ Ошибка подключения к базе данных")
         return
     
-    # ✅ НОВОЕ v100.11: Отображение информации о базе данных
+    # ✅ НОВОЕ: Отображение информации о базе данных
     st.subheader("📂 Информация о базе данных")
     col_info1, col_info2 = st.columns(2)
     with col_info1:
@@ -8850,7 +8844,7 @@ def show_catalog_grouping_interface():
         st.info(f"📁 **Папка данных:** `{catalog.data_dir}`")
         st.info(f"🔧 **Движок:** DuckDB (аналитическая БД)")
     
-    # ✅ НОВОЕ v100.11: Быстрая статистика по таблицам
+    # ✅ НОВОЕ: Быстрая статистика по таблицам
     st.subheader("📊 Текущее состояние каталога")
     try:
         stats = catalog.get_statistics()
@@ -8867,7 +8861,7 @@ def show_catalog_grouping_interface():
         if stats.get('unique_parts', 0) > 0:
             st.success(f"✅ В каталоге есть данные! Используйте разделы ниже для работы.")
         else:
-            st.warning("⚠️ Каталог пуст. Загрузите данные в разделе '📥 Загрузка данных'.")
+            st.warning("⚠️ Каталог пуст. Загрузите данные в разделе ' Загрузка данных'.")
     except Exception as e:
         st.error(f"❌ Ошибка получения статистики: {e}")
     
@@ -8876,7 +8870,7 @@ def show_catalog_grouping_interface():
     st.sidebar.title("🧭 Меню каталога")
     option = st.sidebar.radio(
         "Выберите раздел",
-        ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", "🔧 Управление"],
+        ["📥 Загрузка данных", " Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", " Управление"],
         key="catalog_menu"
     )
     
@@ -8888,7 +8882,7 @@ def show_catalog_grouping_interface():
         show_catalog_statistics(catalog)
     elif option == "📤 Экспорт":
         show_catalog_export(catalog)
-    elif option == "🔧 Управление":
+    elif option == " Управление":
         show_catalog_management(catalog)
 
 
@@ -8945,10 +8939,10 @@ def show_catalog_upload(catalog):
             # ✅ НОВОЕ v100.11: Подробная информация о загрузке
             st.success("✅ Данные успешно загружены в базу!")
             
-            st.subheader("📊 Результаты загрузки")
+            st.subheader(" Результаты загрузки")
             
             # Показываем путь к БД
-            st.info(f"🗄️ **Данные сохранены в:** `{catalog.db_path}`")
+            st.info(f"️ **Данные сохранены в:** `{catalog.db_path}`")
             
             # Показываем статистику после загрузки
             try:
@@ -8961,7 +8955,7 @@ def show_catalog_upload(catalog):
                 with col3:
                     st.metric("🔗 OE номеров", f"{stats.get('oe', 0):,}")
                 with col4:
-                    st.metric("🔗 Кроссов", f"{stats.get('cross', 0):,}")
+                    st.metric(" Кроссов", f"{stats.get('cross', 0):,}")
             except Exception as e:
                 st.error(f"❌ Ошибка получения статистики: {e}")
             
@@ -9032,7 +9026,7 @@ def show_catalog_upload(catalog):
                             with open(output_path, "rb") as f:
                                 file_data = f.read()
                             st.download_button(
-                                label="⬇️ Скачать Excel файл",
+                                label="️ Скачать Excel файл",
                                 data=file_data,
                                 file_name=output_path.name,
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9046,7 +9040,7 @@ def show_catalog_upload(catalog):
                         st.error(f"❌ Ошибка: {e}")
             
             with download_col3:
-                if st.button("📥 Скачать Parquet", key="quick_download_parquet", use_container_width=True):
+                if st.button(" Скачать Parquet", key="quick_download_parquet", use_container_width=True):
                     try:
                         output_path = catalog.data_dir / f"catalog_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
                         success = catalog.export_to_parquet(
@@ -9059,7 +9053,7 @@ def show_catalog_upload(catalog):
                             with open(output_path, "rb") as f:
                                 file_data = f.read()
                             st.download_button(
-                                label="⬇️ Скачать Parquet файл",
+                                label="️ Скачать Parquet файл",
                                 data=file_data,
                                 file_name=output_path.name,
                                 mime="application/octet-stream",
@@ -9072,7 +9066,7 @@ def show_catalog_upload(catalog):
                     except Exception as e:
                         st.error(f"❌ Ошибка: {e}")
         else:
-            st.warning("⚠️ Загрузите хотя бы один файл")
+            st.warning("️ Загрузите хотя бы один файл")
 
 
 def show_catalog_search(catalog):
@@ -9097,7 +9091,7 @@ def show_catalog_search(catalog):
         search_oe = st.text_input("🔗 OE номер", key="search_oe")
         search_category = st.text_input("📂 Категория", key="search_category")
     
-    if st.button("🔍 Найти", key="catalog_search"):
+    if st.button(" Найти", key="catalog_search"):
         query_parts = []
         params = []
         
@@ -9135,7 +9129,7 @@ def show_catalog_search(catalog):
                 if len(df) > 0:
                     csv_data = df.to_csv(index=False, encoding='utf-8-sig', sep=';')
                     st.download_button(
-                        label="⬇️ Скачать результаты поиска (CSV)",
+                        label="️ Скачать результаты поиска (CSV)",
                         data=csv_data.encode('utf-8-sig'),
                         file_name=f"search_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv; charset=utf-8",
@@ -9144,14 +9138,14 @@ def show_catalog_search(catalog):
             except duckdb.Error as e:
                 st.error(f"❌ Ошибка поиска: {e}")
         else:
-            st.warning("⚠️ Введите хотя бы один параметр для поиска")
+            st.warning("️ Введите хотя бы один параметр для поиска")
 
 
 def show_catalog_statistics(catalog):
     """✅ ИСПРАВЛЕНО v100.11: Статистика с кнопками скачивания"""
     st.subheader("📊 Статистика каталога")
     
-    # Вызываем метод класса, который уже рисует UI
+    # ✅ ИСПРАВЛЕНИЕ: Вызываем метод класса, который уже рисует UI
     catalog.show_statistics()
     
     # ✅ НОВОЕ v100.11: Кнопка скачивания статистики
@@ -9160,13 +9154,10 @@ def show_catalog_statistics(catalog):
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📥 Скачать статистику (CSV)", key="download_stats_csv"):
+        if st.button(" Скачать статистику (CSV)", key="download_stats_csv"):
             try:
                 stats = catalog.get_statistics()
-                # Убираем DataFrame из stats для корректной сериализации
-                stats_clean = {k: v for k, v in stats.items() 
-                              if not isinstance(v, pd.DataFrame)}
-                stats_df = pd.DataFrame([stats_clean])
+                stats_df = pd.DataFrame([stats])
                 csv_data = stats_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
                 st.download_button(
                     label="⬇️ Скачать статистику",
@@ -9177,13 +9168,13 @@ def show_catalog_statistics(catalog):
                 )
                 st.success("✅ Статистика готова к скачиванию")
             except Exception as e:
-                st.error(f"❌ Ошибка: {e}")
+                st.error(f" Ошибка: {e}")
     
     with col2:
         if st.button("📥 Скачать топ брендов (CSV)", key="download_top_brands"):
             try:
                 stats = catalog.get_statistics()
-                if 'top_brands' in stats and isinstance(stats['top_brands'], pd.DataFrame) and not stats['top_brands'].empty:
+                if 'top_brands' in stats and not stats['top_brands'].empty:
                     csv_data = stats['top_brands'].to_csv(index=False, encoding='utf-8-sig', sep=';')
                     st.download_button(
                         label="⬇️ Скачать топ брендов",
@@ -9209,7 +9200,7 @@ def show_catalog_export(catalog):
     st.info(f"📊 Всего записей: {total:,}")
     
     if total == 0:
-        st.warning("⚠️ Нет данных для экспорта. Сначала загрузите данные в разделе '📥 Загрузка данных'.")
+        st.warning("⚠️ Нет данных для экспорта")
         return
     
     format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"])
@@ -9221,7 +9212,7 @@ def show_catalog_export(catalog):
     include_prices = st.checkbox("Включить цены", value=True)
     apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
     
-    if st.button("🚀 Экспортировать"):
+    if st.button(" Экспортировать"):
         output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_choice.lower()}"
         
         with st.spinner("Генерация файла..."):
@@ -9260,7 +9251,6 @@ def show_catalog_export(catalog):
                 mime="text/csv; charset=utf-8" if format_choice == "CSV" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="catalog_download"
             )
-            st.success(f"✅ Файл готов: {output_path.name}")
         else:
             st.error("❌ Ошибка при экспорте")
 
@@ -9268,7 +9258,7 @@ def show_catalog_export(catalog):
 def show_catalog_management(catalog):
     """Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
-    st.warning("⚠️ Операции необратимы!")
+    st.warning("️ Операции необратимы!")
     
     management_option = st.radio(
         "Выберите действие:",
@@ -9285,7 +9275,7 @@ def show_catalog_management(catalog):
             "Удалить по артикули": "📦 Удалить все записи артикула",
             "Управление ценами": "💰 Цены и наценки",
             "Исключения": "🚫 Исключения при экспорте",
-            "Категории": "🗂️ Категории товаров",
+            "Категории": "️ Категории товаров",
             "Облачная синхронизация": "☁️ Облачная синхронизация"
         }[x]
     )
@@ -9916,7 +9906,668 @@ def show_api_tariffs_interface():
     
     st.warning("⚠️ Для работы с API используйте раздел '🧠 Умная загрузка тарифов'")
 
+# ============================================================================
+# 🆕 БЛОК 21: БАЗА ДАННЫХ КАТЕГОРИЙ С ВЕСОГАБАРИТАМИ
+# ============================================================================
+# ✅ Загрузка категорий из Excel с весогабаритами
+# ✅ Валидация и нормализация данных
+# ✅ Интеграция с валидатором весогабаритов
+# ============================================================================
 
+class CategoryDimensionsDB:
+    """
+    📊 База данных категорий с весогабаритами
+    Позволяет загружать категории из Excel и использовать их для валидации
+    """
+    
+    def __init__(self):
+        self.db_path = DATA_DIR / "category_dimensions.json"
+        self.db_path.parent.mkdir(exist_ok=True)
+        self.categories = {}
+        self._load_from_file()
+        self.logger = logging.getLogger('CategoryDimensionsDB')
+    
+    def _load_from_file(self):
+        """Загрузка из JSON файла"""
+        if self.db_path.exists():
+            try:
+                with open(self.db_path, 'r', encoding='utf-8') as f:
+                    self.categories = json.load(f)
+                self.logger.info(f"✅ Загружено {len(self.categories)} категорий из файла")
+            except Exception as e:
+                self.logger.error(f"❌ Ошибка загрузки: {e}")
+                self.categories = {}
+    
+    def save_to_file(self):
+        """Сохранение в JSON файл"""
+        try:
+            with open(self.db_path, 'w', encoding='utf-8') as f:
+                json.dump(self.categories, f, ensure_ascii=False, indent=2)
+            self.logger.info(f"✅ Сохранено {len(self.categories)} категорий")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка сохранения: {e}")
+            return False
+    
+    def add_category(self, name: str, length: float, width: float, height: float, 
+                     weight: float, unit: str = "см", weight_unit: str = "кг"):
+        """Добавление категории"""
+        self.categories[name.lower().strip()] = {
+            "name": name,
+            "length_cm": length,
+            "width_cm": width,
+            "height_cm": height,
+            "weight_kg": weight,
+            "unit": unit,
+            "weight_unit": weight_unit,
+            "added_at": datetime.now().isoformat()
+        }
+        self.save_to_file()
+    
+    def get_category(self, name: str) -> Optional[Dict[str, Any]]:
+        """Получение категории по названию"""
+        return self.categories.get(name.lower().strip())
+    
+    def get_all_categories(self) -> Dict[str, Dict[str, Any]]:
+        """Получение всех категорий"""
+        return self.categories
+    
+    def delete_category(self, name: str):
+        """Удаление категории"""
+        key = name.lower().strip()
+        if key in self.categories:
+            del self.categories[key]
+            self.save_to_file()
+    
+    def clear_all(self):
+        """Очистка всех категорий"""
+        self.categories = {}
+        self.save_to_file()
+    
+    def import_from_excel(self, file_path: str) -> Dict[str, Any]:
+        """
+         Импорт категорий из Excel файла
+        
+        Ожидаемые колонки:
+        - Категория (обязательно)
+        - Длина (см)
+        - Ширина (см)
+        - Высота (см)
+        - Вес (кг)
+        - Единица длины (опционально, по умолчанию см)
+        - Единица веса (опционально, по умолчанию кг)
+        """
+        result = {
+            "success": False,
+            "imported": 0,
+            "errors": [],
+            "warnings": []
+        }
+        
+        try:
+            # Чтение Excel файла
+            df = pd.read_excel(file_path, engine='openpyxl')
+            
+            if df.empty:
+                result["errors"].append("Файл пустой")
+                return result
+            
+            # Нормализация названий колонок
+            df.columns = [col.strip().lower() for col in df.columns]
+            
+            # Маппинг колонок
+            column_mapping = {
+                'категория': 'category',
+                'category': 'category',
+                'название': 'category',
+                'name': 'category',
+                'длина': 'length',
+                'length': 'length',
+                'длина (см)': 'length',
+                'ширина': 'width',
+                'width': 'width',
+                'ширина (см)': 'width',
+                'высота': 'height',
+                'height': 'height',
+                'высота (см)': 'height',
+                'вес': 'weight',
+                'weight': 'weight',
+                'вес (кг)': 'weight',
+                'единица длины': 'length_unit',
+                'length_unit': 'length_unit',
+                'единица веса': 'weight_unit',
+                'weight_unit': 'weight_unit'
+            }
+            
+            df = df.rename(columns=column_mapping)
+            
+            # Проверка обязательных колонок
+            required_cols = ['category', 'length', 'width', 'height', 'weight']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            
+            if missing_cols:
+                result["errors"].append(f"Отсутствуют колонки: {', '.join(missing_cols)}")
+                return result
+            
+            # Импорт данных
+            imported_count = 0
+            for idx, row in df.iterrows():
+                try:
+                    category_name = str(row.get('category', '')).strip()
+                    if not category_name:
+                        result["warnings"].append(f"Строка {idx + 1}: пустое название категории")
+                        continue
+                    
+                    length = safe_float(row.get('length', 0))
+                    width = safe_float(row.get('width', 0))
+                    height = safe_float(row.get('height', 0))
+                    weight = safe_float(row.get('weight', 0))
+                    
+                    if length <= 0 or width <= 0 or height <= 0 or weight <= 0:
+                        result["warnings"].append(f"Строка {idx + 1}: некорректные размеры для '{category_name}'")
+                        continue
+                    
+                    length_unit = str(row.get('length_unit', 'см')).strip()
+                    weight_unit = str(row.get('weight_unit', 'кг')).strip()
+                    
+                    self.add_category(
+                        name=category_name,
+                        length=length,
+                        width=width,
+                        height=height,
+                        weight=weight,
+                        unit=length_unit,
+                        weight_unit=weight_unit
+                    )
+                    
+                    imported_count += 1
+                    
+                except Exception as e:
+                    result["errors"].append(f"Строка {idx + 1}: {str(e)}")
+            
+            result["success"] = imported_count > 0
+            result["imported"] = imported_count
+            
+            if imported_count == 0:
+                result["errors"].append("Не удалось импортировать ни одну категорию")
+            
+        except Exception as e:
+            result["errors"].append(f"Ошибка чтения файла: {str(e)}")
+        
+        return result
+    
+    def export_to_excel(self, file_path: str) -> bool:
+        """Экспорт категорий в Excel"""
+        try:
+            data = []
+            for key, cat in self.categories.items():
+                data.append({
+                    'Категория': cat['name'],
+                    'Длина (см)': cat['length_cm'],
+                    'Ширина (см)': cat['width_cm'],
+                    'Высота (см)': cat['height_cm'],
+                    'Вес (кг)': cat['weight_kg'],
+                    'Единица длины': cat.get('unit', 'см'),
+                    'Единица веса': cat.get('weight_unit', 'кг')
+                })
+            
+            df = pd.DataFrame(data)
+            df.to_excel(file_path, index=False, engine='openpyxl')
+            return True
+        except Exception as e:
+            self.logger.error(f" Ошибка экспорта: {e}")
+            return False
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Статистика по категориям"""
+        if not self.categories:
+            return {"total": 0}
+        
+        lengths = [cat['length_cm'] for cat in self.categories.values()]
+        widths = [cat['width_cm'] for cat in self.categories.values()]
+        heights = [cat['height_cm'] for cat in self.categories.values()]
+        weights = [cat['weight_kg'] for cat in self.categories.values()]
+        
+        return {
+            "total": len(self.categories),
+            "avg_length": sum(lengths) / len(lengths),
+            "avg_width": sum(widths) / len(widths),
+            "avg_height": sum(heights) / len(heights),
+            "avg_weight": sum(weights) / len(weights),
+            "min_weight": min(weights),
+            "max_weight": max(weights)
+        }
+
+
+# ============================================================================
+# 🆕 БЛОК 22: UI ДЛЯ УПРАВЛЕНИЯ КАТЕГОРИЯМИ С ВЕСОГАБАРИТАМИ
+# ============================================================================
+
+def show_category_dimensions_interface():
+    """
+    📊 Интерфейс управления категориями с весогабаритами
+    """
+    st.header("📊 Категории с весогабаритами")
+    st.info("""
+    📋 **О РАЗДЕЛЕ:**
+    Этот раздел позволяет загружать и управлять категориями товаров с их стандартными весогабаритами.
+    
+    **Возможности:**
+    - ✅ Загрузка категорий из Excel файла
+    - ✅ Добавление категорий вручную
+    - ✅ Экспорт категорий в Excel
+    - ✅ Использование для валидации габаритов
+    - ✅ Автоматическое определение категории по названию
+    """)
+    
+    # Инициализация базы данных
+    if 'category_dimensions_db' not in st.session_state:
+        st.session_state.category_dimensions_db = CategoryDimensionsDB()
+    
+    db = st.session_state.category_dimensions_db
+    
+    # Меню
+    menu = st.sidebar.radio(
+        "🧭 Меню",
+        ["📥 Загрузка из Excel", "➕ Добавить вручную", "📋 Список категорий", " Экспорт", "📊 Статистика"],
+        key="category_menu"
+    )
+    
+    if menu == "📥 Загрузка из Excel":
+        show_category_upload(db)
+    elif menu == "➕ Добавить вручную":
+        show_category_add_manual(db)
+    elif menu == "📋 Список категорий":
+        show_category_list(db)
+    elif menu == "📤 Экспорт":
+        show_category_export(db)
+    elif menu == "📊 Статистика":
+        show_category_stats(db)
+
+
+def show_category_upload(db: CategoryDimensionsDB):
+    """Загрузка категорий из Excel"""
+    st.subheader("📥 Загрузка категорий из Excel")
+    
+    st.info("""
+    📋 **ТРЕБОВАНИЯ К ФАЙЛУ:**
+    
+    **Обязательные колонки:**
+    - Категория (название категории)
+    - Длина (числовое значение)
+    - Ширина (числовое значение)
+    - Высота (числовое значение)
+    - Вес (числовое значение)
+    
+    **Опциональные колонки:**
+    - Единица длины (см, мм, м) - по умолчанию см
+    - Единица веса (кг, г, т) - по умолчанию кг
+    
+    **Пример файла:**
+    | Категория | Длина | Ширина | Высота | Вес |
+    |-----------|-------|--------|--------|-----|
+    | Фильтры   | 15    | 15     | 15     | 0.5 |
+    | Колодки   | 15    | 10     | 5      | 2.0 |
+    """)
+    
+    uploaded_file = st.file_uploader(
+        "📤 Загрузите Excel файл с категориями",
+        type=['xlsx', 'xls'],
+        key="category_upload_file"
+    )
+    
+    if uploaded_file is not None:
+        # Сохраняем временный файл
+        temp_path = TEMP_DIR / f"categories_{int(time.time())}.xlsx"
+        TEMP_DIR.mkdir(exist_ok=True)
+        
+        with open(temp_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        st.info(f"📄 Файл загружен: {uploaded_file.name}")
+        
+        if st.button("🚀 Импортировать категории", type="primary", key="import_categories"):
+            with st.spinner("Импорт категорий..."):
+                result = db.import_from_excel(str(temp_path))
+            
+            if result["success"]:
+                st.success(f"✅ Импортировано {result['imported']} категорий")
+                
+                if result["warnings"]:
+                    st.warning(f"⚠️ Предупреждений: {len(result['warnings'])}")
+                    with st.expander("📋 Показать предупреждения"):
+                        for warning in result["warnings"][:10]:
+                            st.warning(warning)
+                
+                st.rerun()
+            else:
+                st.error("❌ Ошибка импорта")
+                with st.expander(" Показать ошибки"):
+                    for error in result["errors"]:
+                        st.error(error)
+        
+        # Удалить временный файл
+        if temp_path.exists():
+            temp_path.unlink()
+    
+    # Кнопка скачать шаблон
+    if st.button("📥 Скачать шаблон Excel", key="download_category_template"):
+        template_data = {
+            'Категория': ['Фильтры', 'Колодки', 'Масла', 'Шины'],
+            'Длина': [15, 15, 10, 60],
+            'Ширина': [15, 10, 10, 60],
+            'Высота': [15, 5, 25, 25],
+            'Вес': [0.5, 2.0, 1.0, 10.0],
+            'Единица длины': ['см', 'см', 'см', 'см'],
+            'Единица веса': ['кг', 'кг', 'кг', 'кг']
+        }
+        
+        template_df = pd.DataFrame(template_data)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            template_df.to_excel(writer, index=False, sheet_name='Категории')
+        
+        output.seek(0)
+        
+        st.download_button(
+            label="⬇️ Скачать шаблон",
+            data=output,
+            file_name="шаблон_категорий.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_category_template_btn"
+        )
+
+
+def show_category_add_manual(db: CategoryDimensionsDB):
+    """Добавление категории вручную"""
+    st.subheader("➕ Добавить категорию вручную")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        category_name = st.text_input(
+            "📝 Название категории",
+            placeholder="например: Фильтры масляные",
+            key="category_name"
+        )
+        
+        length = st.number_input(
+            "📏 Длина",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            key="category_length"
+        )
+        
+        width = st.number_input(
+            "📐 Ширина",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            key="category_width"
+        )
+    
+    with col2:
+        height = st.number_input(
+            "📐 Высота",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            key="category_height"
+        )
+        
+        weight = st.number_input(
+            "⚖️ Вес",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            key="category_weight"
+        )
+        
+        unit = st.selectbox(
+            " Единица длины",
+            ["см", "мм", "м"],
+            key="category_unit"
+        )
+        
+        weight_unit = st.selectbox(
+            "⚖️ Единица веса",
+            ["кг", "г", "т"],
+            key="category_weight_unit"
+        )
+    
+    if st.button("➕ Добавить категорию", type="primary", key="add_category"):
+        if not category_name:
+            st.error("❌ Введите название категории")
+        elif length <= 0 or width <= 0 or height <= 0 or weight <= 0:
+            st.error("❌ Все размеры должны быть больше 0")
+        else:
+            db.add_category(
+                name=category_name,
+                length=length,
+                width=width,
+                height=height,
+                weight=weight,
+                unit=unit,
+                weight_unit=weight_unit
+            )
+            st.success(f"✅ Категория '{category_name}' добавлена")
+            st.rerun()
+
+
+def show_category_list(db: CategoryDimensionsDB):
+    """Список категорий"""
+    st.subheader("📋 Список категорий")
+    
+    categories = db.get_all_categories()
+    
+    if not categories:
+        st.info("️ Категории не добавлены")
+        return
+    
+    st.info(f"📊 Всего категорий: {len(categories)}")
+    
+    # Таблица категорий
+    data = []
+    for key, cat in categories.items():
+        data.append({
+            'Категория': cat['name'],
+            'Длина (см)': cat['length_cm'],
+            'Ширина (см)': cat['width_cm'],
+            'Высота (см)': cat['height_cm'],
+            'Вес (кг)': cat['weight_kg'],
+            'Единица': cat.get('unit', 'см'),
+            'Ед. веса': cat.get('weight_unit', 'кг')
+        })
+    
+    df = pd.DataFrame(data)
+    st_dataframe_compat(df, key="categories_table")
+    
+    # Удаление категории
+    st.divider()
+    st.subheader("🗑️ Удалить категорию")
+    
+    category_to_delete = st.selectbox(
+        "Выберите категорию для удаления",
+        options=list(categories.keys()),
+        format_func=lambda x: categories[x]['name'],
+        key="delete_category_select"
+    )
+    
+    if st.button("🗑️ Удалить", key="delete_category_btn"):
+        db.delete_category(category_to_delete)
+        st.success(f"✅ Категория удалена")
+        st.rerun()
+    
+    # Очистка всех
+    st.divider()
+    if st.button("⚠️ Очистить все категории", key="clear_all_categories"):
+        if st.checkbox("Подтверждаю удаление всех категорий", key="confirm_clear"):
+            db.clear_all()
+            st.success("✅ Все категории удалены")
+            st.rerun()
+
+
+def show_category_export(db: CategoryDimensionsDB):
+    """Экспорт категорий"""
+    st.subheader("📤 Экспорт категорий")
+    
+    categories = db.get_all_categories()
+    
+    if not categories:
+        st.info("ℹ️ Нет категорий для экспорта")
+        return
+    
+    st.info(f"📊 Всего категорий: {len(categories)}")
+    
+    if st.button("📥 Экспортировать в Excel", key="export_categories"):
+        output_path = TEMP_DIR / f"categories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        TEMP_DIR.mkdir(exist_ok=True)
+        
+        if db.export_to_excel(str(output_path)):
+            with open(output_path, "rb") as f:
+                file_data = f.read()
+            
+            st.download_button(
+                label="⬇️ Скачать Excel файл",
+                data=file_data,
+                file_name=output_path.name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_categories_excel"
+            )
+            
+            st.success("✅ Файл готов к скачиванию")
+        else:
+            st.error("❌ Ошибка экспорта")
+
+
+def show_category_stats(db: CategoryDimensionsDB):
+    """Статистика категорий"""
+    st.subheader("📊 Статистика")
+    
+    stats = db.get_statistics()
+    
+    if stats.get('total', 0) == 0:
+        st.info("️ Нет данных для статистики")
+        return
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("📦 Всего категорий", stats['total'])
+    
+    with col2:
+        st.metric("📏 Ср. длина", f"{stats.get('avg_length', 0):.1f} см")
+    
+    with col3:
+        st.metric("📐 Ср. ширина", f"{stats.get('avg_width', 0):.1f} см")
+    
+    with col4:
+        st.metric("📐 Ср. высота", f"{stats.get('avg_height', 0):.1f} см")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("⚖️ Ср. вес", f"{stats.get('avg_weight', 0):.2f} кг")
+    
+    with col2:
+        st.metric("⚖️ Диапазон веса", f"{stats.get('min_weight', 0):.2f} - {stats.get('max_weight', 0):.2f} кг")
+
+
+# ============================================================================
+# 🆕 БЛОК 23: ИНТЕГРАЦИЯ С ВАЛИДАТОРОМ ВЕСОГАБАРИТОВ
+# ============================================================================
+
+def validate_dimensions_with_category(
+    length: float,
+    width: float,
+    height: float,
+    weight: float,
+    category: str,
+    tolerance_percent: float = 20.0
+) -> Dict[str, Any]:
+    """
+    ✅ Валидация весогабаритов с использованием базы категорий
+    
+    Args:
+        length, width, height: Фактические размеры (см)
+        weight: Фактический вес (кг)
+        category: Название категории
+        tolerance_percent: Допустимое отклонение в %
+    
+    Returns:
+        Dict с результатами валидации
+    """
+    result = {
+        "valid": True,
+        "category": category,
+        "deviations": [],
+        "warnings": []
+    }
+    
+    # Получаем стандартные размеры категории
+    if 'category_dimensions_db' in st.session_state:
+        db = st.session_state.category_dimensions_db
+        category_data = db.get_category(category)
+        
+        if category_data:
+            std_length = category_data['length_cm']
+            std_width = category_data['width_cm']
+            std_height = category_data['height_cm']
+            std_weight = category_data['weight_kg']
+            
+            # Проверяем отклонения
+            if std_length > 0:
+                length_dev = abs(length - std_length) / std_length * 100
+                if length_dev > tolerance_percent:
+                    result["deviations"].append({
+                        "parameter": "Длина",
+                        "actual": length,
+                        "expected": std_length,
+                        "deviation_percent": length_dev
+                    })
+                    result["valid"] = False
+            
+            if std_width > 0:
+                width_dev = abs(width - std_width) / std_width * 100
+                if width_dev > tolerance_percent:
+                    result["deviations"].append({
+                        "parameter": "Ширина",
+                        "actual": width,
+                        "expected": std_width,
+                        "deviation_percent": width_dev
+                    })
+                    result["valid"] = False
+            
+            if std_height > 0:
+                height_dev = abs(height - std_height) / std_height * 100
+                if height_dev > tolerance_percent:
+                    result["deviations"].append({
+                        "parameter": "Высота",
+                        "actual": height,
+                        "expected": std_height,
+                        "deviation_percent": height_dev
+                    })
+                    result["valid"] = False
+            
+            if std_weight > 0:
+                weight_dev = abs(weight - std_weight) / std_weight * 100
+                if weight_dev > tolerance_percent:
+                    result["deviations"].append({
+                        "parameter": "Вес",
+                        "actual": weight,
+                        "expected": std_weight,
+                        "deviation_percent": weight_dev
+                    })
+                    result["valid"] = False
+            
+            if result["valid"]:
+                result["warnings"].append("✅ Все параметры в пределах нормы")
+        else:
+            result["warnings"].append(f"⚠️ Категория '{category}' не найдена в базе")
+    
+    return result
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
@@ -9939,9 +10590,10 @@ def main():
             "📁 Загрузка данных",
             "📊 Юнит-экономика",
             "🗂️ Каталог для группировки",
+            "📏 Категории с весогабаритами",  # ✅ НОВЫЙ РАЗДЕЛ
             "🤖 AI Тарифы",
             "🌐 API Тарифы маркетплейсов",
-            "🧠 Умная загрузка тарифов"
+            " Умная загрузка тарифов"
         ],
         key="main_navigation"
     )
@@ -9952,6 +10604,8 @@ def main():
         show_unit_economics_interface()
     elif section == "🗂️ Каталог для группировки":
         show_catalog_grouping_interface()
+    elif section == "📏 Категории с весогабаритами":  # ✅ НОВЫЙ РАЗДЕЛ
+        show_category_dimensions_interface()
     elif section == "🤖 AI Тарифы":
         show_ai_tariffs_interface()
     elif section == "🌐 API Тарифы маркетплейсов":
