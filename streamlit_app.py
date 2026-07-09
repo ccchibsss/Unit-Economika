@@ -5442,7 +5442,8 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# ============================================================================
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ)
 # ============================================================================
 
 # ✅ ИСПРАВЛЕНИЕ 1: Функция-фабрика с кэшированием
@@ -5626,7 +5627,7 @@ class HighVolumeAutoPartsCatalog:
         self.create_indexes()
     
     def create_indexes(self):
-        st.info("🛠️ Создание индексов для ускорения поиска...")
+        st.info("️ Создание индексов для ускорения поиска...")
         indexes = [
             "CREATE INDEX IF NOT EXISTS idx_oe_number_norm ON oe(oe_number_norm)",
             "CREATE INDEX IF NOT EXISTS idx_parts_keys ON parts(artikul_norm, brand_norm)",
@@ -5666,12 +5667,12 @@ class HighVolumeAutoPartsCatalog:
     def determine_category_vectorized(self, name_series: pl.Series) -> pl.Series:
         name_lower = name_series.str.to_lowercase()
         categorization_expr = pl.when(pl.lit(False)).then(pl.lit(None))
-        # Пользовательские правила — приоритет
+        
         for key, category in self.category_mapping.items():
             categorization_expr = categorization_expr.when(
                 name_lower.str.contains(key.lower())
             ).then(pl.lit(category))
-        # Стандартные правила
+        
         categories_map = {
             'Фильтр': 'фильтр|filter',
             'Тормоза': 'тормоз|brake|колодк|диск|суппорт',
@@ -5688,6 +5689,7 @@ class HighVolumeAutoPartsCatalog:
             categorization_expr = categorization_expr.when(
                 name_lower.str.contains(pattern, literal=False)
             ).then(pl.lit(category))
+        
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # --- Обработка файлов ---
@@ -5774,16 +5776,13 @@ class HighVolumeAutoPartsCatalog:
         df = df.unique(keep='first')
         cols = df.columns
         temp_view_name = f"temp_{table_name}_{int(time.time())}"
-        # Регистрация временной таблицы в DuckDB
         try:
             self.conn.register(temp_view_name, df.to_arrow())
         except Exception as e:
             logger.error(f"Ошибка регистрации временной таблицы: {e}")
             return
-        
         try:
             pk_list = pk
-            # ✅ ИСПРАВЛЕНИЕ 5: Используем EXISTS + JOIN вместо (col1, col2) IN (SELECT...)
             join_conditions = " AND ".join([
                 f"{table_name}.\"{c}\" = temp.\"{c}\"" for c in pk_list
             ])
@@ -5795,7 +5794,6 @@ class HighVolumeAutoPartsCatalog:
             );
             """
             self.conn.execute(delete_sql)
-            # вставить новые записи
             insert_sql = f"""
             INSERT INTO {table_name}
             SELECT * FROM {temp_view_name};
@@ -5886,7 +5884,6 @@ class HighVolumeAutoPartsCatalog:
                      df in dataframes.items() if ftype in file_priority}
         
         if key_files:
-            # ✅ ИСПРАВЛЕНИЕ 6: Собираем только непустые DataFrame с нужными колонками
             parts_to_concat = [
                 df.select(['artikul', 'artikul_norm', 'brand', 'brand_norm'])
                 for df in key_files.values()
@@ -6488,7 +6485,7 @@ ORDER BY r.brand, r.artikul
             st.success("✅ Все настройки цен сохранены")
     
     def show_exclusion_settings(self):
-        st.header("🚫 Управление исключениями при экспорте")
+        st.header(" Управление исключениями при экспорте")
         st.info("Товары, содержащие эти слова в названии, будут исключены из экспорта")
         current_exclusions = "\n".join(self.exclusion_rules)
         new_exclusions = st.text_area(
@@ -6646,9 +6643,9 @@ ORDER BY r.brand, r.artikul
                 "Удалить по бренду": "🏭 Удалить все записи бренда",
                 "Удалить по артикули": "📦 Удалить все записи артикула",
                 "Управление ценами": "💰 Цены и наценки",
-                "Исключения": "🚫 Исключения при экспорте",
+                "Исключения": " Исключения при экспорте",
                 "Категории": "🗂️ Категории товаров",
-                "Облачная синхронизация": "️ Облачная синхронизация"
+                "Облачная синхронизация": "☁️ Облачная синхронизация"
             }[x]
         )
         if management_option == "Удалить по бренду":
@@ -8792,12 +8789,12 @@ def show_catalog_calculation_parallel():
     else:
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 # ============================================================================
-# 🆕 БЛОК 17: КАТАЛОГ ДЛЯ ГРУППИРОВКИ (HIGH-VOLUME UI) - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ)
 # ============================================================================
 def show_catalog_grouping_interface():
     """
     🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
-    ✅ ИСПРАВЛЕНО: Используется get_high_volume_catalog() с кэшированием
+    High-Volume каталог с поддержкой 10M+ записей
     """
     st.header("🗂️ Шаг 3: Каталог для группировки")
     st.info("""
@@ -8814,30 +8811,25 @@ def show_catalog_grouping_interface():
     if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
         st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
         return
-    
-    # ✅ ИСПРАВЛЕНИЕ: Используем функцию-фабрику с кэшированием
     if 'high_volume_catalog' not in st.session_state:
         st.session_state.high_volume_catalog = get_high_volume_catalog()
-    
     catalog = st.session_state.high_volume_catalog
     if not catalog.conn:
-        st.error(" Ошибка подключения к базе данных")
+        st.error("❌ Ошибка подключения к базе данных")
         return
-    
     st.sidebar.title("🧭 Меню каталога")
     option = st.sidebar.radio(
         "Выберите раздел",
-        [" Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", "🔧 Управление"],
+        ["📥 Загрузка данных", " Поиск и фильтрация", "📊 Статистика", "📤 Экспорт", " Управление"],
         key="catalog_menu"
     )
-    
     if option == "📥 Загрузка данных":
         show_catalog_upload(catalog)
     elif option == "🔍 Поиск и фильтрация":
         show_catalog_search(catalog)
     elif option == "📊 Статистика":
         show_catalog_statistics(catalog)
-    elif option == " Экспорт":
+    elif option == "📤 Экспорт":
         show_catalog_export(catalog)
     elif option == "🔧 Управление":
         show_catalog_management(catalog)
@@ -8847,7 +8839,7 @@ def show_catalog_upload(catalog):
     """Загрузка данных в каталог"""
     st.subheader("📥 Загрузка данных")
     st.info("""
- **ТРЕБОВАНИЯ К ФАЙЛАМ:**
+📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
 - **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
 - **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
 - **Штрих-коды:** `artikul`, `brand`, `barcode`, `multiplicity`
@@ -8857,20 +8849,18 @@ def show_catalog_upload(catalog):
 """)
     col1, col2 = st.columns(2)
     with col1:
-        oe_file = st.file_uploader("📄 Основные данные (OE)", type=['xlsx'], key="hv_oe")
+        oe_file = st.file_uploader(" Основные данные (OE)", type=['xlsx'], key="hv_oe")
         cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
         barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
     with col2:
         dims_file = st.file_uploader("📏 Габариты", type=['xlsx'], key="hv_dims")
-        images_file = st.file_uploader("️ Изображения", type=['xlsx'], key="hv_images")
+        images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
         prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
-    
     uploaded_files = {
         'oe': oe_file, 'cross': cross_file, 'barcode': barcode_file,
         'dimensions': dims_file, 'images': images_file, 'prices': prices_file
     }
-    
-    if st.button(" Обработать и загрузить", key="hv_load"):
+    if st.button("🚀 Обработать и загрузить", key="hv_load"):
         saved_paths = {}
         for key, file in uploaded_files.items():
             if file:
@@ -8898,7 +8888,6 @@ def show_catalog_search(catalog):
     with col2:
         search_oe = st.text_input("🔗 OE номер", key="search_oe")
         search_category = st.text_input("📂 Категория", key="search_category")
-    
     if st.button("🔍 Найти", key="catalog_search"):
         query_parts = []
         params = []
@@ -8919,7 +8908,6 @@ def show_catalog_search(catalog):
         if search_category:
             query_parts.append("category LIKE ?")
             params.append(f"%{search_category}%")
-        
         if query_parts:
             where_clause = " AND ".join(query_parts)
             query = f"SELECT * FROM parts WHERE {where_clause} LIMIT 100"
@@ -8927,14 +8915,27 @@ def show_catalog_search(catalog):
                 df = catalog.conn.execute(query, params).df()
                 st_dataframe_compat(df)
             except duckdb.Error as e:
-                st.error(f" Ошибка поиска: {e}")
+                st.error(f"❌ Ошибка поиска: {e}")
 
 
 def show_catalog_statistics(catalog):
-    """✅ ИСПРАВЛЕНИЕ 4: Статистика каталога с использованием get_statistics()"""
+    """Статистика каталога"""
     st.subheader("📊 Статистика каталога")
-    # ✅ ИСПРАВЛЕНИЕ 4: Вызываем метод класса, который уже рисует UI
-    catalog.show_statistics()
+    stats = catalog.get_statistics()
+    if stats:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📦 Уникальных товаров", f"{stats.get('unique_parts', 0):,}")
+        with col2:
+            st.metric("🏷️ Брендов", f"{stats.get('brands', 0):,}")
+        with col3:
+            st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
+        if 'category_stats' in stats and not stats['category_stats'].empty:
+            st.subheader("📊 Распределение по категориям")
+            st_dataframe_compat(stats['category_stats'])
+        if 'top_brands' in stats and not stats['top_brands'].empty:
+            st.subheader("🏆 Топ 10 брендов")
+            st_dataframe_compat(stats['top_brands'])
 
 
 def show_catalog_export(catalog):
@@ -8943,11 +8944,10 @@ def show_catalog_export(catalog):
     total = catalog.conn.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
     ).fetchone()[0]
-    st.info(f" Всего записей: {total:,}")
+    st.info(f"📊 Всего записей: {total:,}")
     if total == 0:
         st.warning("⚠️ Нет данных для экспорта")
         return
-    
     format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"])
     selected_columns = st.multiselect("Колонки", [
         "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
@@ -8956,7 +8956,6 @@ def show_catalog_export(catalog):
     ])
     include_prices = st.checkbox("Включить цены", value=True)
     apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
-    
     if st.button("🚀 Экспортировать"):
         output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_choice.lower()}"
         with st.spinner("Генерация файла..."):
@@ -8984,12 +8983,11 @@ def show_catalog_export(catalog):
             else:
                 st.warning("Неподдерживаемый формат")
                 return
-        
         if success and output_path.exists():
             with open(output_path, "rb") as f:
                 file_data = f.read()
             st.download_button(
-                label="️ Скачать файл",
+                label="⬇️ Скачать файл",
                 data=file_data,
                 file_name=output_path.name,
                 mime="text/csv; charset=utf-8" if format_choice == "CSV" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9001,7 +8999,7 @@ def show_catalog_export(catalog):
 
 def show_catalog_management(catalog):
     """Управление каталогом"""
-    st.subheader(" Управление каталогом")
+    st.subheader("🔧 Управление каталогом")
     st.warning("⚠️ Операции необратимы!")
     management_option = st.radio(
         "Выберите действие:",
@@ -9017,8 +9015,8 @@ def show_catalog_management(catalog):
             "Удалить по бренду": "🏭 Удалить все записи бренда",
             "Удалить по артикули": "📦 Удалить все записи артикула",
             "Управление ценами": "💰 Цены и наценки",
-            "Исключения": "🚫 Исключения при экспорте",
-            "Категории": "️ Категории товаров",
+            "Исключения": " Исключения при экспорте",
+            "Категории": "🗂️ Категории товаров",
             "Облачная синхронизация": "☁️ Облачная синхронизация"
         }[x]
     )
