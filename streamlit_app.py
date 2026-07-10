@@ -7152,42 +7152,53 @@ def show_data_upload_interface():
             
             # Функция для нормализации числовых значений
             def normalize_dimension_value(val):
-                """Нормализует значение весогабарита"""
-                if pd.isna(val):
-                    return 0.0
-                
-                # Если это дата (datetime)
-                if isinstance(val, (datetime, pd.Timestamp)):
-                    logger.warning(f"Обнаружена дата вместо числа: {val}")
-                    return 0.0
-                
-                # Если это строка
-                if isinstance(val, str):
-                    val = val.strip()
-                    # Проверяем, не дата ли это (содержит буквы месяцев)
-                    month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-                                  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-                    if any(month in val.lower() for month in month_names):
-                        logger.warning(f"Обнаружена дата в строке: {val}")
-                        return 0.0
-                    
-                    # Пробуем преобразовать строку в число
-                    try:
-                        # Заменяем запятую на точку
-                        cleaned = val.replace(',', '.')
-                        return round(float(cleaned), 2)
-                    except (ValueError, TypeError):
-                        logger.warning(f"Не удалось преобразовать строку в число: {val}")
-                        return 0.0
-                
-                # Если это число
+    """Нормализует значение весогабарита, исправляя ошибочные даты."""
+    if pd.isna(val):
+        return 0.0
+
+    # Если это дата (datetime) — сразу возвращаем 0
+    if isinstance(val, (datetime, pd.Timestamp)):
+        logger.warning(f"Обнаружена дата вместо числа: {val}")
+        return 0.0
+
+    # Если это строка
+    if isinstance(val, str):
+        val = val.strip()
+
+        # --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: ОБРАБОТКА ДАТ И СТРОК С / ---
+        # Проверяем, содержит ли строка название месяца или символ /
+        month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+                       'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+        
+        # Если это похоже на дату или содержит / (например "9,3/8,7/8,7")
+        if any(month in val.lower() for month in month_names) or '/' in val:
+            # Ищем все числа в строке (включая десятичные дроби)
+            numbers = re.findall(r'(\d+[.,]?\d*)', val.replace(',', '.'))
+            if numbers:
                 try:
-                    num = float(val)
-                    # Округляем до 2 знаков после запятой
-                    return round(num, 2)
+                    # Берём ПЕРВОЕ найденное число
+                    return round(float(numbers[0]), 2)
                 except (ValueError, TypeError):
                     return 0.0
-            
+            return 0.0
+
+        # Если это обычная строка с числом
+        try:
+            cleaned = val.replace(',', '.')
+            cleaned = re.sub(r'[^\d.]', '', cleaned)  # Убираем всё, кроме цифр и точек
+            if cleaned:
+                return round(float(cleaned), 2)
+            return 0.0
+        except (ValueError, TypeError):
+            logger.warning(f"Не удалось преобразовать строку в число: {val}")
+            return 0.0
+
+    # Если это число — просто округляем
+    try:
+        num = float(val)
+        return round(num, 2)
+    except (ValueError, TypeError):
+        return 0.0
             # Применяем нормализацию к колонкам весогабаритов
             normalized_count = 0
             for col in dimension_cols:
