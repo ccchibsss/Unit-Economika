@@ -25,6 +25,11 @@
 ================================================================================
 """
 # ============================================================================
+# БУДУЩИЕ ИМПОРТЫ (ОБЯЗАТЕЛЬНО В НАЧАЛЕ)
+# ============================================================================
+from __future__ import annotations
+
+# ============================================================================
 # БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ (v100.26)
 # ============================================================================
 # ✅ ИСПРАВЛЕНИЯ v100.26:
@@ -841,6 +846,264 @@ class DataCorruptionError(AutoPartsException):
         self.checksum = checksum
         super().__init__(
             f"Повреждение данных{f' в {file_path}' if file_path else ''}: {message}")
+
+# ============================================================================
+# ПЕРЕЧИСЛЕНИЯ (ENUM) ДЛЯ ТИПИЗАЦИИ
+# ============================================================================
+class TariffSource(Enum):
+    """Источник тарифов"""
+    HARDCODED = "hardcoded"
+    MANUAL = "manual"
+    AI_LIVE = "ai_live"
+    API = "api"
+    CACHE = "cache"
+    IMPORTED = "imported"
+
+class CalculationStatus(Enum):
+    """Статус расчета"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+
+class Seasonality(Enum):
+    """Сезонность товара"""
+    ALL_YEAR = "all_year"
+    WINTER = "winter"
+    SPRING = "spring"
+    SUMMER = "summer"
+    AUTUMN = "autumn"
+    HOLIDAY = "holiday"
+    NEW_YEAR = "new_year"
+
+class RiskLevel(Enum):
+    """Уровень риска товара"""
+    VERY_LOW = "very_low"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    VERY_HIGH = "very_high"
+
+class ProfitabilityLevel(Enum):
+    """Уровень рентабельности"""
+    LOSS = "loss"
+    BREAK_EVEN = "break_even"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    VERY_HIGH = "very_high"
+
+class ExportFormat(Enum):
+    """Формат экспорта данных"""
+    EXCEL = "excel"
+    CSV = "csv"
+    JSON = "json"
+    PDF = "pdf"
+    PARQUET = "parquet"
+    ARROW = "arrow"
+
+# ============================================================================
+# ФУНКЦИИ УТИЛИТЫ ДЛЯ КАТЕГОРИЙ ТОВАРОВ
+# ============================================================================
+def get_auto_parts_categories_full() -> Dict[str, Dict[str, Any]]:
+    """
+    Получение полного словаря категорий автозапчастей с характеристиками
+    Returns:
+        Dict[str, Dict[str, Any]]: Словарь категорий с полной информацией
+    """
+    return {
+        "двигатель": {
+            "name": "Двигатель",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 100.0,
+            "typical_volume": 0.05,
+            "margin_avg": 0.25
+        },
+        "трансмиссия": {
+            "name": "Трансмиссия",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 80.0,
+            "typical_volume": 0.04,
+            "margin_avg": 0.22
+        },
+        "подвеска": {
+            "name": "Подвеска",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 50.0,
+            "typical_volume": 0.03,
+            "margin_avg": 0.20
+        },
+        "тормозная_система": {
+            "name": "Тормозная система",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.HIGH,
+            "typical_weight": 30.0,
+            "typical_volume": 0.02,
+            "margin_avg": 0.25
+        },
+        "рулевое_управление": {
+            "name": "Рулевое управление",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 40.0,
+            "typical_volume": 0.025,
+            "margin_avg": 0.22
+        },
+        "электрика": {
+            "name": "Электрика",
+            "hazardous": False,
+            "fragile": True,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 20.0,
+            "typical_volume": 0.015,
+            "margin_avg": 0.28
+        },
+        "охлаждение": {
+            "name": "Охлаждение",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.SUMMER,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 25.0,
+            "typical_volume": 0.02,
+            "margin_avg": 0.20
+        },
+        "выпуск": {
+            "name": "Выпуск",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 35.0,
+            "typical_volume": 0.025,
+            "margin_avg": 0.18
+        },
+        "фильтры": {
+            "name": "Фильтры",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.VERY_LOW,
+            "typical_weight": 2.0,
+            "typical_volume": 0.001,
+            "margin_avg": 0.30
+        },
+        "масла": {
+            "name": "Масла",
+            "hazardous": True,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 5.0,
+            "typical_volume": 0.005,
+            "margin_avg": 0.28
+        },
+        "оптика": {
+            "name": "Оптика",
+            "hazardous": False,
+            "fragile": True,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.HIGH,
+            "typical_weight": 3.0,
+            "typical_volume": 0.002,
+            "margin_avg": 0.25
+        },
+        "шины": {
+            "name": "Шины",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.WINTER,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 15.0,
+            "typical_volume": 0.04,
+            "margin_avg": 0.15
+        },
+        "инструменты": {
+            "name": "Инструменты",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 2.0,
+            "typical_volume": 0.001,
+            "margin_avg": 0.30
+        },
+        "кузов": {
+            "name": "Кузов",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 20.0,
+            "typical_volume": 0.015,
+            "margin_avg": 0.20
+        },
+        "крепёж": {
+            "name": "Крепёж",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.VERY_LOW,
+            "typical_weight": 0.1,
+            "typical_volume": 0.00001,
+            "margin_avg": 0.35
+        },
+        "ремни": {
+            "name": "Ремни",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 1.0,
+            "typical_volume": 0.001,
+            "margin_avg": 0.25
+        },
+        "подшипники": {
+            "name": "Подшипники",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.LOW,
+            "typical_weight": 3.0,
+            "typical_volume": 0.001,
+            "margin_avg": 0.25
+        },
+        "климат": {
+            "name": "Климат-контроль",
+            "hazardous": False,
+            "fragile": False,
+            "seasonality": Seasonality.SUMMER,
+            "risk_level": RiskLevel.MEDIUM,
+            "typical_weight": 10.0,
+            "typical_volume": 0.008,
+            "margin_avg": 0.22
+        },
+        "безопасность": {
+            "name": "Безопасность",
+            "hazardous": False,
+            "fragile": True,
+            "seasonality": Seasonality.ALL_YEAR,
+            "risk_level": RiskLevel.HIGH,
+            "typical_weight": 2.0,
+            "typical_volume": 0.001,
+            "margin_avg": 0.28
+        }
+    }
 
 # ============================================================================
 # УТИЛИТЫ ДЛЯ ОБРАБОТКИ ДАННЫХ
