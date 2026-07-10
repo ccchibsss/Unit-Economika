@@ -24,16 +24,17 @@
 ✅ МИГРАЦИЯ БД (авто-добавление новых колонок)
 ================================================================================
 """
+================================================================================
+🚗 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v100.5 - ENTERPRISE EDITION
+================================================================================
+📌 ВЕРСИЯ: 100.5.1 (ENTERPRISE)
+📌 СПЕЦИАЛИЗАЦИЯ: АВТОЗАПЧАСТИ, АВТОТОВАРЫ И АГРЕГАТЫ
+📌 ТЕХНОЛОГИИ: STREAMLIT, POLARS, DUCKDB, SCIKIT-LEARN, OPENPYXL, PLOTLY
+================================================================================
+"""
+
 # ============================================================================
 # БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ (v100.15)
-# ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.15:
-# 1. Добавлены все необходимые константы (EXCEL_ROW_LIMIT, HISTORY_LIMIT)
-# 2. Все отступы корректны
-# 3. Оптимизирован порядок импортов
-# 4. ДОБАВЛЕНЫ TAX_SYSTEMS И MARKETS_BENCHMARKS_2026
-# 5. ДОБАВЛЕН КЛАСС AutoPartsSpecificCosts
-# 6. ДОБАВЛЕНА ЗАГЛУШКА DeepSeekRateUpdater
 # ============================================================================
 
 # === Стандартная библиотека Python ===
@@ -117,6 +118,7 @@ from decimal import Decimal, ROUND_HALF_UP
 # ============================================================================
 # ОПЦИОНАЛЬНЫЕ ИМПОРТЫ С ОБРАБОТКОЙ ОШИБОК
 # ============================================================================
+
 # === PIL/Pillow (изображения) ===
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
@@ -502,31 +504,25 @@ class AutoPartsSpecificCosts:
                   requires_certification: bool = False) -> float:
         """
         Расчет специфических расходов
-        
         Args:
             price: Цена товара
             is_import: Импортный товар
             requires_marking: Требуется маркировка
             requires_certification: Требуется сертификация
-        
         Returns:
             Сумма специфических расходов
         """
         costs = 0.0
-        
         if requires_marking:
             costs += self.marking_cost
-        
         if requires_certification:
             costs += self.certification_cost
-        
         if is_import:
             costs += price * self.import_duty_rate
-        
         return costs
     
     def calculate_batch(self, prices: List[float], is_import: bool = False,
-                       requires_marking: bool = True) -> List[float]:
+                        requires_marking: bool = True) -> List[float]:
         """Пакетный расчет специфических расходов"""
         return [self.calculate(price, is_import, requires_marking) for price in prices]
 
@@ -545,14 +541,14 @@ except ImportError:
             self.logger.warning("⚠️ DeepSeekRateUpdater использует заглушку. Установите deepseek_rates")
         
         def get_rates_from_ai(self, marketplace: str, category: Optional[str] = None,
-                             force_refresh: bool = False, use_cache: bool = True,
-                             include_forecast: bool = False) -> Tuple[Optional[Dict], Optional[Any], Optional[Dict]]:
+                              force_refresh: bool = False, use_cache: bool = True,
+                              include_forecast: bool = False) -> Tuple[Optional[Dict], Optional[Any], Optional[Dict]]:
             """Заглушка: возвращает None"""
             self.logger.warning(f"get_rates_from_ai вызван для {marketplace}, но это заглушка")
             return None, None, None
         
         def update_all_marketplaces(self, force_refresh: bool = False,
-                                   include_forecast: bool = False) -> Dict[str, Tuple[Optional[Dict], Optional[Any], Optional[Dict]]]:
+                                    include_forecast: bool = False) -> Dict[str, Tuple[Optional[Dict], Optional[Any], Optional[Dict]]]:
             """Заглушка: возвращает пустой словарь"""
             self.logger.warning("update_all_marketplaces вызван, но это заглушка")
             return {}
@@ -638,11 +634,10 @@ def get_logger():
         logger.addHandler(fh)
     except OSError as e:
         print(f"Ошибка создания файлового логгера: {e}")
-    
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
     
     return logger
 
@@ -659,10 +654,10 @@ def st_dataframe_compat(df, *args, **kwargs):
     return st.dataframe(df, *args, **kwargs)
 
 # ============================================================================
-#  v100.5.1: ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
+# 🆕 v100.5.1: ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
 # ============================================================================
 def detect_mojibake(text: str) -> bool:
-    """ v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования)."""
+    """🆕 v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования)."""
     if not isinstance(text, str) or not text:
         return False
     
@@ -672,7 +667,6 @@ def detect_mojibake(text: str) -> bool:
         'Ð', 'Ñ', 'Ò', 'Ó', 'Ô', 'Õ', 'Ö', '×',
         'Ã', 'Ä', 'Å', 'Æ', 'Ç', 'È', 'É', 'Ê'
     ]
-    
     return any(pattern in text for pattern in mojibake_patterns)
 
 def fix_double_utf8(text: str) -> str:
@@ -713,7 +707,6 @@ def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
             fixed_count += 1
         else:
             new_columns.append(col)
-    
     df.columns = new_columns
     
     # Исправляем строковые значения в ячейках
@@ -728,7 +721,6 @@ def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
                 # Считаем сколько ячеек действительно содержат mojibake
                 mask = df[col].apply(lambda x: isinstance(x, str) and detect_mojibake(x))
                 fixed_count += int(mask.sum())
-                
                 df[col] = df[col].apply(_fix_cell)
             except Exception:
                 pass
@@ -745,7 +737,6 @@ def get_api_key_safe(service_name: str) -> Optional[str]:
             return st.secrets[service_name]
     except Exception:
         pass
-    
     env_key = f"{service_name.upper()}_API_KEY"
     return os.environ.get(env_key)
 
@@ -760,6 +751,7 @@ def escape_sql_string(value: str) -> str:
 # ============================================================================
 class AutoPartsException(Exception):
     """Базовое исключение для приложения"""
+    
     def __init__(self, message: str = "", *args, **kwargs):
         self.message = message
         self.timestamp = datetime.now()
@@ -853,32 +845,25 @@ def safe_float(val: Any, default: float = 0.0) -> float:
     """Безопасное преобразование в float"""
     if val is None:
         return default
-    
     if isinstance(val, (int, float)):
         if math.isnan(val) or math.isinf(val):
             return default
         return float(val)
-    
     if isinstance(val, str):
         cleaned = val.strip()
         if not cleaned:
             return default
-        
         cleaned = re.sub(r'[^\d.,\-+\s]', '', cleaned)
         cleaned = cleaned.replace(' ', '').replace(',', '.')
-        
         if cleaned.count('-') > 1:
             return default
-        
         parts = cleaned.split('.')
         if len(parts) > 2:
             return default
-        
         try:
             return float(cleaned)
         except ValueError:
             return default
-    
     if hasattr(val, 'dtype') and hasattr(val, 'item'):
         try:
             item = val.item()
@@ -886,7 +871,6 @@ def safe_float(val: Any, default: float = 0.0) -> float:
                 return float(item)
         except Exception:
             pass
-    
     return default
 
 def safe_int(val: Any, default: int = 0) -> int:
@@ -903,21 +887,16 @@ def safe_str(val: Any, default: str = "") -> str:
     """Безопасное преобразование в str"""
     if val is None:
         return default
-    
     if isinstance(val, bool):
         return str(val)
-    
     if isinstance(val, (int, float)):
         if math.isnan(val) or math.isinf(val):
             return default
         return str(val)
-    
     if isinstance(val, (list, tuple)):
         return ", ".join(safe_str(v) for v in val[:5]) + ("..." if len(val) > 5 else "")
-    
     if isinstance(val, dict):
         return str({k: safe_str(v) for k, v in list(val.items())[:5]})
-    
     try:
         return str(val)
     except Exception:
@@ -940,19 +919,17 @@ def calculate_volume(length: float, width: float, height: float) -> float:
         return 0.0
     return (length * width * height) / 1000  # см³ → литры
 
-def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, 
+def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float,
                               height_cm: float, volumetric_coeff: float = 5000.0) -> float:
     """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
     if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
         return weight_kg
-    
     volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
     billable = max(weight_kg, volumetric_weight)
     billable = math.ceil(billable * 2) / 2
-    
     return billable
 
-def calculate_storage_cost_progressive(volume_l: float, days: int, base_rate: float, 
+def calculate_storage_cost_progressive(volume_l: float, days: int, base_rate: float,
                                        marketplace: str) -> float:
     """Прогрессивная стоимость хранения"""
     if marketplace in ["Ozon", "Wildberries"]:
@@ -966,7 +943,6 @@ def calculate_storage_cost_progressive(volume_l: float, days: int, base_rate: fl
             multiplier = 8.0
         else:
             multiplier = 16.0
-        
         weighted_rate = base_rate * multiplier
         return money_round(volume_l * weighted_rate * days)
     else:
@@ -980,20 +956,16 @@ def calculate_advertising_cost(price: float, category: str, ad_intensity: str = 
         "high": 0.25,
         "aggressive": 0.35
     }
-    
     competitive_categories = ["масла", "фильтры", "колодки", "аккумуляторы"]
-    
     if category in competitive_categories:
         intensity = "high" if ad_intensity == "medium" else ad_intensity
     else:
         intensity = ad_intensity
-    
     return money_round(price * drr_rates.get(intensity, 0.15))
 
 def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> float:
     """Расчёт налога"""
     cfg = TAX_SYSTEMS.get(tax_system, TAX_SYSTEMS["УСН_6"])
-    
     if cfg["base"] == "price":
         return money_round(price * cfg["rate"])
     elif cfg["base"] == "profit":
@@ -1005,7 +977,6 @@ def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> fl
         return money_round(max(0, tax))
     elif cfg["base"] == "fixed":
         return 0.0
-    
     return 0.0
 
 def calculate_returns_cost(price: float, return_rate: float) -> float:
@@ -1031,14 +1002,12 @@ def calculate_recommended_min_price(
         return_rate +
         tax_rate
     )
-    
     fixed_costs = logistics + storage_cost + last_mile
     
     if variable_rate >= 1.0:
         return 0.0
     
     min_price = (cost + fixed_costs) / (1 - variable_rate - min_profit_percent)
-    
     return money_round(max(min_price, cost * 1.1))
 
 # ============================================================================
@@ -1055,14 +1024,12 @@ def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
     for sep in separators:
         if sep in dim_str:
             parts = [p.strip() for p in dim_str.split(sep) if p.strip()]
-            
             if len(parts) >= 3:
                 try:
                     dimensions = []
                     for p in parts[:3]:
                         cleaned = re.sub(r'[^\d.,\-]', '', p)
                         cleaned = cleaned.replace(',', '.')
-                        
                         if cleaned and cleaned.replace('.', '').replace('-', '').isdigit():
                             dimensions.append(float(cleaned))
                         else:
@@ -1124,8 +1091,8 @@ def log_execution(func: Callable) -> Callable:
             args_str.extend(f"{k}={str(v)[:100]}" for k, v in list(kwargs.items())[:5])
         
         logger.info(f"▶️ Выполнение {func.__name__}({', '.join(args_str)})")
-        
         start_time = time.perf_counter()
+        
         try:
             result = func(*args, **kwargs)
             elapsed = time.perf_counter() - start_time
@@ -1133,10 +1100,9 @@ def log_execution(func: Callable) -> Callable:
             return result
         except Exception as e:
             elapsed = time.perf_counter() - start_time
-            logger.error(f" {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
+            logger.error(f"❌ {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
             logger.error(traceback.format_exc())
             raise
-    
     return wrapper
 
 def timer_decorator(func: Callable) -> Callable:
@@ -1225,7 +1191,7 @@ class PerformanceManager:
             if memory_mb < self.memory_threshold_mb:
                 self.chunk_size = 5000
                 self.max_workers = 2
-                logger.info(f" Оптимизация для малой памяти: chunk_size={self.chunk_size}, workers={self.max_workers}")
+                logger.info(f"⚡ Оптимизация для малой памяти: chunk_size={self.chunk_size}, workers={self.max_workers}")
     
     def get_optimal_chunk_size(self, total_rows: int) -> int:
         """Получение оптимального размера чанка"""
@@ -1244,9 +1210,10 @@ perf_manager.optimize_for_big_data()
 # ============================================================================
 logger.info(f"✅ Блок 0 загружен. Версия: {APP_VERSION}")
 logger.info(f"📊 Python: {sys.version}")
-logger.info(f" Streamlit: {st.__version__}")
+logger.info(f"📊 Streamlit: {st.__version__}")
 logger.info(f"📊 Pandas: {pd.__version__}")
 logger.info(f"📊 NumPy: {np.__version__}")
+
 if POLARS_AVAILABLE:
     logger.info(f"📊 Polars: {pl.__version__}")
 if DUCKDB_AVAILABLE:
@@ -9666,67 +9633,40 @@ def format_catalog_stats(stats: Dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 # ============================================================================
-# БЛОК 18: AI ТАРИФЫ С DEEPSEEK - ПОЛНАЯ РЕАЛИЗАЦИЯ
+# БЛОК 18: AI ТАРИФЫ С DEEPSEEK - ПОЛНАЯ РЕАЛИЗАЦИЯ (v100.18)
 # ============================================================================
-# ВЕРСИЯ: v100.18 - ПОЛНАЯ РЕАЛИЗАЦИЯ С DEEPSEEK
-# ============================================================================
-# ОПИСАНИЕ:
-# 1. Полная интеграция с DeepSeek API
-# 2. Автоматическое извлечение тарифов из документации
-# 3. Прогнозирование изменений на 3 месяца
-# 4. Кэширование результатов
-# 5. Обработка ошибок и fallback
-# 6. UI для управления AI тарифами
+# 🆕 v100.18 ИСПРАВЛЕНИЯ:
+# 1. ✅ Удалён конфликт с TariffSource(Enum) из Блока 1
+# 2. ✅ Удалены дублирующиеся импорты (есть в Блоке 0)
+# 3. ✅ Удалены дублирующиеся функции (get_smart_tariff_cache,
+#      get_marketplace_unit_economics, st_dataframe_compat)
+# 4. ✅ Восстановлены правильные отступы
+# 5. ✅ Используется реальный SmartTariffCache из Блока 2
+# 6. ✅ Используется реальный MarketplaceUnitEconomics из Блока 10
+# 7. ✅ Убран if __name__ == "__main__" из середины файла
 # ============================================================================
 
-import json
-import re
-import time
-import logging
-import os
-from typing import Dict, Any, Optional, Tuple, List
-from datetime import datetime, timedelta
-from pathlib import Path
-import requests
+from typing import Dict, Any, Optional, Tuple
 
 # ============================================================================
-# ПРОВЕРКА ДОСТУПНОСТИ OPENAI
+# 🆕 v100.18: ДИРЕКТОРИЯ ДЛЯ КЭША AI ТАРИФОВ
 # ============================================================================
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    openai = None
+AI_TARIFFS_CACHE_DIR = TARIFFS_DIR / "ai_cache"
+AI_TARIFFS_CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
 # ============================================================================
-# КОНСТАНТЫ
-# ============================================================================
-TARIFFS_DIR = Path(os.path.dirname(os.path.abspath(__file__))) / "tariffs_data"
-
-# ============================================================================
-# КЛАСС ДЛЯ ИСТОЧНИКОВ ТАРИФОВ
-# ============================================================================
-class TariffSource:
-    """Источники тарифов"""
-    AI_CACHE = "ai_cache"
-    AI_LIVE = "ai_live"
-    API = "api"
-    CACHE = "cache"
-    FALLBACK = "fallback"
-
-# ============================================================================
-# КЛАСС DEEPSEEK RATE UPDATER - ПОЛНАЯ РЕАЛИЗАЦИЯ
+# 🆕 v100.18: КЛАСС DEEPSEEK RATE UPDATER - ПОЛНАЯ РЕАЛИЗАЦИЯ
 # ============================================================================
 class DeepSeekRateUpdater:
     """
-    Обновление тарифов через DeepSeek AI
-    
-    Использует DeepSeek API для:
+    Обновление тарифов через DeepSeek AI.
+    Использует DeepSeek API (совместим с OpenAI API) для:
     - Извлечения актуальных тарифов из документации маркетплейсов
     - Анализа изменений тарифов
     - Прогнозирования на 3 месяца
     - Сравнения с текущими тарифами
+    
+    🆕 v100.18: Использует TariffSource(Enum) из Блока 1
     """
     
     # Базовые URL для документации маркетплейсов
@@ -9740,20 +9680,11 @@ class DeepSeekRateUpdater:
     
     # Поля для извлечения
     TARIFF_FIELDS = [
-        "commission_rate",
-        "min_commission",
-        "logistics_base",
-        "logistics_per_kg",
-        "logistics_per_liter",
-        "storage_per_day",
-        "return_fee",
-        "acquiring_fee",
-        "last_mile_fee",
-        "delivery_fee_percent",
-        "hazardous_surcharge",
-        "fragile_surcharge",
-        "oversized_surcharge",
-        "seasonal_multipliers"
+        "commission_rate", "min_commission", "logistics_base",
+        "logistics_per_kg", "logistics_per_liter", "storage_per_day",
+        "return_fee", "acquiring_fee", "last_mile_fee",
+        "delivery_fee_percent", "hazardous_surcharge",
+        "fragile_surcharge", "oversized_surcharge", "seasonal_multipliers"
     ]
     
     def __init__(self, api_key: Optional[str] = None):
@@ -9765,8 +9696,7 @@ class DeepSeekRateUpdater:
         """
         self.api_key = api_key or os.environ.get('DEEPSEEK_API_KEY')
         self.logger = logging.getLogger('DeepSeekRateUpdater')
-        self.cache_dir = TARIFFS_DIR / "ai_cache"
-        self.cache_dir.mkdir(exist_ok=True, parents=True)
+        self.cache_dir = AI_TARIFFS_CACHE_DIR
         
         # Инициализация OpenAI клиента (DeepSeek использует совместимый API)
         self.client = None
@@ -9777,13 +9707,13 @@ class DeepSeekRateUpdater:
                     api_key=self.api_key,
                     base_url="https://api.deepseek.com/v1"
                 )
-                self.logger.info("DeepSeek клиент инициализирован")
+                self.logger.info("✅ DeepSeek клиент инициализирован")
             except Exception as e:
-                self.logger.error(f"Ошибка инициализации DeepSeek клиента: {e}")
+                self.logger.error(f"❌ Ошибка инициализации DeepSeek клиента: {e}")
                 self.client = None
         
-        self._tariff_cache = {}
-        self._forecast_cache = {}
+        self._tariff_cache: Dict[str, Dict] = {}
+        self._forecast_cache: Dict[str, Dict] = {}
         self._load_cache()
     
     def _load_cache(self):
@@ -9793,16 +9723,15 @@ class DeepSeekRateUpdater:
             if cache_file.exists():
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     self._tariff_cache = json.load(f)
-                self.logger.info(f"Загружено {len(self._tariff_cache)} записей из кэша")
+                self.logger.info(f"📥 Загружено {len(self._tariff_cache)} записей из кэша")
             
             forecast_file = self.cache_dir / "forecast_cache.json"
             if forecast_file.exists():
                 with open(forecast_file, 'r', encoding='utf-8') as f:
                     self._forecast_cache = json.load(f)
-                self.logger.info(f"Загружено {len(self._forecast_cache)} прогнозов из кэша")
-        
+                self.logger.info(f"📥 Загружено {len(self._forecast_cache)} прогнозов из кэша")
         except Exception as e:
-            self.logger.warning(f"Ошибка загрузки кэша: {e}")
+            self.logger.warning(f"⚠️ Ошибка загрузки кэша: {e}")
     
     def _save_cache(self):
         """Сохранение кэша в файлы"""
@@ -9815,10 +9744,9 @@ class DeepSeekRateUpdater:
             with open(forecast_file, 'w', encoding='utf-8') as f:
                 json.dump(self._forecast_cache, f, ensure_ascii=False, indent=2)
             
-            self.logger.info("Кэш сохранен")
-        
+            self.logger.info("💾 Кэш сохранен")
         except Exception as e:
-            self.logger.error(f"Ошибка сохранения кэша: {e}")
+            self.logger.error(f"❌ Ошибка сохранения кэша: {e}")
     
     def _get_cache_key(self, marketplace: str, category: Optional[str] = None) -> str:
         """Создание ключа для кэша"""
@@ -9828,12 +9756,10 @@ class DeepSeekRateUpdater:
         """Проверка валидности кэша (24 часа)"""
         if cache_key not in self._tariff_cache:
             return False
-        
         entry = self._tariff_cache[cache_key]
         timestamp = entry.get('timestamp', 0)
         if time.time() - timestamp > 86400:  # 24 часа
             return False
-        
         return True
     
     def _extract_tariffs_from_text(self, text: str, marketplace: str) -> Dict[str, Any]:
@@ -9852,31 +9778,30 @@ class DeepSeekRateUpdater:
         
         try:
             prompt = f"""
-            Ты - эксперт по тарифам маркетплейсов. Извлеки актуальные тарифы из следующего текста для маркетплейса {marketplace}.
-            
-            Извлеки следующие поля (если они есть в тексте):
-            - commission_rate: комиссия маркетплейса (в процентах, например 0.15 = 15%)
-            - min_commission: минимальная комиссия (в рублях)
-            - logistics_base: базовая стоимость логистики (в рублях)
-            - logistics_per_kg: стоимость логистики за кг (в рублях)
-            - logistics_per_liter: стоимость логистики за литр (в рублях)
-            - storage_per_day: стоимость хранения за день (в рублях за литр)
-            - return_fee: стоимость возврата (в процентах от цены)
-            - acquiring_fee: комиссия эквайринга (в процентах)
-            - last_mile_fee: стоимость последней мили (в рублях)
-            - delivery_fee_percent: стоимость доставки (в процентах от цены)
-            - hazardous_surcharge: надбавка за опасные товары (в процентах)
-            - fragile_surcharge: надбавка за хрупкие товары (в процентах)
-            - oversized_surcharge: надбавка за крупногабаритные товары (в процентах)
-            - seasonal_multipliers: сезонные коэффициенты (словарь с ключами winter, spring, summer, autumn)
-            
-            Текст для анализа:
-            {text[:4000]}  # Ограничиваем размер текста
-            
-            Ответ предоставь в формате JSON без дополнительного текста.
-            Если какое-то поле не найдено, не включай его в ответ.
-            """
-            
+Ты - эксперт по тарифам маркетплейсов. Извлеки актуальные тарифы из следующего текста для маркетплейса {marketplace}.
+
+Извлеки следующие поля (если они есть в тексте):
+- commission_rate: комиссия маркетплейса (в долях, например 0.15 = 15%)
+- min_commission: минимальная комиссия (в рублях)
+- logistics_base: базовая стоимость логистики (в рублях)
+- logistics_per_kg: стоимость логистики за кг (в рублях)
+- logistics_per_liter: стоимость логистики за литр (в рублях)
+- storage_per_day: стоимость хранения за день (в рублях за литр)
+- return_fee: стоимость возврата (в долях от цены)
+- acquiring_fee: комиссия эквайринга (в долях)
+- last_mile_fee: стоимость последней мили (в рублях)
+- delivery_fee_percent: стоимость доставки (в долях от цены)
+- hazardous_surcharge: надбавка за опасные товары (в долях)
+- fragile_surcharge: надбавка за хрупкие товары (в долях)
+- oversized_surcharge: надбавка за крупногабаритные товары (в долях)
+- seasonal_multipliers: сезонные коэффициенты (словарь winter/spring/summer/autumn)
+
+Текст для анализа:
+{text[:4000]}
+
+Ответ предоставь СТРОГО в формате JSON без дополнительного текста.
+Если какое-то поле не найдено, не включай его в ответ.
+"""
             response = self.client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
@@ -9894,18 +9819,18 @@ class DeepSeekRateUpdater:
             if json_match:
                 try:
                     tariffs = json.loads(json_match.group())
-                    self.logger.info(f"Извлечены тарифы для {marketplace}: {len(tariffs)} полей")
+                    self.logger.info(f"✅ Извлечены тарифы для {marketplace}: {len(tariffs)} полей")
                     return tariffs
                 except json.JSONDecodeError as e:
-                    self.logger.error(f"Ошибка парсинга JSON: {e}")
+                    self.logger.error(f"❌ Ошибка парсинга JSON: {e}")
                     self.logger.debug(f"Ответ: {content[:500]}")
                     return {}
             else:
-                self.logger.warning(f"JSON не найден в ответе для {marketplace}")
+                self.logger.warning(f"⚠️ JSON не найден в ответе для {marketplace}")
                 return {}
         
         except Exception as e:
-            self.logger.error(f"Ошибка при извлечении тарифов для {marketplace}: {e}")
+            self.logger.error(f"❌ Ошибка при извлечении тарифов для {marketplace}: {e}")
             return {}
     
     def _generate_forecast(self, current_rates: Dict[str, Any], marketplace: str) -> Dict[str, Any]:
@@ -9924,28 +9849,27 @@ class DeepSeekRateUpdater:
         
         try:
             prompt = f"""
-            Ты - эксперт по прогнозированию тарифов маркетплейсов.
-            На основе текущих тарифов маркетплейса {marketplace} сделай прогноз на 3 месяца.
-            
-            Текущие тарифы:
-            {json.dumps(current_rates, ensure_ascii=False, indent=2)}
-            
-            Учти следующие факторы:
-            - Сезонность (зимой выше из-за сложной логистики)
-            - Инфляция (около 7% в год)
-            - Конкуренция между маркетплейсами
-            - Сезонные распродажи (черная пятница, новый год)
-            
-            Предоставь прогноз в формате JSON со следующими полями:
-            {{
-                "month_1": {{"commission_rate": 0.16, "logistics_base": 55, ...}},
-                "month_2": {{"commission_rate": 0.17, "logistics_base": 58, ...}},
-                "month_3": {{"commission_rate": 0.18, "logistics_base": 60, ...}},
-                "trend": "up" или "down" или "stable",
-                "confidence": 0.85 (от 0 до 1)
-            }}
-            """
-            
+Ты - эксперт по прогнозированию тарифов маркетплейсов.
+На основе текущих тарифов маркетплейса {marketplace} сделай прогноз на 3 месяца.
+
+Текущие тарифы:
+{json.dumps(current_rates, ensure_ascii=False, indent=2)}
+
+Учти следующие факторы:
+- Сезонность (зимой выше из-за сложной логистики)
+- Инфляция (около 7% в год)
+- Конкуренция между маркетплейсами
+- Сезонные распродажи (черная пятница, новый год)
+
+Предоставь прогноз в формате JSON со следующими полями:
+{{
+    "month_1": {{"commission_rate": 0.16, "logistics_base": 55}},
+    "month_2": {{"commission_rate": 0.17, "logistics_base": 58}},
+    "month_3": {{"commission_rate": 0.18, "logistics_base": 60}},
+    "trend": "up" или "down" или "stable",
+    "confidence": 0.85
+}}
+"""
             response = self.client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
@@ -9962,18 +9886,64 @@ class DeepSeekRateUpdater:
             if json_match:
                 try:
                     forecast = json.loads(json_match.group())
-                    self.logger.info(f"Сгенерирован прогноз для {marketplace}")
+                    self.logger.info(f"✅ Сгенерирован прогноз для {marketplace}")
                     return forecast
                 except json.JSONDecodeError as e:
-                    self.logger.error(f"Ошибка парсинга прогноза: {e}")
+                    self.logger.error(f"❌ Ошибка парсинга прогноза: {e}")
                     return {}
             else:
-                self.logger.warning(f"JSON не найден в прогнозе для {marketplace}")
+                self.logger.warning(f"⚠️ JSON не найден в прогнозе для {marketplace}")
                 return {}
         
         except Exception as e:
-            self.logger.error(f"Ошибка генерации прогноза для {marketplace}: {e}")
+            self.logger.error(f"❌ Ошибка генерации прогноза для {marketplace}: {e}")
             return {}
+    
+    def _get_fallback_rates(self, marketplace: str) -> Dict[str, Any]:
+        """Базовые тарифы для fallback (используются при ошибке AI)"""
+        fallback_rates = {
+            "Ozon": {
+                "commission_rate": 0.15, "min_commission": 30.0,
+                "logistics_base": 50.0, "logistics_per_kg": 15.0,
+                "logistics_per_liter": 5.0, "storage_per_day": 0.3,
+                "return_fee": 0.02, "acquiring_fee": 0.015,
+                "last_mile_fee": 50.0, "hazardous_surcharge": 0.02,
+                "fragile_surcharge": 0.01, "oversized_surcharge": 0.015
+            },
+            "Wildberries": {
+                "commission_rate": 0.18, "min_commission": 35.0,
+                "logistics_base": 60.0, "logistics_per_kg": 18.0,
+                "logistics_per_liter": 6.0, "storage_per_day": 0.5,
+                "return_fee": 0.03, "acquiring_fee": 0.0,
+                "last_mile_fee": 0.0, "hazardous_surcharge": 0.025,
+                "fragile_surcharge": 0.015, "oversized_surcharge": 0.02
+            },
+            "Яндекс Маркет": {
+                "commission_rate": 0.14, "min_commission": 0.0,
+                "logistics_base": 45.0, "logistics_per_kg": 14.0,
+                "logistics_per_liter": 4.5, "storage_per_day": 0.25,
+                "return_fee": 0.02, "acquiring_fee": 0.02,
+                "last_mile_fee": 40.0, "hazardous_surcharge": 0.018,
+                "fragile_surcharge": 0.01, "oversized_surcharge": 0.012
+            },
+            "AliExpress": {
+                "commission_rate": 0.10, "min_commission": 20.0,
+                "logistics_base": 80.0, "logistics_per_kg": 25.0,
+                "logistics_per_liter": 8.0, "storage_per_day": 0.2,
+                "return_fee": 0.01, "acquiring_fee": 0.025,
+                "last_mile_fee": 70.0, "hazardous_surcharge": 0.03,
+                "fragile_surcharge": 0.02, "oversized_surcharge": 0.025
+            },
+            "Мегамаркет": {
+                "commission_rate": 0.13, "min_commission": 28.0,
+                "logistics_base": 55.0, "logistics_per_kg": 16.0,
+                "logistics_per_liter": 5.5, "storage_per_day": 0.3,
+                "return_fee": 0.02, "acquiring_fee": 0.018,
+                "last_mile_fee": 45.0, "hazardous_surcharge": 0.02,
+                "fragile_surcharge": 0.012, "oversized_surcharge": 0.015
+            }
+        }
+        return fallback_rates.get(marketplace, fallback_rates["Ozon"])
     
     def get_rates_from_ai(
         self,
@@ -9982,9 +9952,11 @@ class DeepSeekRateUpdater:
         force_refresh: bool = False,
         use_cache: bool = True,
         include_forecast: bool = False
-    ) -> Tuple[Optional[Dict], Optional[str], Optional[Dict]]:
+    ) -> Tuple[Optional[Dict], Optional[TariffSource], Optional[Dict]]:
         """
         Получение тарифов через AI
+        
+        🆕 v100.18: Возвращает TariffSource(Enum) вместо строки
         
         Args:
             marketplace: Название маркетплейса
@@ -9994,32 +9966,30 @@ class DeepSeekRateUpdater:
             include_forecast: Включить прогноз
         
         Returns:
-            Tuple[Optional[Dict], Optional[str], Optional[Dict]]: (тарифы, источник, прогноз)
+            Tuple[Optional[Dict], Optional[TariffSource], Optional[Dict]]:
+                (тарифы, источник как Enum, прогноз)
         """
         cache_key = self._get_cache_key(marketplace, category)
         
         # Проверяем кэш
         if use_cache and not force_refresh and self._is_cache_valid(cache_key):
-            self.logger.info(f"Использован кэш для {marketplace}")
+            self.logger.info(f"📦 Использован кэш для {marketplace}")
             entry = self._tariff_cache[cache_key]
-            
             forecast = None
             if include_forecast and cache_key in self._forecast_cache:
                 forecast = self._forecast_cache[cache_key]
-            
+            # 🆕 v100.18: Используем Enum TariffSource.AI_CACHE
             return entry.get('rates', {}), TariffSource.AI_CACHE, forecast
         
         # Получаем тарифы через AI
         try:
-            # Проверяем клиент
             if not self.client:
-                self.logger.warning(f"DeepSeek клиент не инициализирован для {marketplace}")
+                self.logger.warning(f"⚠️ DeepSeek клиент не инициализирован для {marketplace}")
                 return None, None, None
             
             # Формируем запрос
             doc_url = self.DOCS_URLS.get(marketplace, "")
             if doc_url:
-                # Пытаемся получить документацию
                 try:
                     response = requests.get(doc_url, timeout=10, headers={
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -10038,7 +10008,7 @@ class DeepSeekRateUpdater:
             
             if not rates:
                 # Fallback: используем базовые тарифы
-                self.logger.warning(f"Не удалось извлечь тарифы для {marketplace}, используем базовые")
+                self.logger.warning(f"⚠️ Не удалось извлечь тарифы для {marketplace}, используем базовые")
                 rates = self._get_fallback_rates(marketplace)
             
             # Сохраняем в кэш
@@ -10059,107 +10029,18 @@ class DeepSeekRateUpdater:
             # Сохраняем кэш
             self._save_cache()
             
+            # 🆕 v100.18: Используем Enum TariffSource.AI_LIVE
             return rates, TariffSource.AI_LIVE, forecast
         
         except Exception as e:
-            self.logger.error(f"Ошибка получения тарифов для {marketplace}: {e}")
+            self.logger.error(f"❌ Ошибка получения тарифов для {marketplace}: {e}")
             return None, None, None
-    
-    def _get_fallback_rates(self, marketplace: str) -> Dict[str, Any]:
-        """Базовые тарифы для fallback"""
-        fallback_rates = {
-            "Ozon": {
-                "commission_rate": 0.15,
-                "min_commission": 30.0,
-                "logistics_base": 50.0,
-                "logistics_per_kg": 15.0,
-                "logistics_per_liter": 5.0,
-                "storage_per_day": 0.3,
-                "return_fee": 0.02,
-                "acquiring_fee": 0.015,
-                "last_mile_fee": 50.0,
-                "hazardous_surcharge": 0.02,
-                "fragile_surcharge": 0.01,
-                "oversized_surcharge": 0.015
-            },
-            "Wildberries": {
-                "commission_rate": 0.18,
-                "min_commission": 35.0,
-                "logistics_base": 60.0,
-                "logistics_per_kg": 18.0,
-                "logistics_per_liter": 6.0,
-                "storage_per_day": 0.5,
-                "return_fee": 0.03,
-                "acquiring_fee": 0.0,
-                "last_mile_fee": 0.0,
-                "hazardous_surcharge": 0.025,
-                "fragile_surcharge": 0.015,
-                "oversized_surcharge": 0.02
-            },
-            "Яндекс Маркет": {
-                "commission_rate": 0.14,
-                "min_commission": 0.0,
-                "logistics_base": 45.0,
-                "logistics_per_kg": 14.0,
-                "logistics_per_liter": 4.5,
-                "storage_per_day": 0.25,
-                "return_fee": 0.02,
-                "acquiring_fee": 0.02,
-                "last_mile_fee": 40.0,
-                "hazardous_surcharge": 0.018,
-                "fragile_surcharge": 0.01,
-                "oversized_surcharge": 0.012
-            },
-            "AliExpress": {
-                "commission_rate": 0.10,
-                "min_commission": 20.0,
-                "logistics_base": 80.0,
-                "logistics_per_kg": 25.0,
-                "logistics_per_liter": 8.0,
-                "storage_per_day": 0.2,
-                "return_fee": 0.01,
-                "acquiring_fee": 0.025,
-                "last_mile_fee": 70.0,
-                "hazardous_surcharge": 0.03,
-                "fragile_surcharge": 0.02,
-                "oversized_surcharge": 0.025
-            },
-            "Мегамаркет": {
-                "commission_rate": 0.13,
-                "min_commission": 28.0,
-                "logistics_base": 55.0,
-                "logistics_per_kg": 16.0,
-                "logistics_per_liter": 5.5,
-                "storage_per_day": 0.3,
-                "return_fee": 0.02,
-                "acquiring_fee": 0.018,
-                "last_mile_fee": 45.0,
-                "hazardous_surcharge": 0.02,
-                "fragile_surcharge": 0.012,
-                "oversized_surcharge": 0.015
-            }
-        }
-        
-        return fallback_rates.get(marketplace, {
-            "commission_rate": 0.15,
-            "min_commission": 30.0,
-            "logistics_base": 50.0,
-            "logistics_per_kg": 15.0,
-            "logistics_per_liter": 5.0,
-            "storage_per_day": 0.3,
-            "return_fee": 0.02,
-            "acquiring_fee": 0.015,
-            "last_mile_fee": 50.0,
-            "hazardous_surcharge": 0.02,
-            "fragile_surcharge": 0.01,
-            "oversized_surcharge": 0.015
-        })
     
     def update_all_marketplaces(
         self,
         force_refresh: bool = False,
         include_forecast: bool = False
-    ) -> Dict[str, Tuple[Optional[Dict], Optional[str], Optional[Dict]]]:
+    ) -> Dict[str, Tuple[Optional[Dict], Optional[TariffSource], Optional[Dict]]]:
         """
         Обновление тарифов для всех маркетплейсов
         
@@ -10171,7 +10052,6 @@ class DeepSeekRateUpdater:
             Dict[str, Tuple]: Результаты для каждого маркетплейса
         """
         results = {}
-        
         for marketplace in self.DOCS_URLS.keys():
             try:
                 rates, source, forecast = self.get_rates_from_ai(
@@ -10181,11 +10061,10 @@ class DeepSeekRateUpdater:
                     include_forecast=include_forecast
                 )
                 results[marketplace] = (rates, source, forecast)
-                self.logger.info(f"Обновлены тарифы для {marketplace}")
+                self.logger.info(f"✅ Обновлены тарифы для {marketplace}")
             except Exception as e:
-                self.logger.error(f"Ошибка обновления {marketplace}: {e}")
+                self.logger.error(f"❌ Ошибка обновления {marketplace}: {e}")
                 results[marketplace] = (None, None, None)
-        
         return results
     
     def get_tariff_forecast(
@@ -10207,10 +10086,10 @@ class DeepSeekRateUpdater:
         """
         cache_key = self._get_cache_key(marketplace, category)
         
-        # Проверяем кэш
+        # Проверяем кэш (7 дней)
         if cache_key in self._forecast_cache:
             forecast = self._forecast_cache[cache_key]
-            if forecast.get('timestamp', 0) > time.time() - 86400 * 7:  # 7 дней
+            if forecast.get('timestamp', 0) > time.time() - 86400 * 7:
                 return forecast
         
         # Получаем новые тарифы и прогноз
@@ -10224,8 +10103,9 @@ class DeepSeekRateUpdater:
             forecast['timestamp'] = time.time()
             self._forecast_cache[cache_key] = forecast
             self._save_cache()
+            return forecast
         
-        return forecast
+        return None
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Получение статистики кэша"""
@@ -10234,7 +10114,6 @@ class DeepSeekRateUpdater:
             "forecast_count": len(self._forecast_cache),
             "cache_size_mb": 0
         }
-        
         try:
             total_size = 0
             for file in self.cache_dir.glob("*.json"):
@@ -10242,7 +10121,6 @@ class DeepSeekRateUpdater:
             stats["cache_size_mb"] = round(total_size / (1024 * 1024), 2)
         except Exception:
             pass
-        
         return stats
     
     def clear_cache(self) -> int:
@@ -10258,90 +10136,192 @@ class DeepSeekRateUpdater:
             except Exception:
                 pass
         
-        self.logger.info(f"Очищено {count} записей кэша")
+        self.logger.info(f"🗑️ Очищено {count} записей кэша")
         return count
 
 
 # ============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ UI
+# 🆕 v100.18: UI ДЛЯ AI ТАРИФОВ (уникальная версия для Блока 18)
 # ============================================================================
+def show_ai_tariffs_interface_v18():
+    """
+    🤖 Интерфейс AI тарифов с DeepSeek
+    🆕 v100.18: Использует реальные классы из Блоков 2 и 10
+    """
+    try:
+        st.header("🤖 AI Тарифы с DeepSeek")
+        st.info("""
+🤖 **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ ИИ:**
+1. Получите API ключ на platform.deepseek.com
+2. Введите ключ в поле ниже
+3. Система автоматически обновит тарифы
+4. Получите прогноз изменения тарифов на 3 месяца вперёд
 
-def get_smart_tariff_cache():
-    """Получение кэша тарифов"""
-    # Заглушка для совместимости
-    class DummyCache:
-        def get_history(self, limit=20):
-            return []
-        def get_statistics(self):
-            return {}
-        def clear_expired(self):
-            return 0
-        def get(self, key, default=None, use_expired=False):
-            return default
-        def delete(self, key):
-            pass
-        def set(self, key, value):
-            pass
-        def clear(self):
-            pass
-        def get_all(self):
-            return {}
-    
-    return DummyCache()
-
-
-def get_marketplace_unit_economics():
-    """Получение экономики маркетплейсов"""
-    # Заглушка для совместимости
-    class DummyEconomics:
-        def __init__(self):
-            self._configs = {}
-            
-        def get_config(self, marketplace):
-            return None
-    
-    return DummyEconomics()
-
-
-def st_dataframe_compat(df, hide_index=False):
-    """Совместимая функция для отображения DataFrame"""
-    import streamlit as st
-    if hide_index:
-        st.dataframe(df, hide_index=True)
-    else:
-        st.dataframe(df)
-
-
-def show_ai_tariffs_interface():
-    """AI ТАРИФЫ С DEEPSEEK"""
-    import streamlit as st
-    
-    st.header("Шаг 4: AI Тарифы с DeepSeek")
-    
-    st.info("""
-    **ОБНОВЛЕНИЕ ТАРИФОВ ЧЕРЕЗ DEEPSEEK AI:**
-    
-    1. Получите API ключ на platform.deepseek.com
-    2. Введите ключ в поле ниже
-    3. Выберите маркетплейс для обновления
-    4. Нажмите "Обновить тарифы"
-    
-    **Что делает AI:**
-    - Анализирует документацию маркетплейсов
-    - Извлекает актуальные тарифы
-    - Прогнозирует изменения на 3 месяца
-    - Сравнивает с текущими тарифами
-    - Определяет тренды изменения
-    """)
-    
-    # Проверка доступности OpenAI
-    if not OPENAI_AVAILABLE:
-        st.warning("""
-        **OpenAI не установлен**
+💡 **Преимущества:**
+- ✅ Актуальные тарифы 2026 года
+- ✅ Прогноз изменения тарифов
+- ✅ Автоматическое обновление
+- ✅ История изменений
+""")
         
-        Для работы AI тарифов необходимо установить:
-        ```bash
-        pip install openai
+        # Проверка доступности OpenAI
+        if not OPENAI_AVAILABLE:
+            st.warning("⚠️ OpenAI не установлен. Установите: `pip install openai`")
+            st.info("💡 Для работы AI тарифов также можно использовать DeepSeek API")
+            return
+        
+        # API ключ
+        api_key = st.text_input(
+            "🔑 DeepSeek API Key",
+            type="password",
+            placeholder="sk-...",
+            key="ai_tariffs_api_key_v18",
+            help="Получите ключ на platform.deepseek.com"
+        )
+        
+        # Настройки
+        settings_col1, settings_col2 = st.columns(2)
+        with settings_col1:
+            marketplace = st.selectbox(
+                "🏪 Маркетплейс",
+                ["Все", "Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет"],
+                key="ai_tariffs_marketplace_v18"
+            )
+        
+        with settings_col2:
+            include_forecast = st.checkbox(
+                "📈 Включить прогноз на 3 месяца",
+                value=True,
+                key="ai_tariffs_forecast_v18"
+            )
+        
+        # Кнопки действий
+        action_col1, action_col2 = st.columns(2)
+        
+        with action_col1:
+            if st.button("🔄 Обновить тарифы", type="primary", use_container_width=True,
+                        key="ai_tariffs_update_v18"):
+                if not api_key:
+                    st.error("❌ Введите API ключ")
+                    return
+                
+                with st.spinner("Обновление тарифов через AI..."):
+                    try:
+                        updater = DeepSeekRateUpdater(api_key=api_key)
+                        
+                        if marketplace == "Все":
+                            result = updater.update_all_marketplaces(include_forecast=include_forecast)
+                            success = True
+                            updated_count = sum(1 for r in result.values() if r[0] is not None)
+                        else:
+                            rates, source, forecast = updater.get_rates_from_ai(
+                                marketplace=marketplace,
+                                force_refresh=True,
+                                include_forecast=include_forecast
+                            )
+                            result = {
+                                "success": rates is not None,
+                                "updated": 1 if rates else 0,
+                                "forecast": forecast,
+                                "source": source
+                            }
+                            success = result.get("success", False)
+                            updated_count = result.get("updated", 0)
+                        
+                        if success:
+                            st.success(f"✅ Обновлено {updated_count} маркетплейсов")
+                            st.balloons()
+                            
+                            if include_forecast and marketplace != "Все":
+                                forecast_data = result.get("forecast")
+                                if forecast_data:
+                                    st.subheader("📈 Прогноз на 3 месяца")
+                                    st.json(forecast_data)
+                        else:
+                            st.error(f"❌ Ошибка: {result.get('error', 'Неизвестная ошибка')}")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Ошибка обновления: {e}")
+                        logger.exception("Ошибка обновления тарифов через AI")
+        
+        with action_col2:
+            if st.button("📊 Показать текущие тарифы", use_container_width=True,
+                        key="ai_tariffs_show_v18"):
+                try:
+                    # 🆕 v100.18: Используем реальную функцию из Блока 10
+                    unit_economics = get_marketplace_unit_economics()
+                    
+                    if unit_economics and hasattr(unit_economics, '_configs'):
+                        configs = unit_economics._configs
+                        tariff_data = []
+                        
+                        for mp_name, config in configs.items():
+                            tariff_source = getattr(config, 'tariff_source', 'unknown')
+                            # Безопасное получение значения из Enum
+                            if hasattr(tariff_source, 'value'):
+                                tariff_source = tariff_source.value
+                            elif hasattr(tariff_source, 'name'):
+                                tariff_source = tariff_source.name
+                            
+                            tariff_data.append({
+                                "Маркетплейс": mp_name,
+                                "Комиссия": f"{getattr(config, 'commission_rate', 0)*100:.1f}%",
+                                "Логистика база": f"{getattr(config, 'logistics_base', 0):.2f} ₽",
+                                "Логистика/кг": f"{getattr(config, 'logistics_per_kg', 0):.2f} ₽",
+                                "Хранение/день": f"{getattr(config, 'storage_per_day', 0):.2f} ₽",
+                                "Источник": str(tariff_source)
+                            })
+                        
+                        if tariff_data:
+                            st.subheader("📊 Текущие тарифы")
+                            st_dataframe_compat(pd.DataFrame(tariff_data), hide_index=True)
+                        else:
+                            st.warning("⚠️ Тарифы не найдены")
+                    else:
+                        st.warning("⚠️ UnitEconomics не инициализирован")
+                
+                except Exception as e:
+                    st.error(f"❌ Ошибка получения тарифов: {e}")
+        
+        st.divider()
+        
+        # История обновлений
+        st.subheader("📜 История обновлений")
+        st.info("ℹ️ Здесь будет отображаться история изменений тарифов")
+        
+        # Статистика кэша
+        try:
+            # 🆕 v100.18: Используем реальную функцию из Блока 2
+            tariff_cache = get_smart_tariff_cache()
+            if tariff_cache and hasattr(tariff_cache, 'get_statistics'):
+                stats = tariff_cache.get_statistics()
+                if stats:
+                    st.subheader("📊 Статистика кэша тарифов")
+                    cache_col1, cache_col2, cache_col3 = st.columns(3)
+                    with cache_col1:
+                        st.metric("📦 Всего записей", stats.get('total_entries', 0))
+                    with cache_col2:
+                        st.metric("⏰ Истекших", stats.get('expired_count', 0))
+                    with cache_col3:
+                        st.metric("📈 Прогнозов", stats.get('forecast_count', 0))
+        except Exception as e:
+            logger.warning(f"Не удалось получить статистику кэша: {e}")
+    
+    except Exception as e:
+        st.error(f"❌ Критическая ошибка в разделе 'AI Тарифы'")
+        st.error(f"**Ошибка:** {str(e)}")
+        st.error(f"**Тип:** {type(e).__name__}")
+        with st.expander("📋 Полный traceback", expanded=True):
+            st.code(traceback.format_exc())
+
+
+# ============================================================================
+# 🆕 v100.18: ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКА 18
+# ============================================================================
+logger.info("✅ Блок 18 загружен: DeepSeekRateUpdater (полная реализация)")
+logger.info(f"📁 Директория кэша AI: {AI_TARIFFS_CACHE_DIR}")
+logger.info(f"🔑 OpenAI доступен: {OPENAI_AVAILABLE}")
+
 
 # ============================================================================
 # БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА (v3.1)
