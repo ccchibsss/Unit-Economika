@@ -11209,21 +11209,6 @@ class SmartTariffLoaderV3:
         """Деструктор для остановки фоновых задач"""
         if hasattr(self, 'cache_manager'):
             self.cache_manager.stop_background_prefetch()
-
-
-# ============================================================================
-# ИСПОЛЬЗОВАНИЕ
-# ============================================================================
-# Пример использования
-if __name__ == "__main__":
-    # Настройка логирования
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Создаем загрузчик
-    loader = SmartTariffLoaderV3()
     
     # Загрузка с автоматическим выбором источника
     result = loader.load_tariffs_advanced(
