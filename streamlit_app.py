@@ -10387,6 +10387,7 @@ class SmartCacheManager:
         self.prefetch_schedule = {}
         self.prefetch_thread = None
         self.running = False
+        self.loader = None
         self.lock = threading.Lock()
         self.logger = logging.getLogger('SmartCacheManager')
     
@@ -10428,8 +10429,15 @@ class SmartCacheManager:
             elapsed = (datetime.now() - schedule['last_prefetch']).total_seconds()
             return elapsed > schedule['prefetch_interval']
     
-    def prefetch_data(self, marketplace: str, loader, force: bool = False):
+    def prefetch_data(self, marketplace: str, loader=None, force: bool = False):
         """Предзагрузка данных"""
+        if loader is None:
+            loader = getattr(self, 'loader', None)
+        
+        if loader is None:
+            self.logger.warning("Не удалось выполнить предзагрузку: loader не привязан к SmartCacheManager")
+            return None
+        
         if not force and not self.should_prefetch(marketplace):
             return None
         
@@ -10459,8 +10467,11 @@ class SmartCacheManager:
             self.logger.error(f"Ошибка предзагрузки {marketplace}: {e}")
             return None
     
-    def start_background_prefetch(self, loader, interval: int = 300):
+    def start_background_prefetch(self, loader=None, interval: int = 300):
         """Запуск фоновой предзагрузки"""
+        if loader is not None:
+            self.loader = loader
+        
         if self.running:
             return
         
@@ -10471,7 +10482,7 @@ class SmartCacheManager:
                 try:
                     for marketplace in list(self.prefetch_schedule.keys()):
                         if self.should_prefetch(marketplace):
-                            self.prefetch_data(marketplace, loader)
+                            self.prefetch_data(marketplace, loader=self.loader)
                     
                     time.sleep(interval)
                 except Exception as e:
@@ -10550,6 +10561,7 @@ class SmartTariffLoaderV3:
         self.performance_monitor = PerformanceMonitor()
         self.source_selector = SourceSelector()
         self.cache_manager = SmartCacheManager(self.tariff_cache, self.config.get('cache', {}))
+        self.cache_manager.loader = self
         
         # Статистика использования источников
         self.source_stats = {
@@ -11209,6 +11221,21 @@ class SmartTariffLoaderV3:
         """Деструктор для остановки фоновых задач"""
         if hasattr(self, 'cache_manager'):
             self.cache_manager.stop_background_prefetch()
+
+
+# ============================================================================
+# ИСПОЛЬЗОВАНИЕ
+# ============================================================================
+# Пример использования (не выполняется автоматически при импорте Streamlit)
+if __name__ == "__main__" and os.environ.get("UNIT_ECONOMIKA_SELFTEST", "0") == "1":
+    # Настройка логирования
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Создаем загрузчик
+    loader = SmartTariffLoaderV3()
     
     # Загрузка с автоматическим выбором источника
     result = loader.load_tariffs_advanced(
