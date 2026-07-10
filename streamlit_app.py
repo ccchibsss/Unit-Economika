@@ -814,7 +814,7 @@ class AutoPartsException(Exception):
         super().__init__(message, *args)
 
     def __str__(self):
-    return f"[{self.timestamp.strftime(LOG_DATE_FORMAT)}] {self.message}"
+        return f"[{self.timestamp.strftime(LOG_DATE_FORMAT)}] {self.message}"
 
 
 class ValidationError(AutoPartsException):
