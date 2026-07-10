@@ -4725,44 +4725,98 @@ class MarketplaceUnitEconomics:
             wb = load_workbook(output)
             ws = wb['История']
 
-            # Создаём лист для формул
-            if 'Формулы' in wb.sheetnames:
-                wb.remove(wb['Формулы'])
-            wf = wb.create_sheet('Формулы')
+            try:
+                # Создаём лист для формул
+                if 'Формулы' in wb.sheetnames:
+                    wb.remove(wb['Формулы'])
+                wf = wb.create_sheet('Формулы')
 
-            # Заголовки для формул
-            headers = ['calc_total_expenses_formula', 'calc_profit_formula', 'calc_margin_formula', 'calc_roi_formula']
-            for c, h in enumerate(headers, start=1):
-                wf.cell(row=1, column=c, value=h)
+                # Заголовки для формул
+                headers = ['calc_total_expenses_formula', 'calc_profit_formula', 'calc_margin_formula', 'calc_roi_formula']
+                for c, h in enumerate(headers, start=1):
+                    wf.cell(row=1, column=c, value=h)
 
-            # Получаем соответствие имён колонок к буквенным адресам
-            header_names = [cell.value for cell in ws[1]]
-            col_map = {name: get_column_letter(i + 1) for i, name in enumerate(header_names)}
+                # Получаем соответствие имён колонок к буквенным адресам (нормализуем имена)
+                header_cells = list(ws[1])
+                header_names = [str(cell.value).strip() if cell.value is not None else '' for cell in header_cells]
+                header_map = {name.lower(): get_column_letter(i + 1) for i, name in enumerate(header_names) if name}
 
-            # Для каждой строки данных (начиная со второй) создаём формулы, ссылаясь на лист 'История'
-            for row_idx in range(2, ws.max_row + 1):
-                # helper to build reference (uses English column names from to_dict)
-                def ref(col_name):
-                    col = col_map.get(col_name)
-                    if not col:
-                        return '0'
-                    return f"'История'!${col}${row_idx}"
+                # Функция для поиска столбца по списку возможных имён (англ/рус)
+                def find_col(candidates: list[str]) -> str | None:
+                    for c in candidates:
+                        if not c:
+                            continue
+                        col = header_map.get(c.lower())
+                        if col:
+                            return col
+                    return None
 
-                total_expenses_formula = (
-                    f"=({ref('cost')} + {ref('commission')} + {ref('subscription_cost')} + {ref('logistics')} + {ref('storage_cost')} + {ref('acquiring')} + {ref('delivery')} + {ref('last_mile')} + {ref('returns')} + {ref('rko_fee')} + {ref('premium_fee')} + {ref('insurance_fee')} + {ref('packing_fee')} + {ref('marketing_fee')} + {ref('hazardous_surcharge')} + {ref('fragile_surcharge')} + {ref('oversized_surcharge')} + {ref('tax_amount')} + {ref('auto_parts_specific')} + {ref('advertising_cost')})"
-                )
+                # Список кандидатов для логических полей
+                candidates = {
+                    'price': ['price', 'Цена', 'price_rub', 'price_rub'],
+                    'cost': ['cost', 'Себестоимость', 'cost_rub'],
+                    'commission': ['commission', 'Комиссия'],
+                    'subscription_cost': ['subscription_cost', 'subscription_cost'],
+                    'logistics': ['logistics', 'Логистика'],
+                    'storage_cost': ['storage_cost', 'storage_cost'],
+                    'acquiring': ['acquiring', 'acquiring_fee', 'acquiring_fee'],
+                    'delivery': ['delivery', 'delivery_fee_percent', 'delivery'],
+                    'last_mile': ['last_mile', 'last_mile'],
+                    'returns': ['returns', 'returns'],
+                    'rko_fee': ['rko_fee', 'rko_fee'],
+                    'premium_fee': ['premium_fee', 'premium_fee'],
+                    'insurance_fee': ['insurance_fee', 'insurance_fee'],
+                    'packing_fee': ['packing_fee', 'packing_fee'],
+                    'marketing_fee': ['marketing_fee', 'marketing_fee'],
+                    'hazardous_surcharge': ['hazardous_surcharge', 'hazardous_surcharge'],
+                    'fragile_surcharge': ['fragile_surcharge', 'fragile_surcharge'],
+                    'oversized_surcharge': ['oversized_surcharge', 'oversized_surcharge'],
+                    'tax_amount': ['tax_amount', 'tax_amount'],
+                    'auto_parts_specific': ['auto_parts_specific', 'auto_parts_specific'],
+                    'advertising_cost': ['advertising_cost', 'advertising_cost'],
+                }
 
-                price_ref = ref('price')
-                profit_formula = f"=({price_ref} - ({total_expenses_formula[1:]}))"
-                # margin: profit / price * 100
-                margin_formula = f"=IF({price_ref}=0,0,({profit_formula[1:]})/{price_ref}*100)"
-                cost_ref = ref('cost')
-                roi_formula = f"=IF({cost_ref}=0,0,({profit_formula[1:]})/{cost_ref}*100)"
+                # Для каждой строки данных (начиная со второй) создаём формулы, ссылаясь на лист 'История'
+                for row_idx in range(2, ws.max_row + 1):
+                    def ref_logical(key: str) -> str:
+                        col = find_col(candidates.get(key, []))
+                        if not col:
+                            return '0'
+                        return f"'История'!${col}${row_idx}"
 
-                wf.cell(row=row_idx, column=1, value=total_expenses_formula)
-                wf.cell(row=row_idx, column=2, value=profit_formula)
-                wf.cell(row=row_idx, column=3, value=margin_formula)
-                wf.cell(row=row_idx, column=4, value=roi_formula)
+                    total_expenses_formula = (
+                        "=(" + "+".join([
+                            ref_logical('cost'), ref_logical('commission'), ref_logical('subscription_cost'),
+                            ref_logical('logistics'), ref_logical('storage_cost'), ref_logical('acquiring'),
+                            ref_logical('delivery'), ref_logical('last_mile'), ref_logical('returns'),
+                            ref_logical('rko_fee'), ref_logical('premium_fee'), ref_logical('insurance_fee'),
+                            ref_logical('packing_fee'), ref_logical('marketing_fee'), ref_logical('hazardous_surcharge'),
+                            ref_logical('fragile_surcharge'), ref_logical('oversized_surcharge'), ref_logical('tax_amount'),
+                            ref_logical('auto_parts_specific'), ref_logical('advertising_cost')
+                        ]) + ")"
+                    )
+
+                    price_col = find_col(candidates.get('price', []))
+                    price_ref = f"'История'!${price_col}${row_idx}" if price_col else '0'
+                    profit_formula = f"=({price_ref} - ({total_expenses_formula[1:]}))"
+                    margin_formula = f"=IF({price_ref}=0,0,({profit_formula[1:]})/{price_ref}*100)"
+                    cost_col = find_col(candidates.get('cost', []))
+                    cost_ref = f"'История'!${cost_col}${row_idx}" if cost_col else '0'
+                    roi_formula = f"=IF({cost_ref}=0,0,({profit_formula[1:]})/{cost_ref}*100)"
+
+                    wf.cell(row=row_idx, column=1, value=total_expenses_formula)
+                    wf.cell(row=row_idx, column=2, value=profit_formula)
+                    wf.cell(row=row_idx, column=3, value=margin_formula)
+                    wf.cell(row=row_idx, column=4, value=roi_formula)
+            except Exception as e:
+                # Если что-то пошло не так при создании листа формул — вернёмся к простому варианту
+                logger = logging.getLogger('Export')
+                logger.warning(f"Не удалось создать лист 'Формулы': {e}")
+                out_bytes = io.BytesIO()
+                with pd.ExcelWriter(out_bytes, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='История')
+                out_bytes.seek(0)
+                return out_bytes.getvalue()
 
             # Сохраняем в байты
             out_bytes = io.BytesIO()
