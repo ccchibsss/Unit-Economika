@@ -491,7 +491,6 @@ class AutoPartsSpecificCosts:
     def calculate(self, price: float, is_import: bool = False, requires_marking: bool = True,
                   requires_certification: bool = False) -> float:
         """
-        Расчет специфических расходов
         Args:
             price: Цена товара
             is_import: Импортный товар
@@ -4666,10 +4665,7 @@ class MarketplaceUnitEconomics:
 # ✅ ДОБАВЛЕНО: ФУНКЦИЯ calculate_returns_cost (была пропущена)
 # ============================================================================
 def calculate_returns_cost(price: float, return_rate: float) -> float:
-    """
-    Расчёт стоимости возвратов
-    
-    Args:
+       Args:
         price: Цена товара
         return_rate: Ставка возвратов (в долях от 1)
     
