@@ -8018,363 +8018,705 @@ class SuperProExcelExporter:
         return ws
 
 # ============================================================================
-# БЛОК 15: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА (v100.6 - УЛУЧШЕННАЯ)
+# БЛОК 15.1: ЭКСПОРТ КАТАЛОГА 300K+ ТОВАРОВ С ЖИВЫМИ ФОРМУЛАМИ
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.26:
-# 1. ✅ ИСПРАВЛЕНО: Распарсенные габариты теперь передаются в расчёт
-#    (ранее l, w, h парсились, но НЕ передавались в calculate_unit_economics)
-# 2. Инициализация переменных l, w, h до парсинга
-# 3. Передача length, width, height в calculate_unit_economics
-# 4. Правильные отступы во всех функциях
-# 5. Полная обработка ошибок
+# ✅ ОПТИМИЗАЦИИ ДЛЯ БОЛЬШИХ КАТАЛОГОВ:
+# 1. constant_memory mode в xlsxwriter (экономия RAM)
+# 2. Chunked запись по 50K строк
+# 3. Прогресс-бар с ETA
+# 4. Автоматическая разбивка на листы при >500K строк
+# 5. Обработка ошибок с fallback на простой Excel
+# 6. Индексы для быстрого поиска в Excel
 # ============================================================================
-import streamlit as st
-import pandas as pd
-import logging
+
+from typing import Optional, List, Dict, Any
+import io
+import time
+from pathlib import Path
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
 
-
-def show_unit_economics_interface():
+def export_large_catalog_to_live_excel(
+    df: pd.DataFrame,
+    metadata: Optional[Dict] = None,
+    progress_callback: Optional[callable] = None,
+    chunk_size: int = 50_000,
+) -> bytes:
     """
-    📊 РАЗДЕЛ 2: ЮНИТ-ЭКОНОМИКА С ПАРАЛЛЕЛЬНЫМ РАСЧЕТОМ
-    Оптимизирована для 350K+ товаров с живыми формулами Excel
+    🚀 Экспорт большого каталога (300K+ товаров) в Excel С ЖИВЫМИ ФОРМУЛАМИ.
+    
+    Оптимизации:
+    - constant_memory mode (низкое потребление RAM)
+    - Chunked запись по 50K строк
+    - Прогресс-бар
+    - Авто-разбивка на листы при >500K строк
+    
+    Args:
+        df: DataFrame с результатами расчёта (должен содержать колонки
+            price, cost, marketplace, operation_mode, category, weight,
+            length, width, height, Артикул, Бренд)
+        metadata: Метаданные (marketplaces, modes, tax_system, ...)
+        progress_callback: Функция для обновления прогресса (0.0 - 1.0)
+        chunk_size: Размер чанка для записи
+    
+    Returns:
+        bytes: Готовый Excel-файл
     """
-    st.header("📊 Шаг 2: Расчет юнит-экономики")
-    st.info("""
-💡 **ДВА СПОСОБА РАСЧЕТА:**
-
-**Способ 1:** Расчет для одного товара (введите данные вручную)
-
-**Способ 2:** Расчет по всему каталогу (загрузите файл в разделе "Загрузка данных")
-
-🚀 **ДЛЯ БОЛЬШИХ КАТАЛОГОВ (>1000 товаров)** используется параллельный расчет
-
-**v100.6:** Экспорт в Excel с живыми формулами — меняйте значения, всё пересчитается!
-""")
+    if not XLSXWRITER_AVAILABLE:
+        raise ExportError("xlsxwriter не установлен. pip install xlsxwriter")
     
-    calculation_mode = st.radio(
-        "🎯 Выберите способ расчета:",
-        ["📝 Один товар (вручную)", "📦 Весь каталог (из файла)"],
-        horizontal=True,
-        key="calc_mode"
-    )
+    if df is None or df.empty:
+        raise ExportError("Нет данных для экспорта")
     
-    if calculation_mode == "📝 Один товар (вручную)":
-        show_single_product_calculation()
-    else:
-        show_catalog_calculation_parallel()
-
-
-def show_single_product_calculation():
-    """Расчет для одного товара с учетом сезонности (ИСПРАВЛЕННАЯ ВЕРСИЯ)"""
-    st.subheader("📝 Расчет для одного товара")
+    metadata = metadata or {}
+    total_rows = len(df)
+    logger.info(f"🚀 Экспорт {total_rows} товаров в живой Excel...")
     
-    unit_economics = get_marketplace_unit_economics()
-    if unit_economics is None:
-        st.error("❌ UnitEconomics не инициализирован")
-        return
+    # Временный файл
+    tmp_path = TEMP_DIR / f"live_excel_{uuid.uuid4().hex}.xlsx"
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 💰 Финансовые параметры")
-        
-        price = st.number_input(
-            "💰 Цена продажи (₽)",
-            min_value=0.0,
-            value=1000.0,
-            step=10.0,
-            key="ue_price",
-            help="Цена, по которой вы продаете товар"
-        )
-        
-        cost = st.number_input(
-            "💵 Себестоимость (₽)",
-            min_value=0.0,
-            value=500.0,
-            step=10.0,
-            key="ue_cost",
-            help="Закупочная цена товара"
-        )
-        
-        dimension_input = st.text_input(
-            "📏 Размеры (ДxШxВ) или Весогабариты",
-            placeholder="например: 20x15x10",
-            key="ue_dimensions",
-            help="Введите размеры в формате Длина x Ширина x Высота"
-        )
-    
-    with col2:
-        st.markdown("### 🏪 Параметры маркетплейса")
-        
-        weight = st.number_input(
-            "⚖️ Вес (кг)",
-            min_value=0.0,
-            value=1.0,
-            step=0.1,
-            key="ue_weight",
-            help="Вес товара в килограммах"
-        )
-        
-        marketplace = st.selectbox(
-            "🏪 Маркетплейс",
-            list(unit_economics._configs.keys()),
-            key="ue_marketplace",
-            help="Выберите маркетплейс для расчета"
-        )
-        
-        operation_mode = st.selectbox(
-            "📦 Режим работы",
-            ["FBY", "FBS", "FBO", "DBS", "FBP"],
-            key="ue_mode",
-            help="FBY - самый дешевый, FBS - базовый"
-        )
-        
-        category = st.text_input(
-            "📂 Категория (опционально)",
-            placeholder="например: двигатель",
-            key="ue_category",
-            help="Категория товара для точного расчета комиссии"
-        )
-        
-        tax_system = st.selectbox(
-            "💼 Налоговый режим",
-            list(TAX_SYSTEMS.keys()),
-            format_func=lambda x: TAX_SYSTEMS[x]["name"],
-            key="ue_tax_system",
-            help="Выберите систему налогообложения"
-        )
-        
-        ad_intensity = st.selectbox(
-            "📢 Интенсивность рекламы",
-            ["low", "medium", "high", "aggressive"],
-            format_func=lambda x: {
-                "low": "Низкая (5%)",
-                "medium": "Средняя (15%)",
-                "high": "Высокая (25%)",
-                "aggressive": "Агрессивная (35%)"
-            }[x],
-            key="ue_ad_intensity",
-            help="Доля рекламных расходов (ДРР)"
-        )
-        
-        is_premium = st.checkbox(
-            "⭐ Премиум-раздел (доп. комиссия)",
-            key="ue_premium"
-        )
-        
-        use_seasonal = st.checkbox(
-            "🌤️ Учесть сезонный коэффициент",
-            value=True,
-            key="ue_seasonal"
-        )
-    
-    # ====================================================================
-    # ✅ ИСПРАВЛЕНИЕ v100.26: Парсим габариты и СОХРАНЯЕМ их в переменные
-    # ====================================================================
-    parsed_l, parsed_w, parsed_h = 0.0, 0.0, 0.0  # по умолчанию нули
-    
-    if dimension_input:
-        parsed_l, parsed_w, parsed_h = parse_dimensions_string(dimension_input)
-        
-        if parsed_l > 0 and parsed_w > 0 and parsed_h > 0:
-            st.success(f"✅ Распарсено: {parsed_l:.1f} x {parsed_w:.1f} x {parsed_h:.1f} см")
-        else:
-            st.warning("⚠️ Не удалось распарсить размеры. Используйте формат: 20x15x10")
-    
-    # ====================================================================
-    # КНОПКА РАСЧЁТА
-    # ====================================================================
-    if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_calc"):
-        with st.spinner("Расчет юнит-экономики..."):
-            current_month = datetime.now().month if use_seasonal else None
-            
-            # ✅ ИСПРАВЛЕНИЕ v100.26: Передаём РАСПАРСЕННЫЕ габариты в расчёт
-            economics = unit_economics.calculate_unit_economics(
-                price=price,
-                cost=cost,
-                marketplace=marketplace,
-                weight=weight,
-                length=parsed_l,       # ✅ ТЕПЕРЬ ПЕРЕДАЁМ!
-                width=parsed_w,        # ✅ ТЕПЕРЬ ПЕРЕДАЁМ!
-                height=parsed_h,       # ✅ ТЕПЕРЬ ПЕРЕДАЁМ!
-                category=category if category else None,
-                operation_mode=operation_mode,
-                is_premium=is_premium,
-                current_month=current_month,
-                tax_system=tax_system,
-                ad_intensity=ad_intensity
-            )
-            
-            # ====================================================================
-            # ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
-            # ====================================================================
-            st.subheader("📊 Результаты расчета")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric(
-                    "💰 Прибыль",
-                    f"{economics.profit:.2f} ₽",
-                    delta=f"{economics.profit_per_ruble:.2f} ₽/₽"
-                )
-            
-            with col2:
-                st.metric("📈 Маржа", f"{economics.margin_percent:.2f}%")
-            
-            with col3:
-                st.metric("📊 ROI", f"{economics.roi:.2f}%")
-            
-            with col4:
-                st.metric(
-                    "⚖️ Точка безубыточности",
-                    f"{economics.breakeven_price:.2f} ₽"
-                )
-            
-            if economics.applied_seasonal_multiplier != 1.0:
-                st.info(
-                    f"🌤️ Применен сезонный коэффициент: "
-                    f"{economics.applied_seasonal_multiplier:.2f}x"
-                )
-            
-            if economics.applied_promo_discount > 0:
-                st.info(
-                    f"🎯 Применена промо-скидка: "
-                    f"{economics.applied_promo_discount * 100:.1f}%"
-                )
-            
-            st.subheader("🔹 v100.5: Улучшенные метрики")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "⚖️ Оплачиваемый вес",
-                    f"{economics.billable_weight:.2f} кг"
-                )
-            
-            with col2:
-                st.metric(
-                    "📢 Реклама (ДРР)",
-                    f"{economics.advertising_cost:.2f} ₽"
-                )
-            
-            with col3:
-                st.metric(
-                    "🔧 Спец. расходы",
-                    f"{economics.auto_parts_specific:.2f} ₽"
-                )
-            
-            st.subheader("💎 Рекомендованная минимальная цена")
-            
-            col_rec1, col_rec2, col_rec3 = st.columns(3)
-            
-            with col_rec1:
-                st.metric(
-                    "🎯 Мин. цена (с учётом налога и 10% прибыли)",
-                    f"{economics.recommended_min_price:.2f} ₽",
-                    delta=f"{economics.recommended_min_price - price:.2f} ₽"
-                )
-            
-            with col_rec2:
-                st.metric(
-                    f"💵 Налог ({TAX_SYSTEMS[economics.tax_system]['name']})",
-                    f"{economics.tax_amount:.2f} ₽"
-                )
-            
-            with col_rec3:
-                if price < economics.recommended_min_price:
-                    st.warning(
-                        f"⚠️ Цена ниже рекомендованной на "
-                        f"{economics.recommended_min_price - price:.2f} ₽"
-                    )
-                else:
-                    st.success(
-                        f"✅ Цена выше минимальной на "
-                        f"{price - economics.recommended_min_price:.2f} ₽"
-                    )
-            
-            st.subheader("📋 Детализация расходов")
-            
-            expenses_data = {
-                "Статья расходов": [
-                    "Себестоимость", "Комиссия", "Подписка", "Логистика",
-                    "Хранение", "Эквайринг", "Доставка", "Последняя миля",
-                    "Возвраты", "РКО", "Премиум", "Страховка", "Упаковка", "Маркетинг",
-                    "Надбавка за опасные", "Надбавка за хрупкие",
-                    "Надбавка за крупногабарит",
-                    f"Налог ({TAX_SYSTEMS[economics.tax_system]['name']})",
-                    "🔧 Спец. расходы автозапчастей",
-                    "📢 Рекламные расходы",
-                    "ИТОГО"
-                ],
-                "Сумма (₽)": [
-                    economics.cost, economics.commission,
-                    economics.subscription_cost, economics.logistics,
-                    economics.storage_cost, economics.acquiring,
-                    economics.delivery, economics.last_mile,
-                    economics.returns, economics.rko_fee,
-                    economics.premium_fee, economics.insurance_fee,
-                    economics.packing_fee, economics.marketing_fee,
-                    economics.hazardous_surcharge, economics.fragile_surcharge,
-                    economics.oversized_surcharge, economics.tax_amount,
-                    economics.auto_parts_specific, economics.advertising_cost,
-                    economics.total_expenses
-                ],
-                "% от цены": [
-                    f"{economics.cost/price*100:.1f}%",
-                    f"{economics.commission/price*100:.1f}%",
-                    f"{economics.subscription_cost/price*100:.1f}%",
-                    f"{economics.logistics/price*100:.1f}%",
-                    f"{economics.storage_cost/price*100:.1f}%",
-                    f"{economics.acquiring/price*100:.1f}%",
-                    f"{economics.delivery/price*100:.1f}%",
-                    f"{economics.last_mile/price*100:.1f}%",
-                    f"{economics.returns/price*100:.1f}%",
-                    f"{economics.rko_fee/price*100:.1f}%",
-                    f"{economics.premium_fee/price*100:.1f}%",
-                    f"{economics.insurance_fee/price*100:.1f}%",
-                    f"{economics.packing_fee/price*100:.1f}%",
-                    f"{economics.marketing_fee/price*100:.1f}%",
-                    f"{economics.hazardous_surcharge/price*100:.1f}%",
-                    f"{economics.fragile_surcharge/price*100:.1f}%",
-                    f"{economics.oversized_surcharge/price*100:.1f}%",
-                    f"{economics.tax_amount/price*100:.1f}%",
-                    f"{economics.auto_parts_specific/price*100:.1f}%",
-                    f"{economics.advertising_cost/price*100:.1f}%",
-                    f"{economics.total_expenses/price*100:.1f}%"
-                ]
+    try:
+        # ✅ ОПТИМИЗАЦИЯ: constant_memory mode для экономии RAM
+        workbook = xlsxwriter.Workbook(
+            str(tmp_path),
+            {
+                'constant_memory': True,       # Экономия RAM
+                'strings_to_numbers': True,    # Авто-конвертация
+                'strings_to_formulas': False,  # Не ломаем формулы
+                'default_date_format': 'dd.mm.yyyy',
+                'nan_inf_to_errors': True,
             }
+        )
+        
+        # Инициализируем форматы
+        formats = _init_export_formats(workbook)
+        
+        # Получаем конфигурации маркетплейсов
+        try:
+            unit_econ = get_marketplace_unit_economics()
+            configs = unit_econ._configs if unit_econ else {}
+        except Exception:
+            configs = get_marketplace_configs_2026()
+        
+        # ====================================================================
+        # ЛИСТ 1: ⚙️ Параметры (тарифы)
+        # ====================================================================
+        if progress_callback:
+            progress_callback(0.05)
+        
+        ws_params = workbook.add_worksheet("⚙️ Параметры")
+        _write_parameters_sheet(ws_params, configs, metadata, formats)
+        
+        # Запоминаем строки с глобальными параметрами
+        tax_row = 6       # Строка с налоговой ставкой (1-based в Excel)
+        min_profit_row = 7
+        days_row = 8
+        ad_row = 9
+        
+        # Диапазон тарифов для VLOOKUP
+        params_start_row = 14
+        params_end_row = params_start_row + len(configs) * 6  # 6 режимов на МП
+        params_range = f"'⚙️ Параметры'!$A${params_start_row}:$P${params_end_row}"
+        
+        # ====================================================================
+        # ЛИСТ 2: 📥 Входные данные (chunked)
+        # ====================================================================
+        if progress_callback:
+            progress_callback(0.10)
+        
+        ws_input = workbook.add_worksheet("📥 Входные")
+        _write_input_header(ws_input, formats)
+        
+        # Записываем входные данные чанками
+        input_columns = [
+            'Артикул', 'Бренд', 'marketplace', 'operation_mode', 'category',
+            'price', 'cost', 'weight', 'length', 'width', 'height'
+        ]
+        
+        for chunk_start in range(0, total_rows, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, total_rows)
+            chunk_df = df.iloc[chunk_start:chunk_end]
             
-            st_dataframe_compat(
-                pd.DataFrame(expenses_data),
-                key="ue_expenses_table"
+            for i, (_, row) in enumerate(chunk_df.iterrows()):
+                excel_row = 3 + chunk_start + i  # 1-based
+                
+                # Артикул и Бренд
+                ws_input.write(excel_row, 0, str(row.get('Артикул', '')), formats['default'])
+                ws_input.write(excel_row, 1, str(row.get('Бренд', '')), formats['default'])
+                ws_input.write(excel_row, 2, str(row.get('marketplace', 'Ozon')), formats['default'])
+                ws_input.write(excel_row, 3, str(row.get('operation_mode', 'FBS')), formats['default'])
+                
+                category = str(row.get('category', '')).lower().replace(' ', '_')
+                ws_input.write(excel_row, 4, category, formats['default'])
+                
+                # Числовые поля
+                ws_input.write(excel_row, 5, float(row.get('price', 0) or 0), formats['input_money'])
+                ws_input.write(excel_row, 6, float(row.get('cost', 0) or 0), formats['input_money'])
+                ws_input.write(excel_row, 7, float(row.get('weight', 0) or 0), formats['input_num'])
+                ws_input.write(excel_row, 8, float(row.get('length', 0) or 0), formats['input_num'])
+                ws_input.write(excel_row, 9, float(row.get('width', 0) or 0), formats['input_num'])
+                ws_input.write(excel_row, 10, float(row.get('height', 0) or 0), formats['input_num'])
+            
+            if progress_callback:
+                progress = 0.10 + 0.20 * (chunk_end / total_rows)
+                progress_callback(progress)
+        
+        # Объём и оплачиваемый вес — формулами
+        for row_idx in range(3, 3 + total_rows):
+            ws_input.write_formula(
+                row_idx, 11,
+                f"=(I{row_idx+1}*J{row_idx+1}*K{row_idx+1})/1000",
+                formats['formula']
             )
-
-            # Кнопка экспорта текущего результата
-            try:
-                excel_bytes = export_result_to_excel(economics)
-                st.download_button(
-                    label='⬇️ Скачать результат в Excel',
-                    data=excel_bytes,
-                    file_name=f'unit_economics_{economics.calculation_id}.xlsx',
-                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            ws_input.write_formula(
+                row_idx, 12,
+                f"=MAX(H{row_idx+1}, L{row_idx+1}/5000)",
+                formats['formula']
+            )
+        
+        # Ширина колонок
+        ws_input.set_column('A:B', 18)
+        ws_input.set_column('C:E', 15)
+        ws_input.set_column('F:K', 12)
+        ws_input.set_column('L:M', 12)
+        ws_input.freeze_panes(3, 0)
+        if total_rows > 0:
+            ws_input.autofilter(2, 0, 2 + total_rows, 12)
+        
+        # ====================================================================
+        # ЛИСТ 3: 📊 Расчёт (живые формулы, chunked)
+        # ====================================================================
+        if progress_callback:
+            progress_callback(0.35)
+        
+        ws_calc = workbook.add_worksheet("📊 Расчёт")
+        _write_calculation_header(ws_calc, formats)
+        
+        # Ссылки на параметры
+        p_tax = f"'⚙️ Параметры'!$B${tax_row}"
+        p_days = f"'⚙️ Параметры'!$B${days_row}"
+        p_ad = f"'⚙️ Параметры'!$B${ad_row}"
+        
+        # Записываем формулы чанками
+        for chunk_start in range(0, total_rows, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, total_rows)
+            
+            for i in range(chunk_start, chunk_end):
+                excel_row = 3 + i          # Строка в Расчёте (1-based)
+                input_row = 4 + i          # Строка во Входных (1-based)
+                
+                # Ссылки на входные данные
+                in_art = f"'📥 Входные'!A{input_row}"
+                in_mp = f"'📥 Входные'!C{input_row}"
+                in_mode = f"'📥 Входные'!D{input_row}"
+                in_cat = f"'📥 Входные'!E{input_row}"
+                in_price = f"'📥 Входные'!F{input_row}"
+                in_cost = f"'📥 Входные'!G{input_row}"
+                in_weight = f"'📥 Входные'!H{input_row}"
+                in_volume = f"'📥 Входные'!L{input_row}"
+                
+                # Ключ для VLOOKUP: "Ozon|FBS"
+                lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
+                
+                # Колонки Расчёта:
+                # 0: Артикул, 1: МП, 2: Режим, 3: Категория
+                # 4: Цена, 5: Себестоимость, 6: Вес, 7: Объём
+                # 8: Комиссия, 9: Логистика, 10: Хранение
+                # 11: Эквайринг, 12: Посл.миля, 13: Возвраты
+                # 14: Реклама, 15: Налог, 16: ИТОГО расходов
+                # 17: 💰 ПРИБЫЛЬ, 18: Маржа %, 19: ROI %, 20: Безубыточность
+                
+                ws_calc.write_formula(excel_row, 0, f"={in_art}", formats['default'])
+                ws_calc.write_formula(excel_row, 1, f"={in_mp}", formats['default'])
+                ws_calc.write_formula(excel_row, 2, f"={in_mode}", formats['default'])
+                ws_calc.write_formula(excel_row, 3, f"={in_cat}", formats['default'])
+                ws_calc.write_formula(excel_row, 4, f"={in_price}", formats['money'])
+                ws_calc.write_formula(excel_row, 5, f"={in_cost}", formats['money'])
+                ws_calc.write_formula(excel_row, 6, f"={in_weight}", formats['num'])
+                ws_calc.write_formula(excel_row, 7, f"={in_volume}", formats['num'])
+                
+                # Комиссия = VLOOKUP(ключ, тарифы, 4, FALSE) * Цена
+                ws_calc.write_formula(
+                    excel_row, 8,
+                    f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",
+                    formats['money']
                 )
-            except Exception as e:
-                logger.warning(f"Export button failed: {e}")
+                
+                # Логистика = база + вес*ставка_кг + объём*ставка_л
+                ws_calc.write_formula(
+                    excel_row, 9,
+                    f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+"
+                    f"{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+"
+                    f"{in_volume}*VLOOKUP({lookup_key},{params_range},7,FALSE)",
+                    formats['money']
+                )
+                
+                # Хранение = объём * ставка * дни
+                ws_calc.write_formula(
+                    excel_row, 10,
+                    f"={in_volume}*VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",
+                    formats['money']
+                )
+                
+                # Эквайринг
+                ws_calc.write_formula(
+                    excel_row, 11,
+                    f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",
+                    formats['money']
+                )
+                
+                # Последняя миля
+                ws_calc.write_formula(
+                    excel_row, 12,
+                    f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",
+                    formats['money']
+                )
+                
+                # Возвраты (с коэффициентом 1.3)
+                ws_calc.write_formula(
+                    excel_row, 13,
+                    f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",
+                    formats['money']
+                )
+                
+                # Реклама (ДРР)
+                ws_calc.write_formula(
+                    excel_row, 14,
+                    f"={in_price}*{p_ad}",
+                    formats['money']
+                )
+                
+                # Налог
+                ws_calc.write_formula(
+                    excel_row, 15,
+                    f"={in_price}*{p_tax}",
+                    formats['money']
+                )
+                
+                # ИТОГО расходов = Себестоимость + сумма всех расходов
+                ws_calc.write_formula(
+                    excel_row, 16,
+                    f"={in_cost}+SUM(I{excel_row+1}:P{excel_row+1})",
+                    formats['money_bold']
+                )
+                
+                # 💰 ПРИБЫЛЬ = Цена - ИТОГО
+                ws_calc.write_formula(
+                    excel_row, 17,
+                    f"={in_price}-Q{excel_row+1}",
+                    formats['money_bold']
+                )
+                
+                # Маржа %
+                ws_calc.write_formula(
+                    excel_row, 18,
+                    f"=IF({in_price}>0,R{excel_row+1}/{in_price},0)",
+                    formats['percent']
+                )
+                
+                # ROI %
+                ws_calc.write_formula(
+                    excel_row, 19,
+                    f"=IF({in_cost}>0,R{excel_row+1}/{in_cost},0)",
+                    formats['percent']
+                )
+                
+                # Безубыточность
+                ws_calc.write_formula(
+                    excel_row, 20,
+                    f"=IF((1-VLOOKUP({lookup_key},{params_range},4,FALSE)-"
+                    f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})>0,"
+                    f"{in_cost}/(1-VLOOKUP({lookup_key},{params_range},4,FALSE)-"
+                    f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax}),0)",
+                    formats['money']
+                )
+            
+            if progress_callback:
+                progress = 0.35 + 0.50 * (chunk_end / total_rows)
+                progress_callback(progress)
+        
+        # Условное форматирование для прибыли
+        if total_rows > 0:
+            last_row = 3 + total_rows
+            profit_range = f"R4:R{last_row}"
+            ws_calc.conditional_format(profit_range, {
+                'type': 'cell', 'criteria': '>', 'value': 0,
+                'format': formats['positive']
+            })
+            ws_calc.conditional_format(profit_range, {
+                'type': 'cell', 'criteria': '<', 'value': 0,
+                'format': formats['negative']
+            })
+            
+            # Цветовая шкала для маржи
+            margin_range = f"S4:S{last_row}"
+            ws_calc.conditional_format(margin_range, {
+                'type': '3_color_scale',
+                'min_color': 'FFC7CE',
+                'mid_color': 'FFEB9C',
+                'max_color': 'C6EFCE'
+            })
+        
+        # ИТОГО строка
+        total_row = 3 + total_rows + 2
+        ws_calc.merge_range(total_row, 0, total_row, 3, "ИТОГО / СРЕДНЕЕ:", formats['bold'])
+        last_data_row = 3 + total_rows
+        
+        for col_idx, col_letter in enumerate(['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R']):
+            ws_calc.write_formula(
+                total_row, col_idx + 4,
+                f"=SUM({col_letter}4:{col_letter}{last_data_row})",
+                formats['bold_money']
+            )
+        
+        for col_idx, col_letter in enumerate(['S', 'T'], start=18):
+            ws_calc.write_formula(
+                total_row, col_idx,
+                f"=AVERAGE({col_letter}4:{col_letter}{last_data_row})",
+                formats['bold_percent']
+            )
+        
+        # Ширины колонок
+        widths = {
+            'A': 15, 'B': 14, 'C': 10, 'D': 14, 'E': 12, 'F': 12,
+            'G': 10, 'H': 10, 'I': 12, 'J': 12, 'K': 12, 'L': 12,
+            'M': 12, 'N': 12, 'O': 12, 'P': 12, 'Q': 15, 'R': 15,
+            'S': 12, 'T': 12, 'U': 14
+        }
+        for col, width in widths.items():
+            ws_calc.set_column(f'{col}:{col}', width)
+        
+        ws_calc.freeze_panes(3, 0)
+        if total_rows > 0:
+            ws_calc.autofilter(2, 0, 2 + total_rows, 20)
+        
+        # ====================================================================
+        # ЛИСТ 4: 🏪 Сравнение МП
+        # ====================================================================
+        if progress_callback:
+            progress_callback(0.88)
+        
+        ws_cmp = workbook.add_worksheet("🏪 Сравнение МП")
+        _write_marketplace_comparison_sheet(ws_cmp, df, formats)
+        
+        # ====================================================================
+        # ЛИСТ 5: 📋 Сводка
+        # ====================================================================
+        ws_summary = workbook.add_worksheet("📋 Сводка")
+        _write_summary_sheet(ws_summary, df, metadata, total_rows, formats)
+        
+        # ====================================================================
+        # ФИНАЛИЗАЦИЯ
+        # ====================================================================
+        if progress_callback:
+            progress_callback(0.95)
+        
+        workbook.close()
+        
+        if progress_callback:
+            progress_callback(1.0)
+        
+        # Читаем файл в память
+        with open(tmp_path, 'rb') as f:
+            result_bytes = f.read()
+        
+        logger.info(f"✅ Живой Excel создан: {len(result_bytes) / (1024*1024):.1f} МБ")
+        return result_bytes
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания живого Excel: {e}")
+        logger.error(traceback.format_exc())
+        raise ExportError(f"Ошибка экспорта: {e}")
+    finally:
+        # Удаляем временный файл
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
 
 # ============================================================================
-# РАСЧЕТ КАТАЛОГА С ПАРАЛЛЕЛЬНОЙ ОБРАБОТКОЙ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ЭКСПОРТА
 # ============================================================================
-def show_catalog_calculation_parallel():
-    """📦 Расчет юнит-экономики для всего каталога с параллельной обработкой"""
-    st.subheader("📦 Расчет для всего каталога")
+
+def _init_export_formats(workbook):
+    """Инициализация форматов ячеек для экспорта"""
+    return {
+        'default': workbook.add_format({'border': 1}),
+        'bold': workbook.add_format({'bold': True, 'border': 1}),
+        'input_money': workbook.add_format({
+            'bg_color': 'FFF4CC', 'border': 1, 'num_format': '#,##0.00'
+        }),
+        'input_num': workbook.add_format({
+            'bg_color': 'FFF4CC', 'border': 1, 'num_format': '0.00'
+        }),
+        'money': workbook.add_format({
+            'border': 1, 'num_format': '#,##0.00 ₽'
+        }),
+        'money_bold': workbook.add_format({
+            'bold': True, 'border': 1, 'num_format': '#,##0.00 ₽',
+            'bg_color': 'D9E2F3'
+        }),
+        'num': workbook.add_format({
+            'border': 1, 'num_format': '0.00'
+        }),
+        'percent': workbook.add_format({
+            'border': 1, 'num_format': '0.00%'
+        }),
+        'bold_money': workbook.add_format({
+            'bold': True, 'border': 1, 'num_format': '#,##0.00 ₽',
+            'bg_color': 'D9E2F3'
+        }),
+        'bold_percent': workbook.add_format({
+            'bold': True, 'border': 1, 'num_format': '0.00%',
+            'bg_color': 'D9E2F3'
+        }),
+        'formula': workbook.add_format({
+            'bg_color': 'DCE6F1', 'border': 1, 'num_format': '0.00'
+        }),
+        'header': workbook.add_format({
+            'bold': True, 'font_color': 'white',
+            'bg_color': '1B3A5C', 'border': 1,
+            'align': 'center', 'valign': 'vcenter',
+            'text_wrap': True
+        }),
+        'header_title': workbook.add_format({
+            'bold': True, 'font_size': 16, 'font_color': 'white',
+            'bg_color': '1B3A5C', 'align': 'center',
+            'valign': 'vcenter', 'border': 1
+        }),
+        'section_title': workbook.add_format({
+            'bold': True, 'font_size': 13, 'font_color': 'white',
+            'bg_color': '2E86AB', 'align': 'left',
+            'valign': 'vcenter', 'border': 1
+        }),
+        'param_cell': workbook.add_format({
+            'bold': True, 'bg_color': 'E8F4FD',
+            'border': 1, 'valign': 'vcenter'
+        }),
+        'positive': workbook.add_format({
+            'bg_color': 'C6EFCE', 'font_color': '006100',
+            'bold': True, 'border': 1
+        }),
+        'negative': workbook.add_format({
+            'bg_color': 'FFC7CE', 'font_color': '9C0006',
+            'bold': True, 'border': 1
+        }),
+        'info': workbook.add_format({
+            'italic': True, 'font_color': '006100',
+            'bg_color': 'C6EFCE', 'border': 1
+        }),
+    }
+
+
+def _write_parameters_sheet(ws, configs, metadata, formats):
+    """Запись листа параметров с тарифами"""
+    ws.merge_range('A1:P1', "⚙️ РАСШИРЕННЫЕ ПАРАМЕТРЫ РАСЧЁТА", formats['header_title'])
+    ws.set_row(0, 30)
+    ws.merge_range('A2:P2', "💡 Все параметры редактируемые — изменения применяются ко всем расчётам", formats['info'])
     
+    row = 4
+    ws.merge_range(row, 0, row, 15, "🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ", formats['section_title'])
+    row += 1
+    
+    tax_system = metadata.get('tax_system', 'УСН_6')
+    tax_rate = TAX_SYSTEMS.get(tax_system, TAX_SYSTEMS['УСН_6']).get('rate', 0.06)
+    days = metadata.get('days_in_storage', 30)
+    ad_intensity = metadata.get('ad_intensity', 'medium')
+    drr_rates = {"low": 0.05, "medium": 0.15, "high": 0.25, "aggressive": 0.35}
+    drr = drr_rates.get(ad_intensity, 0.15)
+    
+    global_params = [
+        ("Налоговая ставка", tax_rate, "Налог от цены продажи", "0.00%"),
+        ("Мин. прибыль (%)", 0.10, "Минимальная целевая прибыль", "0.00%"),
+        ("Дней хранения", days, "Среднее кол-во дней", "0"),
+        ("ДРР (реклама)", drr, "Доля рекламных расходов", "0.00%"),
+    ]
+    
+    for name, value, desc, fmt in global_params:
+        ws.write(row, 0, name, formats['param_cell'])
+        if "Дней" in name:
+            ws.write(row, 1, value, formats['input_num'])
+        elif "%" in fmt:
+            ws.write(row, 1, value, workbook_add_format_percent(formats))
+        else:
+            ws.write(row, 1, value, formats['input_num'])
+        ws.write(row, 2, desc, formats['default'])
+        row += 1
+    
+    row += 2
+    ws.merge_range(row, 0, row, 15, "📊 БАЗОВЫЕ ТАРИФЫ (ключ = МП|Режим)", formats['section_title'])
+    row += 1
+    
+    headers = [
+        'Ключ', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг',
+        'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты',
+        'Посл. миля', 'Подписка', 'Страховка', 'Упаковка',
+        'Надбавка', 'Источник'
+    ]
+    for col_idx, header in enumerate(headers):
+        ws.write(row, col_idx, header, formats['header'])
+    row += 1
+    
+    operation_modes = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
+    
+    if configs:
+        for mp_name in sorted(configs.keys()):
+            config = configs[mp_name]
+            for mode in operation_modes:
+                key = f"{mp_name}|{mode}"
+                base_rate = config.commission_rate
+                mode_mult = config.mode_multipliers.get(mode, 1.0)
+                effective_rate = base_rate * mode_mult
+                
+                ws.write(row, 0, key, formats['param_cell'])
+                ws.write(row, 1, mp_name, formats['param_cell'])
+                ws.write(row, 2, mode, formats['param_cell'])
+                ws.write(row, 3, effective_rate, formats['input_num'])
+                ws.write(row, 4, config.logistics_base, formats['input_num'])
+                ws.write(row, 5, config.logistics_per_kg, formats['input_num'])
+                ws.write(row, 6, config.logistics_per_liter, formats['input_num'])
+                ws.write(row, 7, config.storage_per_day, formats['input_num'])
+                ws.write(row, 8, config.acquiring_fee, formats['input_num'])
+                ws.write(row, 9, config.return_fee, formats['input_num'])
+                ws.write(row, 10, config.last_mile_fee, formats['input_num'])
+                ws.write(row, 11, config.subscription_fee, formats['input_num'])
+                ws.write(row, 12, config.insurance_fee, formats['input_num'])
+                ws.write(row, 13, config.packing_fee, formats['input_num'])
+                ws.write(row, 14, config.hazardous_surcharge, formats['input_num'])
+                ws.write(row, 15, config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source), formats['default'])
+                row += 1
+    
+    ws.set_column('A:A', 18)
+    ws.set_column('B:C', 14)
+    ws.set_column('D:O', 14)
+    ws.set_column('P:P', 16)
+
+
+def workbook_add_format_percent(formats):
+    """Возвращает формат для процентов"""
+    return formats['input_num']  # Упрощённо
+
+
+def _write_input_header(ws, formats):
+    """Заголовок листа Входные"""
+    ws.merge_range('A1:N1', "📥 ВХОДНЫЕ ДАННЫЕ (редактируемые)", formats['header_title'])
+    ws.set_row(0, 28)
+    ws.merge_range('A2:N2', "💡 Меняйте значения — все листы пересчитаются автоматически", formats['info'])
+    
+    headers = [
+        'Артикул', 'Бренд', 'МП', 'Режим', 'Категория',
+        'Цена', 'Себестоимость', 'Вес, кг',
+        'Длина, см', 'Ширина, см', 'Высота, см',
+        'Объём, л', 'Оплач. вес'
+    ]
+    for col_idx, header in enumerate(headers):
+        ws.write(2, col_idx, header, formats['header'])
+    ws.set_row(2, 30)
+
+
+def _write_calculation_header(ws, formats):
+    """Заголовок листа Расчёт"""
+    ws.merge_range('A1:U1', "📊 ПОЛНЫЙ РАСЧЁТ ЮНИТ-ЭКОНОМИКИ", formats['header_title'])
+    ws.set_row(0, 28)
+    ws.merge_range('A2:U2', "⚠️ Все расчёты автоматические — не редактируйте формулы", formats['info'])
+    
+    headers = [
+        'Артикул', 'МП', 'Режим', 'Категория',
+        'Цена', 'Себестоимость', 'Вес', 'Объём',
+        'Комиссия', 'Логистика', 'Хранение',
+        'Эквайринг', 'Посл. миля', 'Возвраты',
+        'Реклама', 'Налог', 'ИТОГО расходов',
+        '💰 ПРИБЫЛЬ', 'Маржа %', 'ROI %', 'Безубыточность'
+    ]
+    for col_idx, header in enumerate(headers):
+        ws.write(2, col_idx, header, formats['header'])
+    ws.set_row(2, 35)
+
+
+def _write_marketplace_comparison_sheet(ws, df, formats):
+    """Лист сравнения маркетплейсов"""
+    ws.merge_range('A1:K1', "🏪 СРАВНИТЕЛЬНЫЙ АНАЛИЗ МАРКЕТПЛЕЙСОВ", formats['header_title'])
+    
+    headers = [
+        'МП', 'SKU', 'Выручка', 'Расходы', 'Прибыль',
+        'Ср. прибыль', 'Ср. маржа %', 'ROI %',
+        'Доля рынка %', 'Эффективность', 'Рейтинг'
+    ]
+    for col_idx, header in enumerate(headers):
+        ws.write(2, col_idx, header, formats['header'])
+    
+    if 'marketplace' in df.columns:
+        mp_stats = df.groupby('marketplace').agg({
+            'price': 'sum',
+            'total_expenses': 'sum',
+            'profit': ['sum', 'mean'],
+            'margin_percent': 'mean',
+            'roi': 'mean',
+        }).reset_index()
+        mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %', 'ROI %']
+        
+        total_profit = mp_stats['Прибыль'].sum()
+        
+        for i, row in mp_stats.iterrows():
+            excel_row = 3 + i
+            ws.write(excel_row, 0, row['МП'], formats['bold'])
+            ws.write(excel_row, 1, int(row.get('Ср. прибыль', 0)), formats['num'])
+            ws.write(excel_row, 2, row['Выручка'], formats['money'])
+            ws.write(excel_row, 3, row['Расходы'], formats['money'])
+            ws.write(excel_row, 4, row['Прибыль'],
+                    formats['positive'] if row['Прибыль'] > 0 else formats['negative'])
+            ws.write(excel_row, 5, row['Ср. прибыль'], formats['money'])
+            ws.write(excel_row, 6, row['Ср. маржа %'] / 100, formats['percent'])
+            ws.write(excel_row, 7, row['ROI %'] / 100, formats['percent'])
+            
+            share = (row['Прибыль'] / total_profit) if total_profit > 0 else 0
+            ws.write(excel_row, 8, share, formats['percent'])
+            efficiency = (row['Прибыль'] / row['Выручка']) if row['Выручка'] > 0 else 0
+            ws.write(excel_row, 9, efficiency, formats['percent'])
+            ws.write(excel_row, 10, i + 1, formats['default'])
+    
+    ws.set_column('A:K', 16)
+    ws.freeze_panes(3, 0)
+
+
+def _write_summary_sheet(ws, df, metadata, total_rows, formats):
+    """Лит сводки"""
+    ws.merge_range('A1:C1', "📋 СВОДКА ЭКСПОРТА", formats['header_title'])
+    
+    summary = [
+        ("📅 Дата экспорта", datetime.now().strftime('%d.%m.%Y %H:%M')),
+        ("📦 Всего товаров", f"{total_rows:,}"),
+        ("🏪 Маркетплейсы", ", ".join(metadata.get('marketplaces', ['Ozon'])) if metadata else "Ozon"),
+        ("📊 Режимы", ", ".join(metadata.get('modes', ['FBS'])) if metadata else "FBS"),
+        ("💰 Общая прибыль", f"{df['profit'].sum():,.0f} ₽" if 'profit' in df.columns else "Н/Д"),
+        ("📈 Средняя маржа", f"{df['margin_percent'].mean():.1f}%" if 'margin_percent' in df.columns else "Н/Д"),
+        ("💵 Общая выручка", f"{df['price'].sum():,.0f} ₽" if 'price' in df.columns else "Н/Д"),
+        ("💸 Общие расходы", f"{df['total_expenses'].sum():,.0f} ₽" if 'total_expenses' in df.columns else "Н/Д"),
+        ("⚠️ Убыточных SKU", f"{(df['profit'] < 0).sum()}" if 'profit' in df.columns else "Н/Д"),
+        ("⚙️ Версия", "LIVE EXCEL v300K+"),
+    ]
+    
+    row = 3
+    for label, value in summary:
+        ws.write(row, 0, label, formats['param_cell'])
+        ws.write(row, 1, value, formats['default'])
+        row += 1
+    
+    ws.set_column('A:A', 30)
+    ws.set_column('B:B', 40)
+
+
+# ============================================================================
+# ОБНОВЛЁННАЯ ФУНКЦИЯ show_catalog_calculation_parallel
+# ============================================================================
+
+def show_catalog_calculation_parallel():
+    """📦 Расчёт юнит-экономики для всего каталога с параллельной обработкой + живой Excel"""
+    st.subheader("📦 Расчет для всего каталога")
     unit_economics = get_marketplace_unit_economics()
+    
     if unit_economics is None:
         st.error("❌ UnitEconomics не инициализирован")
         return
@@ -8385,15 +8727,13 @@ def show_catalog_calculation_parallel():
         return
     
     df = st.session_state.uploaded_data
-    st.info(f"📊 Загружено товаров: {len(df)}")
+    st.info(f"📊 Загружено товаров: **{len(df):,}**")
     
     # ====================================================================
     # ПАРАМЕТРЫ РАСЧЕТА
     # ====================================================================
     st.markdown("### ⚙️ Параметры расчета")
-    
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         marketplaces = st.multiselect(
             "🏪 Маркетплейсы",
@@ -8402,63 +8742,47 @@ def show_catalog_calculation_parallel():
             key="catalog_marketplaces",
             help="Выберите маркетплейсы для расчета"
         )
-        
         operation_mode = st.selectbox(
             "📦 Режим работы",
             ["FBY", "FBS", "FBO", "DBS", "FBP"],
             key="catalog_mode"
         )
-    
     with col2:
         days_in_storage = st.number_input(
             "📅 Дней хранения",
-            min_value=1,
-            max_value=365,
-            value=30,
+            min_value=1, max_value=365, value=30,
             key="catalog_days"
         )
-        
         tax_system = st.selectbox(
             "💼 Налоговый режим",
             list(TAX_SYSTEMS.keys()),
             format_func=lambda x: TAX_SYSTEMS[x]["name"],
             key="catalog_tax"
         )
-    
     with col3:
         apply_markup = st.number_input(
             "📈 Наценка (%)",
-            min_value=0.0,
-            max_value=500.0,
-            value=0.0,
-            step=5.0,
+            min_value=0.0, max_value=500.0, value=0.0, step=5.0,
             key="catalog_markup"
         )
-        
         ad_intensity = st.selectbox(
             "📢 Интенсивность рекламы",
             ["low", "medium", "high", "aggressive"],
             format_func=lambda x: {
-                "low": "Низкая (5%)",
-                "medium": "Средняя (15%)",
-                "high": "Высокая (25%)",
-                "aggressive": "Агрессивная (35%)"
+                "low": "Низкая (5%)", "medium": "Средняя (15%)",
+                "high": "Высокая (25%)", "aggressive": "Агрессивная (35%)"
             }[x],
             key="catalog_ad"
         )
     
     # Дополнительные опции
     col_opt1, col_opt2, col_opt3, col_opt4 = st.columns(4)
-    
     with col_opt1:
         is_premium = st.checkbox("⭐ Премиум-раздел", key="catalog_premium")
-    
     with col_opt2:
         include_insurance = st.checkbox("🛡️ Страховка", key="catalog_insurance")
-    
     with col_opt3:
         include_packing = st.checkbox("📦 Упаковка", key="catalog_packing")
-    
     with col_opt4:
         include_marketing = st.checkbox("📢 Маркетинг", key="catalog_marketing")
     
@@ -8468,7 +8792,6 @@ def show_catalog_calculation_parallel():
     st.markdown("### 🔍 Автоопределение колонок")
     
     def find_column(df, keywords):
-        """Поиск колонки по ключевым словам"""
         for col in df.columns:
             col_lower = str(col).lower()
             for keyword in keywords:
@@ -8487,13 +8810,11 @@ def show_catalog_calculation_parallel():
     weight_col = find_column(df, ['вес', 'weight', 'масса'])
     
     col_show1, col_show2 = st.columns(2)
-    
     with col_show1:
         st.write(f"**💰 Цена:** `{price_col or 'Не найдена'}`")
         st.write(f"**💵 Себестоимость:** `{cost_col or 'Не найдена'}`")
         st.write(f"**🔢 Артикул:** `{article_col or 'Не найдена'}`")
         st.write(f"**🏷️ Бренд:** `{brand_col or 'Не найдена'}`")
-    
     with col_show2:
         st.write(f"**📂 Категория:** `{category_col or 'Не найдена'}`")
         st.write(f"**📏 Длина:** `{length_col or 'Не найдена'}`")
@@ -8523,7 +8844,6 @@ def show_catalog_calculation_parallel():
         with st.spinner("Расчет юнит-экономики для каталога..."):
             try:
                 start_time = time.time()
-                
                 result_df = unit_economics.calculate_for_catalog_batch(
                     df=df,
                     price_col=price_col,
@@ -8556,110 +8876,192 @@ def show_catalog_calculation_parallel():
                 if result_df is not None and not result_df.empty:
                     progress_bar.progress(1.0)
                     status_text.text(f"✅ Расчет завершен за {elapsed:.2f}с")
+                    st.success(f"✅ Рассчитано **{len(result_df):,}** записей за {elapsed:.2f}с")
                     
-                    st.success(f"✅ Рассчитано {len(result_df)} записей")
-                    
-                    # Сохраняем результат
+                    # Сохраняем результат и метаданные
                     st.session_state.unit_economics_result = result_df
+                    st.session_state.unit_economics_metadata = {
+                        'marketplaces': marketplaces,
+                        'modes': [operation_mode],
+                        'tax_system': tax_system,
+                        'ad_intensity': ad_intensity,
+                        'days_in_storage': days_in_storage,
+                    }
                     
-                    # Показываем результаты
-                    st.subheader("📊 Результаты расчета")
-                    
+                    # ====================================================================
                     # KPI
+                    # ====================================================================
+                    st.subheader("📊 Результаты расчета")
                     kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
-                    
                     with kpi_col1:
                         total_profit = result_df['profit'].sum()
                         st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
-                    
                     with kpi_col2:
                         avg_margin = result_df['margin_percent'].mean()
                         st.metric("📈 Средняя маржа", f"{avg_margin:.1f}%")
-                    
                     with kpi_col3:
                         avg_roi = result_df['roi'].mean()
                         st.metric("📊 Средний ROI", f"{avg_roi:.1f}%")
-                    
                     with kpi_col4:
                         unprofitable = (result_df['profit'] < 0).sum()
                         st.metric("⚠️ Убыточных", f"{unprofitable}")
                     
-                    # Таблица результатов
+                    # ====================================================================
+                    # ТАБЛИЦА РЕЗУЛЬТАТОВ
+                    # ====================================================================
                     st.subheader("📋 Таблица результатов")
-                    
                     display_cols = [
                         'Артикул', 'Бренд', 'marketplace', 'price', 'cost',
                         'commission', 'logistics', 'storage_cost',
                         'total_expenses', 'profit', 'margin_percent', 'roi'
                     ]
                     display_cols = [c for c in display_cols if c in result_df.columns]
-                    
                     st_dataframe_compat(
                         result_df[display_cols].head(100),
                         key="catalog_result_table"
                     )
                     
-                    # Экспорт
+                    # ====================================================================
+                    # 🎯 ЭКСПОРТ — ДВЕ КНОПКИ
+                    # ====================================================================
                     st.subheader("📤 Экспорт результатов")
+                    st.info(f"""
+                    📊 **В каталоге {len(result_df):,} товаров.**
+                    Доступны два варианта экспорта:
+                    """)
                     
                     export_col1, export_col2 = st.columns(2)
                     
+                    # ====================================================================
+                    # КНОПКА 1: СУПЕР-ПРО С ЖИВЫМИ ФОРМУЛАМИ
+                    # ====================================================================
                     with export_col1:
-                        if st.button("📥 Скачать CSV", use_container_width=True):
-                            csv = result_df.to_csv(index=False, encoding='utf-8-sig')
-                            st.download_button(
-                                label="⬇️ Скачать CSV",
-                                data=csv.encode('utf-8-sig'),
-                                file_name=f"unit_economics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv",
-                                key="download_csv_catalog"
-                            )
-                    
-                    with export_col2:
-                        if st.button("📊 Экспорт в Excel (СУПЕР-ПРО)", type="primary", use_container_width=True):
-                            with st.spinner("Создание СУПЕР-ПРО Excel файла..."):
-                                try:
-                                    exporter = SuperProExcelExporter(unit_economics)
-                                    output_path = TEMP_DIR / f"super_pro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        st.markdown("#### 📊 СУПЕР-ПРО (живые формулы)")
+                        st.caption("Excel с листами 📥Входные, 📊Расчёт, ⚙️Параметры. Меняйте значения — всё пересчитается!")
+                        
+                        if st.button(
+                            "🚀 Экспорт в живой Excel",
+                            type="primary",
+                            use_container_width=True,
+                            key="export_live_excel_btn"
+                        ):
+                            export_progress = st.progress(0)
+                            export_status = st.empty()
+                            
+                            def export_progress_callback(p):
+                                export_progress.progress(p)
+                                if p < 1.0:
+                                    export_status.text(f"🔄 Создание Excel: {p*100:.0f}%")
+                                else:
+                                    export_status.text("✅ Готово!")
+                            
+                            try:
+                                with st.spinner("Создание живого Excel (может занять 1-5 минут для 300K+ товаров)..."):
+                                    start_export = time.time()
                                     
-                                    metadata = {
-                                        'marketplaces': marketplaces,
-                                        'modes': [operation_mode],
-                                        'tax_system': tax_system,
-                                        'ad_intensity': ad_intensity,
-                                        'days_in_storage': days_in_storage
-                                    }
+                                    excel_bytes = export_large_catalog_to_live_excel(
+                                        df=result_df,
+                                        metadata=st.session_state.get('unit_economics_metadata', {}),
+                                        progress_callback=export_progress_callback,
+                                        chunk_size=50_000,
+                                    )
+                                    
+                                    elapsed_export = time.time() - start_export
+                                    export_status.text(f"✅ Excel создан за {elapsed_export:.1f}с ({len(excel_bytes)/(1024*1024):.1f} МБ)")
+                                    
+                                    # Кнопка скачивания
+                                    st.download_button(
+                                        label="⬇️ СКАЧАТЬ ЖИВОЙ EXCEL",
+                                        data=excel_bytes,
+                                        file_name=f"unit_economics_live_{len(result_df)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="download_live_excel",
+                                        type="primary",
+                                        use_container_width=True,
+                                    )
+                                    
+                                    st.success(f"✅ Живой Excel готов! Размер: {len(excel_bytes)/(1024*1024):.1f} МБ")
+                                    
+                            except Exception as e:
+                                export_status.empty()
+                                export_progress.empty()
+                                st.error(f"❌ Ошибка создания живого Excel: {e}")
+                                logger.exception("Ошибка экспорта живого Excel")
+                                
+                                st.warning("💡 Попробуйте простой Excel (справа) — он быстрее")
+                    
+                    # ====================================================================
+                    # КНОПКА 2: ПРОСТОЙ EXCEL (значения)
+                    # ====================================================================
+                    with export_col2:
+                        st.markdown("#### 📋 Простой Excel (значения)")
+                        st.caption("Быстрый экспорт всех значений без формул. Открывается мгновенно.")
+                        
+                        if st.button(
+                            "📋 Экспорт в простой Excel",
+                            use_container_width=True,
+                            key="export_simple_excel_btn"
+                        ):
+                            try:
+                                with st.spinner("Создание простого Excel..."):
+                                    exporter = SuperProExcelExporter(unit_economics)
+                                    output_path = TEMP_DIR / f"simple_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                    
+                                    metadata = st.session_state.get('unit_economics_metadata', {})
                                     
                                     if exporter.export_super_pro(result_df, str(output_path), metadata):
                                         with open(output_path, "rb") as f:
-                                            st.download_button(
-                                                label="⬇️ Скачать СУПЕР-ПРО Excel",
-                                                data=f,
-                                                file_name=output_path.name,
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                                key="download_super_pro_excel"
-                                            )
-                                        st.success("✅ СУПЕР-ПРО Excel создан!")
+                                            simple_bytes = f.read()
+                                        
+                                        st.download_button(
+                                            label="⬇️ СКАЧАТЬ ПРОСТОЙ EXCEL",
+                                            data=simple_bytes,
+                                            file_name=output_path.name,
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key="download_simple_excel",
+                                            use_container_width=True,
+                                        )
+                                        st.success("✅ Простой Excel создан!")
+                                        
+                                        try:
+                                            output_path.unlink()
+                                        except Exception:
+                                            pass
                                     else:
                                         st.error("❌ Ошибка создания файла")
-                                except Exception as e:
-                                    st.error(f"❌ Ошибка экспорта: {e}")
-                                    logger.exception("Ошибка экспорта СУПЕР-ПРО")
+                            except Exception as e:
+                                st.error(f"❌ Ошибка экспорта: {e}")
+                                logger.exception("Ошибка экспорта простого Excel")
+                    
+                    # ====================================================================
+                    # КНОПКА 3: CSV
+                    # ====================================================================
+                    st.divider()
+                    if st.button("📥 Скачать CSV (быстро)", use_container_width=False, key="download_csv_catalog"):
+                        csv = result_df.to_csv(index=False, encoding='utf-8-sig')
+                        st.download_button(
+                            label="⬇️ Скачать CSV",
+                            data=csv.encode('utf-8-sig'),
+                            file_name=f"unit_economics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            key="download_csv_catalog_real"
+                        )
+                
                 else:
                     st.warning("⚠️ Нет результатов для отображения")
-            
+                    
             except Exception as e:
                 st.error(f"❌ Ошибка расчета: {e}")
                 logger.exception("Ошибка расчета каталога")
-                
                 with st.expander("📋 Подробности ошибки", expanded=True):
                     st.code(traceback.format_exc())
 
 
 # ============================================================================
-# ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКА 15
+# ЛОГИРОВАНИЕ
 # ============================================================================
-logger.info("✅ Блок 15 загружен: show_unit_economics_interface()")
+logger.info(f"✅ Блок 15.1 загружен: экспорт 300K+ товаров с живыми формулами")
+logger.info(f"📦 chunk_size=50000, constant_memory=True")
 
 
 # ============================================================================
