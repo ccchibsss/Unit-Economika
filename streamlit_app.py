@@ -974,7 +974,7 @@ class MarketplaceConfig:
                                             promo_participation: float = 0.0,
                                             category: Optional[str] = None,
                                             current_month: Optional[int] = None) -> float:
-        """🆕 v100.5: Комиссия с учётом скидок и участия в акциях"""
+        """ v100.5: Комиссия с учётом скидок и участия в акциях"""
         actual_price = price * (1 - discount_percent)
         promo_surcharge = actual_price * promo_participation
         
@@ -1081,7 +1081,7 @@ class ProductCategory:
 
 @dataclass
 class UnitEconomicsResult:
-    """🆕 v100.5: Результат расчёта с новыми полями"""
+    """ v100.5: Результат расчёта с новыми полями"""
     marketplace: str
     operation_mode: str
     category: str
@@ -1969,7 +1969,7 @@ class PersistentHistoryDB:
             return []
     
     def _migrate_database(self):
-        """🆕 v100.5: Автоматическая миграция БД - добавление новых колонок"""
+        """ v100.5: Автоматическая миграция БД - добавление новых колонок"""
         if self.conn is None:
             return
         
@@ -1994,7 +1994,7 @@ class PersistentHistoryDB:
             logger.warning(f"Ошибка миграции: {e}")
     
     def save_calculation(self, result: 'UnitEconomicsResult', article: str = "", brand: str = "") -> bool:
-        """🆕 v100.5: Сохранение с учётом схемы БД"""
+        """ v100.5: Сохранение с учётом схемы БД"""
         if self.conn is None:
             return False
         try:
@@ -3716,7 +3716,7 @@ class MarketplaceUnitEconomics:
         promo_participation: float = 0.0,
         **kwargs
     ) -> 'UnitEconomicsResult':
-        """🆕 v100.5: Расчет юнит-экономики с улучшенной точностью"""
+        """ v100.5: Расчет юнит-экономики с улучшенной точностью"""
         
         if price <= 0:
             raise ValidationError("Цена должна быть положительной", "price", price)
@@ -3924,7 +3924,7 @@ class MarketplaceUnitEconomics:
     
     # ✅ ИСПРАВЛЕНИЕ v100.11: Потокобезопасное обновление статистики
     def _update_stats(self, result: 'UnitEconomicsResult'):
-        """✅ ИСПРАВЛЕНИЕ v100.11: Используется Lock для предотвращения race condition"""
+        """ ИСПРАВЛЕНИЕ v100.11: Используется Lock для предотвращения race condition"""
         with self._stats_lock:
             self._stats["total_calculations"] += 1
             self._stats["by_marketplace"][result.marketplace] += 1
@@ -5235,7 +5235,7 @@ class HighVolumeAutoPartsCatalog:
             self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """✅ ИСПРАВЛЕНИЕ v100.15: С отладочной панелью для габаритов"""
+        """ ИСПРАВЛЕНИЕ v100.15: С отладочной панелью для габаритов"""
         st.info("🔄 Начало загрузки и обновления данных в базе...")
         
         steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
@@ -6899,7 +6899,7 @@ class SuperProExcelExporter:
             return False
     
     def _write_dashboard_super(self, workbook, df: pd.DataFrame, metadata: Dict):
-        """📊 СУПЕР-ДАШБОРД с расширенными KPI"""
+        """ СУПЕР-ДАШБОРД с расширенными KPI"""
         ws = workbook.add_worksheet("📊 Дашборд")
         
         ws.merge_range('A1:G1', "🚀 СУПЕР-ДАШБОРД ЮНИТ-ЭКОНОМИКИ",
@@ -7152,7 +7152,7 @@ class SuperProExcelExporter:
         return ws
     
     def _write_calculation_engine(self, workbook, df: pd.DataFrame):
-        """📊 ДВИЖОК РАСЧЁТОВ с полной детализацией"""
+        """ ДВИЖОК РАСЧЁТОВ с полной детализацией"""
         ws = workbook.add_worksheet("📊 Расчёт")
         
         ws.merge_range('A1:W1',
