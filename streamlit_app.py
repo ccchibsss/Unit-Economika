@@ -24,16 +24,9 @@
 ✅ МИГРАЦИЯ БД (авто-добавление новых колонок)
 ================================================================================
 
-"""
 # ============================================================================
 # БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ (v100.15)
 # ============================================================================
-"""
-
-# ============================================================================
-# БЛОК 0: ВСЕ НЕОБХОДИМЫЕ ИМПОРТЫ И КОНФИГУРАЦИЯ (v100.15)
-# ============================================================================
-
 # === Стандартная библиотека Python ===
 import streamlit as st
 import pandas as pd
@@ -115,7 +108,6 @@ from decimal import Decimal, ROUND_HALF_UP
 # ============================================================================
 # ОПЦИОНАЛЬНЫЕ ИМПОРТЫ С ОБРАБОТКОЙ ОШИБОК
 # ============================================================================
-
 # === PIL/Pillow (изображения) ===
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
@@ -451,7 +443,7 @@ except ImportError:
     BABEL_AVAILABLE = False
 
 # ============================================================================
-# ✅ ДОБАВЛЕНО: TAX_SYSTEMS - налоговые системы
+# ДОБАВЛЕНО: TAX_SYSTEMS - налоговые системы
 # ============================================================================
 TAX_SYSTEMS = {
     "УСН_6": {"name": "УСН 6%", "rate": 0.06, "base": "price"},
@@ -462,7 +454,7 @@ TAX_SYSTEMS = {
 }
 
 # ============================================================================
-# ✅ ДОБАВЛЕНО: MARKET_BENCHMARKS_2026 - бенчмарки рынка
+# ДОБАВЛЕНО: MARKET_BENCHMARKS_2026 - бенчмарки рынка
 # ============================================================================
 MARKET_BENCHMARKS_2026 = {
     "двигатель": {"avg_margin": 25, "avg_price": 15000, "return_rate": 0.02},
@@ -487,7 +479,7 @@ MARKET_BENCHMARKS_2026 = {
 }
 
 # ============================================================================
-# ✅ ДОБАВЛЕНО: AutoPartsSpecificCosts - специфические расходы автозапчастей
+# ДОБАВЛЕНО: AutoPartsSpecificCosts - специфические расходы автозапчастей
 # ============================================================================
 class AutoPartsSpecificCosts:
     """Расчет специфических расходов для автозапчастей"""
@@ -519,12 +511,12 @@ class AutoPartsSpecificCosts:
         return costs
     
     def calculate_batch(self, prices: List[float], is_import: bool = False,
-                        requires_marking: bool = True) -> List[float]:
+                       requires_marking: bool = True) -> List[float]:
         """Пакетный расчет специфических расходов"""
         return [self.calculate(price, is_import, requires_marking) for price in prices]
 
 # ============================================================================
-# ✅ ДОБАВЛЕНО: ЗАГЛУШКА DeepSeekRateUpdater (если библиотека не установлена)
+# ДОБАВЛЕНО: ЗАГЛУШКА DeepSeekRateUpdater (если библиотека не установлена)
 # ============================================================================
 try:
     from deepseek_rates import DeepSeekRateUpdater
@@ -535,17 +527,17 @@ except ImportError:
         def __init__(self, api_key: Optional[str] = None):
             self.api_key = api_key
             self.logger = logging.getLogger('DeepSeekRateUpdater')
-            self.logger.warning("⚠️ DeepSeekRateUpdater использует заглушку. Установите deepseek_rates")
+            self.logger.warning("DeepSeekRateUpdater использует заглушку. Установите deepseek_rates")
         
         def get_rates_from_ai(self, marketplace: str, category: Optional[str] = None,
-                              force_refresh: bool = False, use_cache: bool = True,
-                              include_forecast: bool = False) -> Tuple[Optional[Dict], Optional[Any], Optional[Dict]]:
+                             force_refresh: bool = False, use_cache: bool = True,
+                             include_forecast: bool = False) -> Tuple[Optional[Dict], Optional[Any], Optional[Dict]]:
             """Заглушка: возвращает None"""
             self.logger.warning(f"get_rates_from_ai вызван для {marketplace}, но это заглушка")
             return None, None, None
         
         def update_all_marketplaces(self, force_refresh: bool = False,
-                                    include_forecast: bool = False) -> Dict[str, Tuple[Optional[Dict], Optional[Any], Optional[Dict]]]:
+                                   include_forecast: bool = False) -> Dict[str, Tuple[Optional[Dict], Optional[Any], Optional[Dict]]]:
             """Заглушка: возвращает пустой словарь"""
             self.logger.warning("update_all_marketplaces вызван, но это заглушка")
             return {}
@@ -568,11 +560,11 @@ if POLARS_AVAILABLE:
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
 APP_VERSION = "100.5.1"
-APP_NAME = "🚗 Юнит-экономика автозапчастей PRO 2026"
+APP_NAME = "Unit Economy Pro 2026"
 APP_DESCRIPTION = "Профессиональный расчёт юнит-экономики для автозапчастей"
 APP_AUTHOR = "AutoParts Analytics Team"
 
-# === ДОПОЛНИТЕЛЬНЫЕ КОНСТАНТЫ (✅ ДОБАВЛЕНО v100.15) ===
+# === ДОПОЛНИТЕЛЬНЫЕ КОНСТАНТЫ ===
 EXCEL_ROW_LIMIT = 1_000_000  # Макс. строк на лист Excel
 HISTORY_LIMIT = 10_000       # Макс. записей в истории
 MAX_BACKUPS = 10             # Макс. количество бэкапов
@@ -623,7 +615,6 @@ def get_logger():
     logger = logging.getLogger('UnitEconomyPro')
     logger.setLevel(getattr(logging, LOG_LEVEL))
     formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
-    
     try:
         fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
         fh.setLevel(logging.DEBUG)
@@ -635,13 +626,12 @@ def get_logger():
         ch.setLevel(logging.INFO)
         ch.setFormatter(formatter)
         logger.addHandler(ch)
-    
     return logger
 
 logger = get_logger()
 
 # ============================================================================
-# 🆕 v100.5.1: СОВМЕСТИМОСТЬ STREAMLIT 1.58+
+# СОВМЕСТИМОСТЬ STREAMLIT 1.58+
 # ============================================================================
 def st_dataframe_compat(df, *args, **kwargs):
     """Совместимая обёртка для st.dataframe (width='stretch' для Streamlit 1.58+)"""
@@ -651,10 +641,10 @@ def st_dataframe_compat(df, *args, **kwargs):
     return st.dataframe(df, *args, **kwargs)
 
 # ============================================================================
-# 🆕 v100.5.1: ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
+# ИСПРАВЛЕНИЕ КРАКОЗЯБР (ДВОЙНОГО UTF-8 КОДИРОВАНИЯ)
 # ============================================================================
 def detect_mojibake(text: str) -> bool:
-    """🆕 v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования)."""
+    """v100.5.1: Определяет наличие кракозябр (двойного UTF-8 кодирования)."""
     if not isinstance(text, str) or not text:
         return False
     
@@ -664,10 +654,11 @@ def detect_mojibake(text: str) -> bool:
         'Ð', 'Ñ', 'Ò', 'Ó', 'Ô', 'Õ', 'Ö', '×',
         'Ã', 'Ä', 'Å', 'Æ', 'Ç', 'È', 'É', 'Ê'
     ]
+    
     return any(pattern in text for pattern in mojibake_patterns)
 
 def fix_double_utf8(text: str) -> str:
-    """🆕 v100.5.1: Исправляет двойное кодирование UTF-8."""
+    """v100.5.1: Исправляет двойное кодирование UTF-8."""
     if not isinstance(text, str) or not text:
         return text
     
@@ -691,7 +682,7 @@ def fix_double_utf8(text: str) -> str:
     return text
 
 def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
-    """🆕 v100.5.1: Исправляет кракозябры в DataFrame."""
+    """v100.5.1: Исправляет кракозябры в DataFrame."""
     fixed_count = 0
     
     # Исправляем названия колонок
@@ -704,6 +695,7 @@ def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
             fixed_count += 1
         else:
             new_columns.append(col)
+    
     df.columns = new_columns
     
     # Исправляем строковые значения в ячейках
@@ -744,477 +736,18 @@ def escape_sql_string(value: str) -> str:
     return re.sub(r"['\";\\]", "", str(value))
 
 # ============================================================================
-# КЛАССЫ ИСКЛЮЧЕНИЙ
-# ============================================================================
-class AutoPartsException(Exception):
-    """Базовое исключение для приложения"""
-    
-    def __init__(self, message: str = "", *args, **kwargs):
-        self.message = message
-        self.timestamp = datetime.now()
-        self.context = kwargs
-        super().__init__(message, *args)
-    
-    def __str__(self):
-        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.message}"
-
-class ValidationError(AutoPartsException):
-    def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
-        self.field = field
-        self.value = value
-        super().__init__(f"Ошибка валидации{f' в поле {field}' if field else ''}: {message}")
-
-class MarketplaceError(AutoPartsException):
-    def __init__(self, message: str, marketplace: Optional[str] = None):
-        self.marketplace = marketplace
-        super().__init__(f"Ошибка маркетплейса{f' {marketplace}' if marketplace else ''}: {message}")
-
-class CalculationError(AutoPartsException):
-    def __init__(self, message: str, calculation_type: Optional[str] = None):
-        self.calculation_type = calculation_type
-        super().__init__(f"Ошибка расчета{f' {calculation_type}' if calculation_type else ''}: {message}")
-
-class ExportError(AutoPartsException):
-    def __init__(self, message: str, format: Optional[str] = None, file_path: Optional[Path] = None):
-        self.format = format
-        self.file_path = file_path
-        super().__init__(f"Ошибка экспорта{f' в {format}' if format else ''}: {message}")
-
-class ConfigError(AutoPartsException):
-    def __init__(self, message: str, key: Optional[str] = None):
-        self.key = key
-        super().__init__(f"Ошибка конфигурации{f' для {key}' if key else ''}: {message}")
-
-class DataNotFoundError(AutoPartsException):
-    def __init__(self, message: str, entity: Optional[str] = None, id: Optional[Any] = None):
-        self.entity = entity
-        self.id = id
-        super().__init__(f"Данные не найдены{f' для {entity}' if entity else ''}: {message}")
-
-class ConnectionError(AutoPartsException):
-    def __init__(self, message: str, host: Optional[str] = None, port: Optional[int] = None):
-        self.host = host
-        self.port = port
-        super().__init__(f"Ошибка соединения{f' с {host}:{port}' if host else ''}: {message}")
-
-class InvalidStateError(AutoPartsException):
-    def __init__(self, message: str, state: Optional[str] = None):
-        self.state = state
-        super().__init__(f"Некорректное состояние{f' ({state})' if state else ''}: {message}")
-
-class PriceImportError(AutoPartsException):
-    def __init__(self, message: str, file_path: Optional[str] = None):
-        self.file_path = file_path
-        super().__init__(f"Ошибка импорта цен{f' ({file_path})' if file_path else ''}: {message}")
-
-class ForecastError(AutoPartsException):
-    def __init__(self, message: str, model: Optional[str] = None):
-        self.model = model
-        super().__init__(f"Ошибка прогнозирования{f' ({model})' if model else ''}: {message}")
-
-class RateLimitError(AutoPartsException):
-    def __init__(self, message: str, limit: Optional[int] = None, reset_time: Optional[datetime] = None):
-        self.limit = limit
-        self.reset_time = reset_time
-        super().__init__(f"Превышен лимит запросов{f' ({limit})' if limit else ''}: {message}")
-
-class AuthenticationError(AutoPartsException):
-    def __init__(self, message: str, provider: Optional[str] = None):
-        self.provider = provider
-        super().__init__(f"Ошибка аутентификации{f' ({provider})' if provider else ''}: {message}")
-
-class IncompatibleDataError(AutoPartsException):
-    def __init__(self, message: str, expected_type: Optional[str] = None, actual_type: Optional[str] = None):
-        self.expected_type = expected_type
-        self.actual_type = actual_type
-        super().__init__(f"Несовместимые данные: {message}")
-
-class DataCorruptionError(AutoPartsException):
-    def __init__(self, message: str, file_path: Optional[Path] = None, checksum: Optional[str] = None):
-        self.file_path = file_path
-        self.checksum = checksum
-        super().__init__(f"Повреждение данных{f' в {file_path}' if file_path else ''}: {message}")
-
-# ============================================================================
-# УТИЛИТЫ ДЛЯ ОБРАБОТКИ ДАННЫХ
-# ============================================================================
-def safe_float(val: Any, default: float = 0.0) -> float:
-    """Безопасное преобразование в float"""
-    if val is None:
-        return default
-    if isinstance(val, (int, float)):
-        if math.isnan(val) or math.isinf(val):
-            return default
-        return float(val)
-    if isinstance(val, str):
-        cleaned = val.strip()
-        if not cleaned:
-            return default
-        cleaned = re.sub(r'[^\d.,\-+\s]', '', cleaned)
-        cleaned = cleaned.replace(' ', '').replace(',', '.')
-        if cleaned.count('-') > 1:
-            return default
-        parts = cleaned.split('.')
-        if len(parts) > 2:
-            return default
-        try:
-            return float(cleaned)
-        except ValueError:
-            return default
-    if hasattr(val, 'dtype') and hasattr(val, 'item'):
-        try:
-            item = val.item()
-            if isinstance(item, (int, float)):
-                return float(item)
-        except Exception:
-            pass
-    return default
-
-def safe_int(val: Any, default: int = 0) -> int:
-    """Безопасное преобразование в int"""
-    try:
-        float_val = safe_float(val, default)
-        if float_val == default and val != 0:
-            return default
-        return int(float_val)
-    except (ValueError, TypeError):
-        return default
-
-def safe_str(val: Any, default: str = "") -> str:
-    """Безопасное преобразование в str"""
-    if val is None:
-        return default
-    if isinstance(val, bool):
-        return str(val)
-    if isinstance(val, (int, float)):
-        if math.isnan(val) or math.isinf(val):
-            return default
-        return str(val)
-    if isinstance(val, (list, tuple)):
-        return ", ".join(safe_str(v) for v in val[:5]) + ("..." if len(val) > 5 else "")
-    if isinstance(val, dict):
-        return str({k: safe_str(v) for k, v in list(val.items())[:5]})
-    try:
-        return str(val)
-    except Exception:
-        return default
-
-def money_round(value: float, decimals: int = 2) -> float:
-    """Округление денежных значений"""
-    try:
-        if math.isnan(value) or math.isinf(value):
-            return 0.0
-        return round(float(value), decimals)
-    except (ValueError, TypeError):
-        return 0.0
-
-def calculate_volume(length: float, width: float, height: float) -> float:
-    """Расчёт объёма"""
-    if not all([length, width, height]):
-        return 0.0
-    if not all([length > 0, width > 0, height > 0]):
-        return 0.0
-    return (length * width * height) / 1000  # см³ → литры
-
-def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float,
-                              height_cm: float, volumetric_coeff: float = 5000.0) -> float:
-    """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
-    if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
-        return weight_kg
-    volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
-    billable = max(weight_kg, volumetric_weight)
-    billable = math.ceil(billable * 2) / 2
-    return billable
-
-def calculate_storage_cost_progressive(volume_l: float, days: int, base_rate: float,
-                                       marketplace: str) -> float:
-    """Прогрессивная стоимость хранения"""
-    if marketplace in ["Ozon", "Wildberries"]:
-        if days <= 60:
-            multiplier = 1.0
-        elif days <= 90:
-            multiplier = 2.0
-        elif days <= 180:
-            multiplier = 4.0
-        elif days <= 365:
-            multiplier = 8.0
-        else:
-            multiplier = 16.0
-        weighted_rate = base_rate * multiplier
-        return money_round(volume_l * weighted_rate * days)
-    else:
-        return money_round(volume_l * base_rate * days)
-
-def calculate_advertising_cost(price: float, category: str, ad_intensity: str = "medium") -> float:
-    """Рекламные расходы (ДРР — доля рекламных расходов)"""
-    drr_rates = {
-        "low": 0.05,
-        "medium": 0.15,
-        "high": 0.25,
-        "aggressive": 0.35
-    }
-    competitive_categories = ["масла", "фильтры", "колодки", "аккумуляторы"]
-    if category in competitive_categories:
-        intensity = "high" if ad_intensity == "medium" else ad_intensity
-    else:
-        intensity = ad_intensity
-    return money_round(price * drr_rates.get(intensity, 0.15))
-
-def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> float:
-    """Расчёт налога"""
-    cfg = TAX_SYSTEMS.get(tax_system, TAX_SYSTEMS["УСН_6"])
-    if cfg["base"] == "price":
-        return money_round(price * cfg["rate"])
-    elif cfg["base"] == "profit":
-        profit = price - cost
-        tax = profit * cfg["rate"]
-        if tax_system == "УСН_15":
-            min_tax = price * cfg.get("min_rate", 0.01)
-            tax = max(tax, min_tax)
-        return money_round(max(0, tax))
-    elif cfg["base"] == "fixed":
-        return 0.0
-    return 0.0
-
-def calculate_returns_cost(price: float, return_rate: float) -> float:
-    """Расчёт стоимости возвратов"""
-    return money_round(price * return_rate)
-
-def calculate_recommended_min_price(
-    cost: float,
-    commission_rate: float,
-    logistics: float,
-    storage_cost: float,
-    acquiring_rate: float,
-    last_mile: float,
-    return_rate: float,
-    min_profit_percent: float = 0.10,
-    tax_system: str = "УСН_6",
-    tax_rate: float = 0.06
-) -> float:
-    """Расчёт рекомендуемой минимальной цены"""
-    variable_rate = (
-        commission_rate +
-        acquiring_rate +
-        return_rate +
-        tax_rate
-    )
-    fixed_costs = logistics + storage_cost + last_mile
-    
-    if variable_rate >= 1.0:
-        return 0.0
-    
-    min_price = (cost + fixed_costs) / (1 - variable_rate - min_profit_percent)
-    return money_round(max(min_price, cost * 1.1))
-
-# ============================================================================
-# ПАРСИНГ РАЗМЕРОВ
-# ============================================================================
-def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
-    """🆕 v100.4: Парсит "человеческий" ввод размеров в формат (длина, ширина, высота)."""
-    if not dim_str or not isinstance(dim_str, str):
-        return 0.0, 0.0, 0.0
-    
-    dim_str = dim_str.lower().strip()
-    separators = ['x', '*', 'х', '×', ' ', ',']
-    
-    for sep in separators:
-        if sep in dim_str:
-            parts = [p.strip() for p in dim_str.split(sep) if p.strip()]
-            if len(parts) >= 3:
-                try:
-                    dimensions = []
-                    for p in parts[:3]:
-                        cleaned = re.sub(r'[^\d.,\-]', '', p)
-                        cleaned = cleaned.replace(',', '.')
-                        if cleaned and cleaned.replace('.', '').replace('-', '').isdigit():
-                            dimensions.append(float(cleaned))
-                        else:
-                            nums = re.findall(r'(\d+\.?\d*)', p)
-                            if nums:
-                                dimensions.append(float(nums[0]))
-                    
-                    if len(dimensions) == 3:
-                        dimensions.sort(reverse=True)
-                        return tuple(dimensions)
-                except (ValueError, TypeError):
-                    pass
-    
-    return 0.0, 0.0, 0.0
-
-def parse_dimensions_vectorized(dims_series) -> "pl.DataFrame":
-    """Векторизованный парсинг размеров для Polars DataFrame."""
-    if not POLARS_AVAILABLE:
-        return None
-    
-    def parse_single(dim_str):
-        if pd.isna(dim_str) or not dim_str:
-            return pd.Series([0.0, 0.0, 0.0])
-        l, w, h = parse_dimensions_string(str(dim_str))
-        return pd.Series([l, w, h])
-    
-    parsed = dims_series.apply(parse_single)
-    return pd.DataFrame(parsed.tolist(), columns=['length', 'width', 'height'])
-
-# ============================================================================
-# ДЕКОРАТОРЫ
-# ============================================================================
-def validate_types(**kwargs_types):
-    """Декоратор для валидации типов аргументов"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for param_name, expected_type in kwargs_types.items():
-                if param_name in kwargs:
-                    param_value = kwargs[param_name]
-                    if not isinstance(param_value, expected_type):
-                        raise ValidationError(
-                            f"Аргумент '{param_name}' должен быть типа {expected_type.__name__}",
-                            field=param_name,
-                            value=param_value
-                        )
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-def log_execution(func: Callable) -> Callable:
-    """Декоратор для логирования выполнения функций"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        args_str = []
-        if args:
-            args_str.extend(str(a)[:100] for a in args[:5])
-        if kwargs:
-            args_str.extend(f"{k}={str(v)[:100]}" for k, v in list(kwargs.items())[:5])
-        
-        logger.info(f"▶️ Выполнение {func.__name__}({', '.join(args_str)})")
-        start_time = time.perf_counter()
-        
-        try:
-            result = func(*args, **kwargs)
-            elapsed = time.perf_counter() - start_time
-            logger.info(f"✅ {func.__name__} выполнена за {elapsed:.3f}с")
-            return result
-        except Exception as e:
-            elapsed = time.perf_counter() - start_time
-            logger.error(f"❌ {func.__name__} завершилась с ошибкой за {elapsed:.3f}с: {e}")
-            logger.error(traceback.format_exc())
-            raise
-    return wrapper
-
-def timer_decorator(func: Callable) -> Callable:
-    """Декоратор для измерения времени выполнения"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start_time = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - start_time
-        logger.info(f"⏱️ {func.__name__}: {elapsed:.3f}с")
-        return result
-    return wrapper
-
-def safe_execution(default_return: Any = None, log_error: bool = True) -> Callable:
-    """Декоратор для безопасного выполнения с обработкой ошибок"""
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                if log_error:
-                    logger.error(f"Ошибка в {func.__name__}: {e}")
-                    logger.error(traceback.format_exc())
-                return default_return
-        return wrapper
-    return decorator
-
-# ============================================================================
-# УТИЛИТЫ ДЛЯ КЭШИРОВАНИЯ
-# ============================================================================
-def make_cache_key(*args, **kwargs) -> str:
-    """Создание уникального ключа для кэша"""
-    key_parts = []
-    
-    for arg in args:
-        if isinstance(arg, (int, float, str, bool)):
-            key_parts.append(str(arg))
-        elif isinstance(arg, (list, tuple, set)):
-            key_parts.append(str(sorted(arg) if not isinstance(arg, tuple) else arg))
-        elif isinstance(arg, pd.DataFrame):
-            try:
-                key_parts.append(hashlib.md5(pd.util.hash_pandas_object(arg).values.tobytes()).hexdigest())
-            except Exception:
-                key_parts.append(str(len(arg)))
-        else:
-            key_parts.append(str(arg))
-    
-    for k, v in sorted(kwargs.items()):
-        if isinstance(v, (int, float, str, bool)):
-            key_parts.append(f"{k}:{v}")
-        elif isinstance(v, (list, tuple, set)):
-            key_parts.append(f"{k}:{str(sorted(v) if not isinstance(v, tuple) else v)}")
-        elif isinstance(v, pd.DataFrame):
-            try:
-                key_parts.append(f"{k}:{hashlib.md5(pd.util.hash_pandas_object(v).values.tobytes()).hexdigest()}")
-            except Exception:
-                key_parts.append(f"{k}:{len(v)}")
-        else:
-            key_parts.append(f"{k}:{v}")
-    
-    key = "|".join(key_parts)
-    return hashlib.md5(key.encode('utf-8')).hexdigest()
-
-# ============================================================================
-# ПРОВЕРКА ПАМЯТИ И ОПТИМИЗАЦИЯ
-# ============================================================================
-if PSUTIL_AVAILABLE:
-    memory_mb = psutil.virtual_memory().available / (1024 * 1024)
-    if memory_mb < 2048:
-        logger.warning(f"⚠️ Мало памяти ({memory_mb:.0f} MB). Включен экономичный режим.")
-        os.environ['POLARS_MAX_THREADS'] = '1'
-
-class PerformanceManager:
-    """Менеджер производительности для оптимизации работы с большими данными"""
-    
-    def __init__(self):
-        self.memory_threshold_mb = 2048
-        self.chunk_size = DEFAULT_CHUNK_SIZE
-        self.max_workers = min(4, os.cpu_count() or 2)
-    
-    def optimize_for_big_data(self):
-        """Оптимизация для работы с большими данными"""
-        if PSUTIL_AVAILABLE:
-            memory_mb = psutil.virtual_memory().available / (1024 * 1024)
-            if memory_mb < self.memory_threshold_mb:
-                self.chunk_size = 5000
-                self.max_workers = 2
-                logger.info(f"⚡ Оптимизация для малой памяти: chunk_size={self.chunk_size}, workers={self.max_workers}")
-    
-    def get_optimal_chunk_size(self, total_rows: int) -> int:
-        """Получение оптимального размера чанка"""
-        if total_rows < 10000:
-            return total_rows
-        elif total_rows < 100000:
-            return self.chunk_size
-        else:
-            return self.chunk_size * 2
-
-perf_manager = PerformanceManager()
-perf_manager.optimize_for_big_data()
-
-# ============================================================================
 # ЛОГИРОВАНИЕ ЗАГРУЗКИ БЛОКА 0
 # ============================================================================
-logger.info(f"✅ Блок 0 загружен. Версия: {APP_VERSION}")
-logger.info(f"📊 Python: {sys.version}")
-logger.info(f"📊 Streamlit: {st.__version__}")
-logger.info(f"📊 Pandas: {pd.__version__}")
-logger.info(f"📊 NumPy: {np.__version__}")
-
+logger.info(f"Блок 0 загружен. Версия: {APP_VERSION}")
+logger.info(f"Python: {sys.version}")
+logger.info(f"Streamlit: {st.__version__}")
+logger.info(f"Pandas: {pd.__version__}")
+logger.info(f"NumPy: {np.__version__}")
 if POLARS_AVAILABLE:
-    logger.info(f"📊 Polars: {pl.__version__}")
+    logger.info(f"Polars: {pl.__version__}")
 if DUCKDB_AVAILABLE:
-    logger.info(f"📊 DuckDB: {duckdb.__version__}")
+    logger.info(f"DuckDB: {duckdb.__version__}")
+    
 # ============================================================================
 # БЛОК 1: ENUM И ТИПЫ
 # ============================================================================
