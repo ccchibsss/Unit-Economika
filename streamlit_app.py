@@ -814,7 +814,8 @@ class AutoPartsException(Exception):
         super().__init__(message, *args)
 
     def __str__(self):
-        return f"[{self.timestamp.strftime('%Y-%m-%d %H:%M:%S')}] {self.message}"
+    return f"[{self.timestamp.strftime(LOG_DATE_FORMAT)}] {self.message}"
+
 
 class ValidationError(AutoPartsException):
     def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
@@ -7997,7 +7998,7 @@ class SuperProExcelExporter:
         
         row = 3
         summary = [
-            ("📅 Дата экспорта", datetime.now().strftime('%d.%m.%Y %H:%M:%S')),
+            ("📅 Дата экспорта", datetime.now().strftime(DATE_FORMAT_UI_FULL)),
             ("📦 Всего товаров", f"{len(df):,}"),
             ("🏪 Маркетплейсы", ", ".join(metadata.get('marketplaces', ['Ozon'])) if metadata else "Ozon"),
             ("📊 Режимы", ", ".join(metadata.get('modes', ['FBS'])) if metadata else "FBS"),
@@ -11628,7 +11629,7 @@ def show_smart_tariff_interface():
                 if last_updated is None:
                     last_updated_str = "Неизвестно"
                 elif hasattr(last_updated, 'strftime'):
-                    last_updated_str = last_updated.strftime('%d.%m.%Y %H:%M')
+                    last_updated_str = last_updated.strftime(DATE_FORMAT_UI)
                 else:
                     last_updated_str = str(last_updated)
                 
@@ -12927,7 +12928,7 @@ def show_api_tariffs_interface():
                             f"{config.last_mile_fee:.2f} ₽",
                             f"{config.subscription_fee:.2f} ₽",
                             config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source),
-                            config.last_updated.strftime('%d.%m.%Y %H:%M') if hasattr(config.last_updated, 'strftime') else str(config.last_updated)
+                            config.last_updated.strftime(DATE_FORMAT_UI) if hasattr(config.last_updated, 'strftime') else str(config.last_updated)
                         ]
                     }
                     
@@ -13312,7 +13313,7 @@ class DataManager:
                     "path": file_path,
                     "size_mb": round(size_mb, 2),
                     "created": created,
-                    "created_str": created.strftime('%d.%m.%Y %H:%M:%S')
+                    "created_str": created.strftime(DATE_FORMAT_UI_FULL)
                 })
             except Exception as e:
                 self.logger.warning(f"Ошибка чтения бэкапа {file_path}: {e}")
@@ -13780,7 +13781,7 @@ def main():
         try:
             st.title("💼 Unit Economy Pro для автозапчастей")
             st.caption(f"Версия {APP_VERSION} | Профессиональный расчёт юнит-экономики")
-            st.caption(f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')} | 🐍 Python {sys.version.split()[0]}")
+            st.caption(f"📅 {datetime.now().strftime(DATE_FORMAT_UI)} | 🐍 Python {sys.version.split()[0]}")
             logger.info("✅ Заголовок установлен")
         except Exception as e:
             logger.error(f"❌ Ошибка установки заголовка: {e}")
@@ -13945,7 +13946,7 @@ def main():
                 st.caption(f"📊 Streamlit {st.__version__}")
             
             with col3:
-                st.caption(f"📅 {datetime.now().strftime('%Y-%m-%d')}")
+                st.caption(f"📅 {datetime.now().strftime(DATE_FORMAT_SHORT)}")
                 
         except Exception as e:
             logger.warning(f"Не удалось отобразить footer: {e}")
