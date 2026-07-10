@@ -115,6 +115,7 @@ from collections import defaultdict, Counter, deque, OrderedDict, ChainMap, name
 from enum import Enum, auto, IntEnum
 from threading import Lock, RLock, Semaphore, Thread, Event, Barrier, Condition
 from contextlib import contextmanager, closing, suppress, ExitStack
+import contextlib
 from pathlib import Path, PurePath
 from abc import ABC, abstractmethod
 from multiprocessing import Pool, cpu_count
@@ -277,6 +278,61 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
+
+# ------------------------------------------------------------------
+# Простая реализация CategoryClassifier (fallback)
+# ------------------------------------------------------------------
+class CategoryClassifier:
+    """Простой классификатор категорий: использует sklearn, если доступен,
+    иначе — rule-based fallback.
+    """
+    def __init__(self):
+        self._trained = False
+        self.mapping = {
+            'масл': 'Масла',
+            'фильтр': 'Фильтры',
+            'колодк': 'Тормозные колодки',
+            'аккум': 'Аккумуляторы',
+            'амортиз': 'Амортизаторы'
+        }
+        if SKLEARN_AVAILABLE:
+            try:
+                self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=20000)
+                self.clf = MultinomialNB()
+                self._trained = False
+            except Exception:
+                self._trained = False
+
+    def train(self, texts: List[str], labels: List[str]):
+        if not SKLEARN_AVAILABLE:
+            return False
+        try:
+            X = self.vectorizer.fit_transform(texts)
+            self.clf.fit(X, labels)
+            self._trained = True
+            return True
+        except Exception:
+            self._trained = False
+            return False
+
+    def predict(self, texts: List[str]) -> List[str]:
+        if self._trained and SKLEARN_AVAILABLE:
+            try:
+                X = self.vectorizer.transform(texts)
+                return list(self.clf.predict(X))
+            except Exception:
+                pass
+        # Rule-based fallback
+        out = []
+        for t in texts:
+            s = (t or '') .lower()
+            found = None
+            for k, v in self.mapping.items():
+                if k in s:
+                    found = v
+                    break
+            out.append(found or 'Другие')
+        return out
 
 # === Plotly (интерактивные графики) ===
 try:
@@ -1677,6 +1733,64 @@ class ProductCategory:
             "seasonality": self.seasonality.value,
             "risk_level": self.risk_level.value
         }
+
+
+class CategoryDimensionsDB:
+    def __init__(self):
+        self.categories: Dict[str, ProductCategory] = {}
+
+    def import_from_excel(self, path: str) -> Dict[str, Any]:
+        try:
+            df = pd.read_excel(path)
+        except Exception as e:
+            return {'success': False, 'errors': [str(e)], 'imported': 0, 'warnings': []}
+
+        imported = 0
+        warnings = []
+        errors = []
+        for _, row in df.iterrows():
+            try:
+                key = str(row.get('key') or row.get('id') or row.get('category') or row.get('name') or "").strip()
+                if not key:
+                    warnings.append('Пустой ключ в строке')
+                    continue
+                pc = ProductCategory(name=str(row.get('name', key)))
+                try:
+                    pc.min_length = float(row.get('min_length') or 0)
+                    pc.max_length = float(row.get('max_length') or 0)
+                    pc.min_width = float(row.get('min_width') or 0)
+                    pc.max_width = float(row.get('max_width') or 0)
+                    pc.min_height = float(row.get('min_height') or 0)
+                    pc.max_height = float(row.get('max_height') or 0)
+                    pc.min_weight = float(row.get('min_weight') or 0)
+                    pc.max_weight = float(row.get('max_weight') or 0)
+                except Exception:
+                    pass
+                self.categories[key] = pc
+                imported += 1
+            except Exception as e:
+                errors.append(str(e))
+
+        return {'success': len(errors) == 0, 'errors': errors, 'warnings': warnings, 'imported': imported}
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Возвращает базовую статистику по импортированным категориям."""
+        return {
+            'total_categories': len(self.categories),
+            'categories_with_dimensions': sum(1 for c in self.categories.values() if c.dimensions is not None),
+            'categories_with_weight': sum(1 for c in self.categories.values() if c.typical_weight > 0),
+            'categories_with_volume': sum(1 for c in self.categories.values() if c.typical_volume > 0),
+        }
+
+
+_CATEGORY_DB_INSTANCE: Optional[CategoryDimensionsDB] = None
+
+
+def get_category_dimensions_db() -> CategoryDimensionsDB:
+    global _CATEGORY_DB_INSTANCE
+    if _CATEGORY_DB_INSTANCE is None:
+        _CATEGORY_DB_INSTANCE = CategoryDimensionsDB()
+    return _CATEGORY_DB_INSTANCE
 
 
 @dataclass
@@ -4126,7 +4240,8 @@ class MarketplaceUnitEconomics:
         total_futures = len(chunks) * len(marketplaces)
         completed = 0
         
-        with st.status("🚀 Параллельный расчет юнит-экономики...", expanded=True) as status:
+        status_ctx = st.status("🚀 Параллельный расчет юнит-экономики...", expanded=True) if hasattr(st, 'status') else contextlib.nullcontext()
+        with status_ctx as status:
             # ✅ ThreadPoolExecutor — потоки в одном процессе, self доступен
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
@@ -4196,12 +4311,20 @@ class MarketplaceUnitEconomics:
                     completed += 1
                     if progress_callback:
                         progress_callback(completed / total_futures)
-                    status.update(
-                        label=f"🔄 Обработано {completed}/{total_futures} чанков",
-                        state="running"
-                    )
+                    if status:
+                        try:
+                            status.update(
+                                label=f"🔄 Обработано {completed}/{total_futures} чанков",
+                                state="running"
+                            )
+                        except Exception:
+                            pass
             
-            status.update(label="✅ Параллельный расчет завершен!", state="complete")
+            if status:
+                try:
+                    status.update(label="✅ Параллельный расчет завершен!", state="complete")
+                except Exception:
+                    pass
             if progress_callback:
                 progress_callback(1.0)
         
@@ -5200,6 +5323,28 @@ class HighVolumeAutoPartsCatalog:
                 .str.replace_all(r"\s+", " ")
                 .str.strip_chars()
                 .str.to_lowercase())
+
+    @staticmethod
+    def normalize_key_value(val: Any) -> str:
+        """Надежно нормализует одиночное значение и возвращает str.
+        Работает с Polars, если доступен, иначе использует регулярное приведение.
+        """
+        try:
+            if POLARS_AVAILABLE and pl is not None:
+                s = pl.Series([val])
+                res_series = HighVolumeAutoPartsCatalog.normalize_key(s)
+                return res_series[0]
+        except Exception:
+            pass
+        # Fallback: простая нормализация
+        try:
+            txt = str(val or "")
+            txt = re.sub("'", "", txt)
+            txt = re.sub(r"[^0-9A-Za-zА-Яа-яЁё`\-\s]", "", txt)
+            txt = re.sub(r"\s+", " ", txt)
+            return txt.strip().lower()
+        except Exception:
+            return str(val)
 
     @staticmethod
     def clean_values(series: pl.Series) -> pl.Series:
@@ -6476,7 +6621,7 @@ ORDER BY r.brand, r.artikul
         if brand_norm_result:
             brand_norm = brand_norm_result[0]
         else:
-            brand_norm = self.normalize_key(pl.Series([selected_brand]))[0]
+            brand_norm = self.normalize_key_value(selected_brand)
         
         count = self.conn.execute(
             "SELECT COUNT(*) FROM parts WHERE brand_norm = ?", [brand_norm]).fetchone()[0]
@@ -6494,7 +6639,7 @@ ORDER BY r.brand, r.artikul
         artikul_input = st.text_input("Артикул")
         
         if artikul_input:
-            artikul_norm = self.normalize_key(pl.Series([artikul_input]))[0]
+            artikul_norm = self.normalize_key_value(artikul_input)
             count = self.conn.execute(
                 "SELECT COUNT(*) FROM parts WHERE artikul_norm = ?", [artikul_norm]).fetchone()[0]
             
@@ -8947,43 +9092,8 @@ def show_catalog_export(catalog):
             st.error("❌ Ошибка при экспорте")
 
 
-def show_catalog_management(catalog):
-    """Управление каталогом"""
-    st.subheader("🔧 Управление каталогом")
-    st.warning("⚠️ Операции необратимы!")
-    
-    management_option = st.radio(
-        "Выберите действие:",
-        [
-            "Удалить по бренду",
-            "Удалить по артикули",
-            "Управление ценами",
-            "Исключения",
-            "Категории",
-            "Облачная синхронизация"
-        ],
-        format_func=lambda x: {
-            "Удалить по бренду": "🏭 Удалить все записи бренда",
-            "Удалить по артикули": "📦 Удалить все записи артикула",
-            "Управление ценами": "💰 Цены и наценки",
-            "Исключения": "🚫 Исключения при экспорте",
-            "Категории": "🗂️ Категории товаров",
-            "Облачная синхронизация": "☁️ Облачная синхронизация"
-        }[x]
-    )
-    
-    if management_option == "Удалить по бренду":
-        catalog._show_delete_by_brand()
-    elif management_option == "Удалить по артикули":
-        catalog._show_delete_by_artikul()
-    elif management_option == "Управление ценами":
-        catalog.show_price_settings()
-    elif management_option == "Исключения":
-        catalog.show_exclusion_settings()
-    elif management_option == "Категории":
-        catalog.show_category_mapping()
-    elif management_option == "Облачная синхронизация":
-        catalog.show_cloud_sync()
+# (Ранее была здесь устаревшая реализация `show_catalog_management`,
+#  заменена на централизованную, более модульную версию ниже.)
 
 
 # ============================================================================
@@ -9008,7 +9118,7 @@ def show_delete_by_brand_interface(catalog):
     selected_brand = st.selectbox("Выберите бренд для удаления", available_brands, key="delete_brand_select")
     
     # Получаем нормированное имя бренда
-    brand_norm = catalog.normalize_key(pl.Series([selected_brand]))[0]
+    brand_norm = catalog.normalize_key_value(selected_brand)
     count = catalog.conn.execute(
         "SELECT COUNT(*) FROM parts WHERE brand_norm = ?", [brand_norm]
     ).fetchone()[0]
@@ -9031,7 +9141,7 @@ def show_delete_by_artikul_interface(catalog):
     artikul_input = st.text_input("Введите артикул для удаления", key="delete_artikul_input")
     
     if artikul_input:
-        artikul_norm = catalog.normalize_key(pl.Series([artikul_input]))[0]
+        artikul_norm = catalog.normalize_key_value(artikul_input)
         count = catalog.conn.execute(
             "SELECT COUNT(*) FROM parts WHERE artikul_norm = ?", [artikul_norm]
         ).fetchone()[0]
@@ -9696,8 +9806,8 @@ class DeepSeekRateUpdater:
             forecast = None
             if include_forecast and cache_key in self._forecast_cache:
                 forecast = self._forecast_cache[cache_key]
-            # ✅ v100.18: Используем Enum TariffSource.AI_CACHE
-            return entry.get('rates', {}), TariffSource.AI_CACHE, forecast
+            # ✅ v100.18: Используем Enum TariffSource.CACHE
+            return entry.get('rates', {}), TariffSource.CACHE, forecast
         
         # Получаем тарифы через AI
         try:
@@ -10880,7 +10990,7 @@ class SmartTariffLoaderV3:
                     result["errors"].append("API WB вернул ошибку")
             
             elif marketplace == "Yandex.Market" and api_key:
-                data = self.api_connector.get_yandex_tariffs(api_key)
+                data = self.api_connector.get_yandex_market_tariffs(api_key, client_id)
                 if data:
                     result["data"] = data
                     result["warnings"].append("Тарифы загружены из API Яндекс.Маркет")
@@ -11897,7 +12007,7 @@ def show_category_dimensions_interface():
                         RiskLevel.LOW: "🟢",
                         RiskLevel.MEDIUM: "🟡",
                         RiskLevel.HIGH: "🔴",
-                        RiskLevel.CRITICAL: "⚫"
+                        RiskLevel.VERY_HIGH: "⚫"
                     }.get(cat.risk_level, "⚪")
                     st.write(f"**Уровень риска:** {risk_color} {cat.risk_level.value}")
                 
@@ -12763,7 +12873,35 @@ def show_api_tariffs_interface():
                     progress_bar.progress(10)
                     
                     # Асинхронный запрос
-                    result = asyncio.run(get_tariffs_via_api_async(
+                    # Безопасный запуск корутины в среде Streamlit
+                    def run_coro_sync(coro):
+                        try:
+                            loop = asyncio.get_running_loop()
+                        except RuntimeError:
+                            loop = None
+
+                        if loop and loop.is_running():
+                            # Создаём новый цикл в отдельном потоке
+                            result_container = {}
+                            def _runner():
+                                new_loop = asyncio.new_event_loop()
+                                try:
+                                    asyncio.set_event_loop(new_loop)
+                                    result_container['res'] = new_loop.run_until_complete(coro)
+                                finally:
+                                    try:
+                                        new_loop.close()
+                                    except Exception:
+                                        pass
+
+                            t = threading.Thread(target=_runner)
+                            t.start()
+                            t.join()
+                            return result_container.get('res')
+                        else:
+                            return asyncio.run(coro)
+
+                    result = run_coro_sync(get_tariffs_via_api_async(
                         marketplace=marketplace,
                         api_key=api_key,
                         client_id=client_id
