@@ -1728,6 +1728,7 @@ class UnitEconomicsResult:
     billable_weight: float = 0.0
     advertising_cost: float = 0.0
     auto_parts_specific: float = 0.0
+    formulas: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Конвертация в словарь"""
@@ -3975,6 +3976,21 @@ class MarketplaceUnitEconomics:
             advertising_cost=money_round(advertising_cost),
             auto_parts_specific=money_round(auto_parts_specific)
         )
+        # Сохраняем текстовые формулы для прозрачности и экспорта
+        try:
+            result.formulas = {
+                "commission": "commission = commission_rate * price (with discounts/promo applied)",
+                "logistics": "logistics = logistics_base*seasonal + billable_weight*logistics_per_kg*seasonal + volume*logistics_per_liter*seasonal",
+                "storage_cost": "progressive storage by days and volume",
+                "returns": "returns = price * return_rate",
+                "total_expenses": "cost + commission + subscription_cost + logistics + storage_cost + acquiring + delivery + last_mile + returns + rko_fee + premium_fee + insurance_fee + packing_fee + marketing_fee + hazardous_surcharge + fragile_surcharge + oversized_surcharge + tax_amount + auto_parts_specific + advertising_cost",
+                "profit": "profit = price - total_expenses",
+                "margin_percent": "margin% = profit / price * 100",
+                "roi": "roi = profit / cost * 100",
+                "breakeven_price": "breakeven = (cost + fixed_costs) / (1 - variable_rate)"
+            }
+        except Exception:
+            result.formulas = {}
         
         self._update_stats(result)
         self._history.append(result)
@@ -4697,10 +4713,61 @@ class MarketplaceUnitEconomics:
         if format == ExportFormat.CSV:
             return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8')
         elif format == ExportFormat.EXCEL:
+            # Записываем лист с числовыми значениями, затем добавляем лист с формулами,
+            # которые ссылаются на лист `История` по строкам.
+            from openpyxl import load_workbook
+            from openpyxl.utils import get_column_letter
+
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='История')
-            return output.getvalue()
+            output.seek(0)
+            wb = load_workbook(output)
+            ws = wb['История']
+
+            # Создаём лист для формул
+            if 'Формулы' in wb.sheetnames:
+                wb.remove(wb['Формулы'])
+            wf = wb.create_sheet('Формулы')
+
+            # Заголовки для формул
+            headers = ['calc_total_expenses_formula', 'calc_profit_formula', 'calc_margin_formula', 'calc_roi_formula']
+            for c, h in enumerate(headers, start=1):
+                wf.cell(row=1, column=c, value=h)
+
+            # Получаем соответствие имён колонок к буквенным адресам
+            header_names = [cell.value for cell in ws[1]]
+            col_map = {name: get_column_letter(i + 1) for i, name in enumerate(header_names)}
+
+            # Для каждой строки данных (начиная со второй) создаём формулы, ссылаясь на лист 'История'
+            for row_idx in range(2, ws.max_row + 1):
+                # helper to build reference (uses English column names from to_dict)
+                def ref(col_name):
+                    col = col_map.get(col_name)
+                    if not col:
+                        return '0'
+                    return f"'История'!${col}${row_idx}"
+
+                total_expenses_formula = (
+                    f"=({ref('cost')} + {ref('commission')} + {ref('subscription_cost')} + {ref('logistics')} + {ref('storage_cost')} + {ref('acquiring')} + {ref('delivery')} + {ref('last_mile')} + {ref('returns')} + {ref('rko_fee')} + {ref('premium_fee')} + {ref('insurance_fee')} + {ref('packing_fee')} + {ref('marketing_fee')} + {ref('hazardous_surcharge')} + {ref('fragile_surcharge')} + {ref('oversized_surcharge')} + {ref('tax_amount')} + {ref('auto_parts_specific')} + {ref('advertising_cost')})"
+                )
+
+                price_ref = ref('price')
+                profit_formula = f"=({price_ref} - ({total_expenses_formula[1:]}))"
+                # margin: profit / price * 100
+                margin_formula = f"=IF({price_ref}=0,0,({profit_formula[1:]})/{price_ref}*100)"
+                cost_ref = ref('cost')
+                roi_formula = f"=IF({cost_ref}=0,0,({profit_formula[1:]})/{cost_ref}*100)"
+
+                wf.cell(row=row_idx, column=1, value=total_expenses_formula)
+                wf.cell(row=row_idx, column=2, value=profit_formula)
+                wf.cell(row=row_idx, column=3, value=margin_formula)
+                wf.cell(row=row_idx, column=4, value=roi_formula)
+
+            # Сохраняем в байты
+            out_bytes = io.BytesIO()
+            wb.save(out_bytes)
+            return out_bytes.getvalue()
         elif format == ExportFormat.JSON:
             return df.to_json(orient='records', force_ascii=False).encode('utf-8')
         else:
@@ -5464,7 +5531,7 @@ class HighVolumeAutoPartsCatalog:
                             stats_data.append({
                                 "Колонка": col,
                                 "Всего значений": len(col_data),
-                                "Не-NULL значений": col_data.not_null().sum(),
+                                "Не-NULL значений": col_data.is_not_null().sum(),
                                 "Нулевых значений": (col_data == 0).sum(),
                                 "Минимум": col_data.min(),
                                 "Максимум": col_data.max(),
