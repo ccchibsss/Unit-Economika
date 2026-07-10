@@ -134,10 +134,10 @@ def fix_indentation(content: str) -> str:
 # ШАГ 3: Исправление сломанных docstrings
 # ============================================================
 def fix_docstrings(content: str) -> str:
-    """Добавляет открывающий """ перед Args:/Returns:"""
+    """Добавляет открывающий тройной кавычкой перед Args:/Returns:"""
     print("🔧 Шаг 3: Исправляю сломанные docstrings...")
     
-    # Паттерн: def func(...):\nArgs: (без """)
+    # Паттерн: def func(...):\nArgs: (без тройных кавычек)
     pattern = r'(def \w+\([^)]*\)[^:]*:)\s*\n(\s*)(Args:|Returns:)'
     
     def replacer(m):
