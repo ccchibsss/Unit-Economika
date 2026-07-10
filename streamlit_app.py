@@ -855,7 +855,7 @@ class DataNotFoundError(AutoPartsException):
         super().__init__(
             f"Данные не найдены{f' для {entity}' if entity else ''}: {message}")
 
-class ConnectionError(AutoPartsException):
+class APIConnectionError(AutoPartsException):
     def __init__(self, message: str, host: Optional[str] = None, port: Optional[int] = None):
         self.host = host
         self.port = port
@@ -1774,12 +1774,62 @@ class CategoryDimensionsDB:
         return {'success': len(errors) == 0, 'errors': errors, 'warnings': warnings, 'imported': imported}
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Возвращает базовую статистику по импортированным категориям."""
+        """Возвращает статистику по импортированным категориям."""
+        total = len(self.categories)
+        if total == 0:
+            return {
+                'total': 0,
+                'total_categories': 0,
+                'avg_length': 0.0,
+                'avg_weight': 0.0,
+                'total_volume_l': 0.0,
+                'categories_with_dimensions': 0,
+                'categories_with_weight': 0,
+                'categories_with_volume': 0,
+            }
+
+        total_length = 0.0
+        total_weight = 0.0
+        total_volume = 0.0
+        categories_with_dimensions = 0
+        categories_with_weight = 0
+        categories_with_volume = 0
+
+        for c in self.categories.values():
+            if c.dimensions is not None:
+                categories_with_dimensions += 1
+            if c.typical_weight > 0:
+                categories_with_weight += 1
+            if c.typical_volume > 0:
+                categories_with_volume += 1
+
+            avg_length = 0.0
+            if c.min_length > 0 or c.max_length > 0:
+                avg_length = ((c.min_length or c.max_length) + (c.max_length or c.min_length)) / 2.0
+            elif c.dimensions is not None and c.dimensions.length > 0:
+                avg_length = c.dimensions.length
+            total_length += avg_length
+
+            avg_weight = c.typical_weight if c.typical_weight > 0 else ((c.min_weight or c.max_weight) + (c.max_weight or c.min_weight)) / 2.0
+            total_weight += avg_weight
+
+            volume = c.typical_volume
+            if volume <= 0:
+                width_avg = ((c.min_width or c.max_width) + (c.max_width or c.min_width)) / 2.0
+                height_avg = ((c.min_height or c.max_height) + (c.max_height or c.min_height)) / 2.0
+                if avg_length > 0 and width_avg > 0 and height_avg > 0:
+                    volume = avg_length * width_avg * height_avg / 1000.0
+            total_volume += volume
+
         return {
-            'total_categories': len(self.categories),
-            'categories_with_dimensions': sum(1 for c in self.categories.values() if c.dimensions is not None),
-            'categories_with_weight': sum(1 for c in self.categories.values() if c.typical_weight > 0),
-            'categories_with_volume': sum(1 for c in self.categories.values() if c.typical_volume > 0),
+            'total': total,
+            'total_categories': total,
+            'avg_length': round(total_length / total, 1),
+            'avg_weight': round(total_weight / total, 2),
+            'total_volume_l': round(total_volume, 2),
+            'categories_with_dimensions': categories_with_dimensions,
+            'categories_with_weight': categories_with_weight,
+            'categories_with_volume': categories_with_volume,
         }
 
 
@@ -3310,126 +3360,6 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
     
     return configs
 
-# ============================================================================
-# БЛОК 9: API КОННЕКТОРЫ МАРКЕТПЛЕЙСОВ
-# ============================================================================
-class MarketplaceAPIConnector:
-    """Получение актуальных тарифов, остатков и заказов через официальные API."""
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Content-Type": "application/json",
-            "User-Agent": "AutoPartsUnitEconomicsPro/100.5"
-        })
-        self.logger = logging.getLogger('MarketplaceAPI')
-        self.cache = {}
-        self.cache_ttl = 3600
-    
-    def get_ozon_tariffs(self, api_key: str, client_id: str, category_id: int = 0) -> Dict[str, Any]:
-        url = "https://api-seller.ozon.ru/v1/finance/tariff-rates"
-        headers = {"Client-Id": client_id, "Api-Key": api_key}
-        cache_key = f"ozon_tariffs_{category_id}"
-        if cache_key in self.cache:
-            cached = self.cache[cache_key]
-            if time.time() - cached.get("timestamp", 0) < self.cache_ttl:
-                return cached.get("data", {})
-        try:
-            response = self.session.post(
-                url, json={"category_id": category_id}, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                self.cache[cache_key] = {
-                    "timestamp": time.time(),
-                    "data": {
-                        "source": "Ozon API Live",
-                        "timestamp": datetime.now().isoformat(),
-                        "raw_data": data
-                    }
-                }
-                return self.cache[cache_key]["data"]
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Ozon API Error: {e}")
-            return {}
-    
-    def get_ozon_stocks(self, api_key: str, client_id: str, limit: int = 100, last_id: str = "") -> Dict[str, Any]:
-        url = "https://api-seller.ozon.ru/v2/products/info/stocks"
-        headers = {"Client-Id": client_id, "Api-Key": api_key}
-        try:
-            response = self.session.post(
-                url, json={"limit": limit, "last_id": last_id}, headers=headers, timeout=30)
-            if response.status_code == 200:
-                return {"success": True, "data": response.json()}
-            return {"success": False, "error": f"HTTP {response.status_code}"}
-        except requests.exceptions.RequestException as e:
-            return {"success": False, "error": str(e)}
-    
-    def get_wildberries_tariffs(self, api_key: str, date: Optional[str] = None) -> Dict[str, Any]:
-        url = "https://common-api.wildberries.ru/tariffs/box"
-        headers = {"Authorization": api_key}
-        if date is None:
-            date = datetime.now().strftime("%Y-%m-%d")
-        params = {"date": date}
-        cache_key = f"wb_tariffs_{date}"
-        if cache_key in self.cache:
-            cached = self.cache[cache_key]
-            if time.time() - cached.get("timestamp", 0) < self.cache_ttl:
-                return cached.get("data", {})
-        try:
-            response = self.session.get(
-                url, headers=headers, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                self.cache[cache_key] = {
-                    "timestamp": time.time(),
-                    "data": {
-                        "source": "WB API Live",
-                        "timestamp": datetime.now().isoformat(),
-                        "data": data
-                    }
-                }
-                return self.cache[cache_key]["data"]
-            return {"success": False, "error": f"HTTP {response.status_code}"}
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"WB API Error: {e}")
-            return {"success": False, "error": str(e)}
-    
-    def get_wildberries_reports(self, api_key: str, date_from: str, date_to: str) -> Dict[str, Any]:
-        url = "https://statistics-api.wildberries.ru/api/v1/supplier/reportDetailByPeriod"
-        params = {"dateFrom": date_from, "dateTo": date_to}
-        headers = {"Authorization": api_key}
-        try:
-            response = self.session.get(
-                url, params=params, headers=headers, timeout=30)
-            if response.status_code == 200:
-                return {"success": True, "data": response.json()}
-            return {"success": False, "error": f"HTTP {response.status_code}"}
-        except requests.exceptions.RequestException as e:
-            return {"success": False, "error": str(e)}
-    
-    def get_yandex_market_campaigns(self, oauth_token: str) -> Dict[str, Any]:
-        url = "https://api.partner.market.yandex.ru/v2/campaigns"
-        headers = {"Authorization": f"OAuth {oauth_token}"}
-        try:
-            response = self.session.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                return {"success": True, "data": response.json()}
-            return {"success": False, "error": f"HTTP {response.status_code}"}
-        except requests.exceptions.RequestException as e:
-            return {"success": False, "error": str(e)}
-    
-    def get_yandex_market_tariffs(self, oauth_token: str, campaign_id: int) -> Dict[str, Any]:
-        url = f"https://api.partner.market.yandex.ru/v2/campaigns/{campaign_id}/deliveries/fees"
-        headers = {"Authorization": f"OAuth {oauth_token}"}
-        try:
-            response = self.session.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                return {"success": True, "data": response.json()}
-            return {"success": False, "error": f"HTTP {response.status_code}"}
-        except requests.exceptions.RequestException as e:
-            return {"success": False, "error": str(e)}
-# ============================================================================
-# БЛОК 8: МЕНЕДЖЕР ПАМЯТИ И ПРОИЗВОДИТЕЛЬНОСТИ
-# ============================================================================
 class PerformanceManager:
     """Управление ресурсами системы для оптимизации тяжелых расчетов"""
     def __init__(self):
@@ -5790,11 +5720,12 @@ class HighVolumeAutoPartsCatalog:
                 ).then(
                     pl.col('dimensions_str').cast(pl.Utf8)
                 ).otherwise(
-                    pl.concat_str([
+                    pl.concat_str(
                         pl.col('_length_str'), pl.lit('x'),
                         pl.col('_width_str'), pl.lit('x'),
-                        pl.col('_height_str')
-                    ], separator='')
+                        pl.col('_height_str'),
+                        separator=''
+                    )
                 )
             )
             
@@ -5816,12 +5747,13 @@ class HighVolumeAutoPartsCatalog:
             ])
             
             parts_df = parts_df.with_columns(
-                description=pl.concat_str([
+                description=pl.concat_str(
                     pl.lit('Артикул: '), pl.col('_artikul_str'),
                     pl.lit(', Бренд: '), pl.col('_brand_str'),
-                    pl.lit(', Кратность: '), pl.col(
-                        '_multiplicity_str'), pl.lit(' шт.')
-                ], separator='')
+                    pl.lit(', Кратность: '), pl.col('_multiplicity_str'),
+                    pl.lit(' шт.'),
+                    separator=''
+                )
             )
             
             parts_df = parts_df.drop(
@@ -12899,7 +12831,14 @@ def show_api_tariffs_interface():
                             t.join()
                             return result_container.get('res')
                         else:
-                            return asyncio.run(coro)
+                            new_loop = asyncio.new_event_loop()
+                            try:
+                                return new_loop.run_until_complete(coro)
+                            finally:
+                                try:
+                                    new_loop.close()
+                                except Exception:
+                                    pass
 
                     result = run_coro_sync(get_tariffs_via_api_async(
                         marketplace=marketplace,
