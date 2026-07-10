@@ -7165,7 +7165,6 @@ def show_data_upload_interface():
     if isinstance(val, str):
         val = val.strip()
 
-        # --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: ОБРАБОТКА ДАТ И СТРОК С / ---
         # Проверяем, содержит ли строка название месяца или символ /
         month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
                        'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
@@ -7199,6 +7198,7 @@ def show_data_upload_interface():
         return round(num, 2)
     except (ValueError, TypeError):
         return 0.0
+        
             # Применяем нормализацию к колонкам весогабаритов
             normalized_count = 0
             for col in dimension_cols:
