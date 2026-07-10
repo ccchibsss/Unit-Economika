@@ -7156,35 +7156,27 @@ def show_data_upload_interface():
     if pd.isna(val):
         return 0.0
 
-    # Если это дата (datetime) — сразу возвращаем 0
     if isinstance(val, (datetime, pd.Timestamp)):
         logger.warning(f"Обнаружена дата вместо числа: {val}")
         return 0.0
 
-    # Если это строка
     if isinstance(val, str):
         val = val.strip()
-
-        # Проверяем, содержит ли строка название месяца или символ /
         month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
                        'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
         
-        # Если это похоже на дату или содержит / (например "9,3/8,7/8,7")
         if any(month in val.lower() for month in month_names) or '/' in val:
-            # Ищем все числа в строке (включая десятичные дроби)
             numbers = re.findall(r'(\d+[.,]?\d*)', val.replace(',', '.'))
             if numbers:
                 try:
-                    # Берём ПЕРВОЕ найденное число
                     return round(float(numbers[0]), 2)
                 except (ValueError, TypeError):
                     return 0.0
             return 0.0
 
-        # Если это обычная строка с числом
         try:
             cleaned = val.replace(',', '.')
-            cleaned = re.sub(r'[^\d.]', '', cleaned)  # Убираем всё, кроме цифр и точек
+            cleaned = re.sub(r'[^\d.]', '', cleaned)
             if cleaned:
                 return round(float(cleaned), 2)
             return 0.0
@@ -7192,7 +7184,6 @@ def show_data_upload_interface():
             logger.warning(f"Не удалось преобразовать строку в число: {val}")
             return 0.0
 
-    # Если это число — просто округляем
     try:
         num = float(val)
         return round(num, 2)
