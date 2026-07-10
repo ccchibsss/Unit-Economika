@@ -118,6 +118,9 @@ from contextlib import contextmanager, closing, suppress, ExitStack
 from pathlib import Path, PurePath
 from abc import ABC, abstractmethod
 from multiprocessing import Pool, cpu_count
+
+# ====== Безопасный режим (отключает AI/тяжёлые C-расширения при запуске) ======
+SAFE_MODE = os.environ.get('UNIT_ECONOMY_SAFE_MODE', os.environ.get('UNIT_ECONOMY_SAFE', '0')).lower() in ('1', 'true', 'yes')
 import multiprocessing as mp
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -2080,7 +2083,14 @@ class PriceCalculator:
 @st.cache_resource
 def get_smart_tariff_cache():
     """Получение умного кэша тарифов"""
-    return SmartTariffCache()
+    if SAFE_MODE:
+        return SimpleSmartTariffCache()
+    try:
+        return SmartTariffCache()
+    except Exception as e:
+        logger = logging.getLogger('SmartTariffCache')
+        logger.warning(f"Не удалось инициализировать SmartTariffCache: {e}. Используется SimpleSmartTariffCache.")
+        return SimpleSmartTariffCache()
 
 
 class SmartTariffCache:
@@ -2101,6 +2111,29 @@ class SmartTariffCache:
         self._load_forecasts()
         logger.info(
             f"SmartTariffCache инициализирован: {len(self._cache)} записей")
+
+
+class SimpleSmartTariffCache:
+    """Лёгкий заглушечный кэш тарифов для безопасного режима (без файловых/сетевых операций)."""
+    def __init__(self):
+        self._cache: Dict[str, Any] = {}
+        self._history: List[Dict[str, Any]] = []
+
+    def get_statistics(self) -> Dict[str, Any]:
+        return {"count": 0, "entries": 0}
+
+    def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._history[-limit:]
+
+    def get(self, marketplace: str, category: Optional[str] = None):
+        return None
+
+    def set(self, marketplace: str, category: Optional[str], data: Dict[str, Any], source: Any = None):
+        key = f"{marketplace}::{category or 'all'}"
+        self._cache[key] = {"data": data, "source": getattr(source, 'value', str(source))}
+
+    def get_rates(self, marketplace: str, category: Optional[str] = None):
+        return None
 
     def _make_key(self, marketplace: str, category: Optional[str] = None) -> str:
         """Создание ключа кэша"""
@@ -3482,20 +3515,24 @@ class MarketplaceAPIConnector:
 @st.cache_resource
 def get_marketplace_unit_economics():
     """Получение экземпляра через st.cache_resource"""
-    return MarketplaceUnitEconomics()
+    return MarketplaceUnitEconomics(safe_mode=SAFE_MODE)
 
 
 class MarketplaceUnitEconomics:
     """Основной класс для расчета юнит-экономики."""
     
-    def __init__(self):
+    def __init__(self, safe_mode: bool = False):
         self._configs = self._load_marketplace_configs()
         self._categories = self._load_categories()
         self._cache = {}
         self._history = []
         self._stats = self._init_stats()
         self._settings = self._load_settings()
-        self._tariff_cache = get_smart_tariff_cache()
+        # Тарифный кэш: используем лёгкий заглушечный кэш в safe_mode
+        if safe_mode:
+            self._tariff_cache = SimpleSmartTariffCache()
+        else:
+            self._tariff_cache = get_smart_tariff_cache()
         self._ai_updater = None
         self._parallel_cache = {}
         # ✅ ИСПРАВЛЕНИЕ v100.11: Lock для потокобезопасного обновления статистики
@@ -4061,6 +4098,7 @@ class MarketplaceUnitEconomics:
         progress_callback: Optional[Callable] = None,
         max_workers: int = 4,
         chunk_size: int = 1000,
+        spill_to_disk: bool = True,
         tax_system: str = "УСН_6",
         ad_intensity: str = "medium"
     ) -> pd.DataFrame:
@@ -4084,6 +4122,7 @@ class MarketplaceUnitEconomics:
         chunks = [df[i:i + chunk_size] for i in range(0, len(df), chunk_size)]
         all_results = []
         all_errors = []  # ✅ ИСПРАВЛЕНИЕ v100.11: Собираем ошибки
+        temp_files: List[Path] = []
         total_futures = len(chunks) * len(marketplaces)
         completed = 0
         
@@ -4124,7 +4163,25 @@ class MarketplaceUnitEconomics:
                 for future in as_completed(futures):
                     try:
                         result_chunk, errors = future.result(timeout=120)
-                        all_results.extend(result_chunk)
+                        # Если включено сброс на диск — сохраняем каждый чанк в отдельный parquet
+                        if spill_to_disk and result_chunk:
+                            try:
+                                tmp_name = EXPORTS_DIR / f"ue_chunk_{uuid.uuid4().hex}.parquet"
+                                df_chunk = pd.DataFrame(result_chunk)
+                                # Convert nested objects (dict/list) to JSON strings for Parquet compatibility
+                                try:
+                                    for col in df_chunk.columns:
+                                        if df_chunk[col].apply(lambda x: isinstance(x, (dict, list))).any():
+                                            df_chunk[col] = df_chunk[col].apply(lambda x: json.dumps(x, ensure_ascii=False) if x is not None else None)
+                                except Exception:
+                                    pass
+                                df_chunk.to_parquet(tmp_name, index=False)
+                                temp_files.append(tmp_name)
+                            except Exception as e:
+                                logger.warning(f"Не удалось записать чанк в parquet: {e}")
+                                all_results.extend(result_chunk)
+                        else:
+                            all_results.extend(result_chunk)
                         all_errors.extend(errors)  # ✅ ИСПРАВЛЕНИЕ v100.11
                     except concurrent.futures.TimeoutError:
                         logger.error("Таймаут расчета чанка")
@@ -4156,8 +4213,39 @@ class MarketplaceUnitEconomics:
                 logger.warning(f"  - {err}")
         
         if not all_results:
+            # Если нет результатов в памяти, но есть temp_files — читаем их
+            if temp_files:
+                try:
+                    dfs = [pd.read_parquet(p) for p in temp_files]
+                    df_out = pd.concat(dfs, ignore_index=True)
+                except Exception as e:
+                    logger.error(f"Не удалось прочитать временные файлы: {e}")
+                    return pd.DataFrame()
+                finally:
+                    for p in temp_files:
+                        try:
+                            p.unlink()
+                        except Exception:
+                            pass
+                return df_out
             return pd.DataFrame()
-        
+        # Если есть временные файлы + in-memory результаты — объединяем
+        if temp_files and all_results:
+            try:
+                dfs = [pd.read_parquet(p) for p in temp_files]
+                dfs.append(pd.DataFrame(all_results))
+                df_out = pd.concat(dfs, ignore_index=True)
+            except Exception as e:
+                logger.error(f"Ошибка при объединении результатов: {e}")
+                df_out = pd.DataFrame(all_results)
+            finally:
+                for p in temp_files:
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+            return df_out
+
         return pd.DataFrame(all_results)
 
     # ✅ ИСПРАВЛЕНИЕ v100.11: Метод теперь возвращает (results, errors)
@@ -4826,6 +4914,37 @@ class MarketplaceUnitEconomics:
             return df.to_json(orient='records', force_ascii=False).encode('utf-8')
         else:
             raise ExportError(f"Формат {format.name} не поддерживается", format=format.name)
+
+
+def export_result_to_excel(result: UnitEconomicsResult) -> bytes:
+    """Экспорт одного результата расчёта в Excel с листом 'Результат' и 'Формулы'."""
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Результат'
+
+    data = result.to_dict()
+    # Пишем ключи и значения
+    for r, (k, v) in enumerate(data.items(), start=1):
+        ws.cell(row=r, column=1, value=k)
+        ws.cell(row=r, column=2, value=str(v))
+
+    # Лист с формулами / пояснениями
+    wf = wb.create_sheet('Формулы')
+    wf.cell(row=1, column=1, value='Поле')
+    wf.cell(row=1, column=2, value='Формула / Пояснение')
+    formulas = getattr(result, 'formulas', {}) or {}
+    r = 2
+    for k, f in formulas.items():
+        wf.cell(row=r, column=1, value=k)
+        wf.cell(row=r, column=2, value=f)
+        r += 1
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
 
     def get_tariff_cache_statistics(self) -> Dict[str, Any]:
         """Получение статистики кэша тарифов"""
@@ -8156,6 +8275,18 @@ def show_single_product_calculation():
                 pd.DataFrame(expenses_data),
                 key="ue_expenses_table"
             )
+
+            # Кнопка экспорта текущего результата
+            try:
+                excel_bytes = export_result_to_excel(economics)
+                st.download_button(
+                    label='⬇️ Скачать результат в Excel',
+                    data=excel_bytes,
+                    file_name=f'unit_economics_{economics.calculation_id}.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
+            except Exception as e:
+                logger.warning(f"Export button failed: {e}")
 
 
 # ============================================================================
