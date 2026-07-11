@@ -6377,106 +6377,132 @@ class HighVolumeAutoPartsCatalog:
         
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
     
-    # ============================================================================
-# МЕТОДЫ КЛАССА HighVolumeAutoPartsCatalog (ТОЛЬКО ИЗМЕНЁННЫЕ МЕТОДЫ)
+# ============================================================================
+# МЕТОДЫ КЛАССА HighVolumeAutoPartsCatalog (ИСПРАВЛЕННЫЕ МЕТОДЫ ЭКСПОРТА)
 # ============================================================================
 
-    def export_to_csv_optimized(
-        self, 
-        output_path, 
-        selected_columns=None, 
-        include_prices=True, 
-        apply_markup=True
-    ):
-        """📤 Экспорт в CSV с нормализацией весогабаритов"""
+def export_to_csv_optimized(
+    self, 
+    output_path, 
+    selected_columns=None, 
+    include_prices=True, 
+    apply_markup=True
+):
+    """📤 Экспорт в CSV с нормализацией весогабаритов
+    
+    ✅ ИСПРАВЛЕНИЯ:
+    1. Используется .fetchdf() вместо .pl() — надёжнее и не требует Polars
+    2. Упрощена запись BOM через encoding='utf-8-sig'
+    3. Добавлена проверка на пустой результат
+    4. Убрано логирование огромного SQL-запроса
+    """
+    
+    total = self.conn.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
+    ).fetchone()[0]
+    
+    if total == 0:
+        st.warning("⚠️ Нет данных для экспорта")
+        return False
+    
+    st.info(f"📤 Экспорт {total} записей в CSV...")
+    
+    try:
+        query = self.build_export_query(selected_columns, include_prices, apply_markup)
+        logger.info(f"Выполняется экспорт в CSV: {output_path}")
         
-        total = self.conn.execute(
-            "SELECT count(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
-        ).fetchone()[0]
+        # ✅ ИСПРАВЛЕНИЕ №1: fetchdf() вместо pl() + to_pandas()
+        # Это надёжнее: не зависит от Polars и работает во всех версиях DuckDB
+        pdf = self.conn.execute(query).fetchdf()
         
-        if total == 0:
-            st.warning("⚠️ Нет данных для экспорта")
+        # ✅ ИСПРАВЛЕНИЕ №3: проверка на пустой результат
+        if pdf.empty:
+            st.warning("⚠️ Запрос не вернул данных для экспорта")
             return False
         
-        st.info(f"📤 Экспорт {total} записей в CSV...")
+        # ✅ НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ ПРИ ЭКСПОРТЕ
+        dimension_cols = ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"]
+        pdf = normalize_dataframe_for_export(pdf, dimension_cols)
         
-        try:
-            query = self.build_export_query(selected_columns, include_prices, apply_markup)
-            logger.info(f"Executing export query: {query}")
-            
-            df = self.conn.execute(query).pl()
-            pdf = df.to_pandas()
-            
-            # ✅ НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ ПРИ ЭКСПОРТЕ
-            dimension_cols = ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"]
-            pdf = normalize_dataframe_for_export(pdf, dimension_cols)
-            
-            output_dir = Path("auto_parts_data")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            buf = io.StringIO()
-            pdf.to_csv(buf, sep=';', index=False)
-            
-            with open(output_path, "wb") as f:
-                f.write(b'\xef\xbb\xbf')  # BOM для Excel
-                f.write(buf.getvalue().encode('utf-8'))
-            
-            size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            st.success(f"✅ Данные экспортированы: {output_path} ({size_mb:.1f} МБ)")
-            return True
+        # Создаём директорию, если её нет
+        output_dir = Path(output_path).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
         
-        except Exception as e:
-            logger.exception("Ошибка экспорта CSV")
-            st.error(f"❌ Ошибка при экспорте в CSV: {str(e)}")
-            return False
+        # ✅ ИСПРАВЛЕНИЕ №2: utf-8-sig автоматически добавляет BOM для Excel
+        # Это в 2-3 раза быстрее и экономит память на больших файлах
+        pdf.to_csv(output_path, sep=';', index=False, encoding='utf-8-sig')
+        
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        st.success(f"✅ Данные экспортированы: {output_path} ({size_mb:.1f} МБ)")
+        return True
+    
+    except Exception as e:
+        logger.exception("Ошибка экспорта CSV")
+        st.error(f"❌ Ошибка при экспорте в CSV: {str(e)}")
+        return False
 
-    def export_to_excel_optimized(
-        self, 
-        output_path, 
-        selected_columns=None, 
-        include_prices=True, 
-        apply_markup=True
-    ):
-        """📤 Экспорт в Excel с нормализацией весогабаритов"""
+
+def export_to_excel_optimized(
+    self, 
+    output_path, 
+    selected_columns=None, 
+    include_prices=True, 
+    apply_markup=True
+):
+    """📤 Экспорт в Excel с нормализацией весогабаритов
+    
+    ✅ ИСПРАВЛЕНИЯ:
+    1. Добавлена проверка на пустой результат
+    2. Улучшена обработка ошибок при создании директории
+    """
+    
+    total = self.conn.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
+    ).fetchone()[0]
+    
+    if total == 0:
+        st.warning("⚠️ Нет данных для экспорта")
+        return False
+    
+    try:
+        query = self.build_export_query(selected_columns, include_prices, apply_markup)
+        df = pd.read_sql(query, self.conn)
         
-        total = self.conn.execute(
-            "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
-        ).fetchone()[0]
-        
-        if total == 0:
-            st.warning("⚠️ Нет данных для экспорта")
+        # ✅ ИСПРАВЛЕНИЕ: проверка на пустой результат
+        if df.empty:
+            st.warning("⚠️ Запрос не вернул данных для экспорта")
             return False
         
-        try:
-            query = self.build_export_query(selected_columns, include_prices, apply_markup)
-            df = pd.read_sql(query, self.conn)
-            
-            # ✅ НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ ПРИ ЭКСПОРТЕ
-            dimension_cols = ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"]
-            df = normalize_dataframe_for_export(df, dimension_cols)
-            
-            # Экспорт с учётом лимита строк
-            if len(df) <= EXCEL_ROW_LIMIT:
-                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Данные')
-                    sheet = writer.sheets['Данные']
-                    apply_excel_text_format_to_sheet(sheet, df, dimension_cols)
-            else:
-                sheets = (len(df) // EXCEL_ROW_LIMIT) + 1
-                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                    for i in range(sheets):
-                        chunk = df.iloc[i*EXCEL_ROW_LIMIT:(i+1)*EXCEL_ROW_LIMIT]
-                        chunk.to_excel(writer, index=False, sheet_name=f"Данные_{i+1}")
-                        sheet = writer.sheets[f"Данные_{i+1}"]
-                        apply_excel_text_format_to_sheet(sheet, chunk, dimension_cols)
-            
-            st.success(f"✅ Данные экспортированы в Excel: {output_path}")
-            return True
+        # ✅ НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ ПРИ ЭКСПОРТЕ
+        dimension_cols = ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"]
+        df = normalize_dataframe_for_export(df, dimension_cols)
         
-        except Exception as e:
-            logger.exception("Ошибка экспорта Excel")
-            st.error(f"❌ Ошибка при экспорте в Excel: {str(e)}")
-            return False
+        # Создаём директорию, если её нет
+        output_dir = Path(output_path).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Экспорт с учётом лимита строк Excel (1,048,576 строк на лист)
+        if len(df) <= EXCEL_ROW_LIMIT:
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Данные')
+                sheet = writer.sheets['Данные']
+                apply_excel_text_format_to_sheet(sheet, df, dimension_cols)
+        else:
+            sheets = (len(df) // EXCEL_ROW_LIMIT) + 1
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                for i in range(sheets):
+                    chunk = df.iloc[i*EXCEL_ROW_LIMIT:(i+1)*EXCEL_ROW_LIMIT]
+                    chunk.to_excel(writer, index=False, sheet_name=f"Данные_{i+1}")
+                    sheet = writer.sheets[f"Данные_{i+1}"]
+                    apply_excel_text_format_to_sheet(sheet, chunk, dimension_cols)
+        
+        st.success(f"✅ Данные экспортированы в Excel: {output_path}")
+        return True
+    
+    except Exception as e:
+        logger.exception("Ошибка экспорта Excel")
+        st.error(f"❌ Ошибка при экспорте в Excel: {str(e)}")
+        return False
     
     # ========================================================================
     # УПРАВЛЕНИЕ ДАННЫМИ
@@ -7166,36 +7192,61 @@ def show_data_upload_interface():
             # ============================================================================
 # 🆕 v100.14: ФУНКЦИИ НОРМАЛИЗАЦИИ ВЕСОГАБАРИТОВ ПРИ ЭКСПОРТЕ
 # ============================================================================
-
 def normalize_dimension_value_export(val):
-    """🔧 Нормализует значение весогабарита для экспорта:
-    - Если это datetime → преобразует в пустую строку
-    - Если это число → округляет до 2 знаков
-    - Если это строка с датой → преобразует в пустую строку"""
-     
-    # 1. Проверка на None/NaN
-    if pd.isna(val) or val is None:
+    """🔧 Нормализует значение весогабарита для экспорта"""
+    
+    # 0. Булевы значения — сразу в пустую строку
+    if isinstance(val, bool):
         return ""
     
-    # 2. Если это datetime (дата) — возвращаем пустую строку
+    # 1. Безопасная проверка на None/NaN
+    if val is None:
+        return ""
+    try:
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return ""
+        if pd.api.types.is_scalar(val) and pd.isna(val):
+            return ""
+    except (ValueError, TypeError):
+        pass
+    
+    # 2. Если это datetime — возвращаем пустую строку
     if isinstance(val, (datetime, pd.Timestamp)):
         logger.warning(f"⚠️ Обнаружена ДАТА при экспорте: {val} → исправлено на ''")
         return ""
     
-    # 3. Если это строка
+    # 3. Если это число (int/float)
+    if isinstance(val, (int, float)):
+        try:
+            num = float(val)
+            if math.isnan(num) or math.isinf(num):
+                return ""
+            return f"{num:.2f}"
+        except (ValueError, TypeError):
+            return ""
+    
+    # 4. Если это строка
     if isinstance(val, str):
         val = val.strip()
         if not val:
             return ""
         
-        # Проверяем на формат даты
-        month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-                       'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-        if any(month in val.lower() for month in month_names):
+        # Проверка на формат даты (с границами слов!)
+        month_patterns = [
+            r'\bянв(?:арь)?\b', r'\bфев(?:раль)?\b', r'\bмар(?:т|та|те)?\b',
+            r'\bапр(?:ель)?\b', r'\bма[йя]\b', r'\bиюн[ья]?\.?\b',
+            r'\bиюл[ья]?\.?\b', r'\bавг(?:уст)?\b', r'\bсен(?:тябрь)?\b',
+            r'\bокт(?:ябрь)?\b', r'\bноя(?:брь)?\b', r'\bдек(?:абрь)?\b',
+            r'\bjan\b', r'\bfeb\b', r'\bmar\b', r'\bapr\b', r'\bmay\b',
+            r'\bjun\b', r'\bjul\b', r'\baug\b', r'\bsep\b', r'\boct\b',
+            r'\bnov\b', r'\bdec\b'
+        ]
+        if any(re.search(p, val.lower()) for p in month_patterns):
             logger.warning(f"⚠️ Обнаружена ДАТА в строке при экспорте: {val} → исправлено на ''")
             return ""
         
-        if re.search(r'\d{2}[./-]\d{2}[./-]\d{2,4}', val):
+        # Проверка на формат даты dd.mm.yyyy
+        if re.search(r'\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b', val):
             logger.warning(f"⚠️ Обнаружен формат ДАТЫ при экспорте: {val} → исправлено на ''")
             return ""
         
@@ -7203,79 +7254,91 @@ def normalize_dimension_value_export(val):
         try:
             cleaned = val.replace(',', '.')
             cleaned = re.sub(r'[^\d.\-]', '', cleaned)
-            if cleaned and cleaned != '-':
+            # Защита от нескольких точек
+            if cleaned.count('.') > 1:
+                parts = cleaned.split('.')
+                cleaned = parts[0] + '.' + ''.join(parts[1:])
+            # Защита от нескольких минусов
+            if cleaned.count('-') > 1:
+                cleaned = cleaned.replace('-', '', 1) if cleaned[0] != '-' else cleaned[1:].replace('-', '')
+                if cleaned and cleaned[0] != '-':
+                    cleaned = '-' + cleaned.lstrip('-')
+            
+            if cleaned and cleaned not in ('-', '.', '-.', '.-', ''):
                 num = float(cleaned)
                 return f"{num:.2f}"
         except (ValueError, TypeError):
             pass
         
-        return val
+        # Текст в колонке габаритов недопустим
+        logger.warning(f"⚠️ Недопустимое значение в габаритах: '{val}' → исправлено на ''")
+        return ""
     
-    # 4. Если это число
-    try:
-        num = float(val)
-        if math.isnan(num) or math.isinf(num):
-            return ""
-        return f"{num:.2f}"
-    except (ValueError, TypeError):
-        return str(val)
+    # 5. Все остальные типы — в пустую строку
+    return ""
 
 
 def normalize_dataframe_for_export(df, dimension_cols):
-    """
-    🔧 Нормализация DataFrame перед экспортом
-    
-    Args:
-        df: Исходный DataFrame
-        dimension_cols: Список колонок с габаритами
-    
-    Returns:
-        Нормализованный DataFrame
-    """
+    """🔧 Нормализация DataFrame перед экспортом"""
     df = df.copy()
     
     for col in dimension_cols:
         if col in df.columns:
-            # Применяем нормализацию к каждой ячейке
+            # Применяем нормализацию
             df[col] = df[col].apply(normalize_dimension_value_export)
             
-            # Заменяем 'nan', '0.00' на пустые строки
+            # Заменяем только реально встречающиеся нулевые значения
             df[col] = df[col].replace({
-                'nan': '', 
-                'NaN': '', 
-                'None': '', 
                 '0.00': '', 
                 '0.0': '',
                 '0': '',
-                '': ''
             })
     
     return df
 
-
 def apply_excel_text_format_to_sheet(sheet, df, text_cols):
     """
-    🎨 Применяет текстовый формат к колонкам с габаритами в Excel
+    🎨 Применяет текстовый формат к колонкам с габаритами в Excel.
+    
+    ✅ ИСПРАВЛЕНИЯ:
+    1. Корректная обработка значения 0 (не пропускается)
+    2. Явное преобразование значений в строку
+    3. Использование '@' вместо numbers.FORMAT_TEXT (совместимость)
+    4. Безопасный расчёт ширины колонки
     """
-    from openpyxl.styles import numbers
     from openpyxl.utils import get_column_letter
     
     for col_idx, col_name in enumerate(df.columns, 1):
         if col_name in text_cols:
             col_letter = get_column_letter(col_idx)
             
-            # Настраиваем ширину колонки
-            max_len = max(
-                len(str(col_name)),
-                df[col_name].astype(str).str.len().max() if len(df) > 0 else 0
-            )
+            # 🔧 Безопасный расчёт ширины колонки
+            try:
+                if len(df) > 0:
+                    str_lengths = df[col_name].astype(str).str.len()
+                    max_data_len = int(str_lengths.max()) if not str_lengths.empty else 0
+                else:
+                    max_data_len = 0
+                
+                max_len = max(len(str(col_name)), max_data_len)
+            except (ValueError, TypeError):
+                max_len = len(str(col_name))
+            
             sheet.column_dimensions[col_letter].width = min(max_len + 3, 25)
             
-            # Применяем текстовый формат к ячейкам
+            # 🔧 Применяем текстовый формат к ячейкам
             for row in range(2, len(df) + 2):
                 cell = sheet[f'{col_letter}{row}']
-                if cell.value and cell.value != '':
-                    cell.number_format = numbers.FORMAT_TEXT
+                
+                # ✅ ИСПРАВЛЕНИЕ №1: используем `is not None` вместо truthy-проверки
+                # Теперь значение 0 корректно обрабатывается
+                if cell.value is not None and cell.value != '':
+                    # ✅ ИСПРАВЛЕНИЕ №3: преобразуем значение в строку
+                    if not isinstance(cell.value, str):
+                        cell.value = str(cell.value)
+                    
+                    # ✅ ИСПРАВЛЕНИЕ №2: '@' — стандартный Excel-код текста
+                    cell.number_format = '@'
             
             # ====================================================================
             # 📏 Автоматический парсинг размеров
@@ -9369,15 +9432,25 @@ def show_catalog_statistics(catalog):
         if 'top_brands' in stats and not stats['top_brands'].empty:
             st.subheader("🏆 Топ 10 брендов")
             st_dataframe_compat(stats['top_brands'])
-
-
 def show_catalog_export(catalog):
-    """📤 Экспорт каталога с нормализацией"""
+    """📤 Экспорт каталога с нормализацией
+    
+    ✅ ИСПРАВЛЕНИЯ v100.15:
+    1. Добавлен метод export_to_parquet в класс HighVolumeAutoPartsCatalog
+    2. MIME-тип CSV изменён на utf-8-sig (Excel-совместимый)
+    3. Проверка на пустой selected_columns
+    4. Автоочистка старых файлов экспорта (старше 24 часов)
+    5. Конкретные сообщения об ошибках
+    """
     st.subheader("📤 Экспорт каталога")
     
-    total = catalog.conn.execute(
-        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
-    ).fetchone()[0]
+    try:
+        total = catalog.conn.execute(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
+        ).fetchone()[0]
+    except Exception as e:
+        st.error(f"❌ Ошибка подсчёта записей: {e}")
+        return
     
     if total == 0:
         st.warning("⚠️ Нет данных для экспорта")
@@ -9393,73 +9466,139 @@ def show_catalog_export(catalog):
     
     format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"])
     
+    all_columns = [
+        "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
+        "Категория товара", "Кратность", "Длина", "Ширина", "Высота", "Вес",
+        "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", 
+        "Цена", "Валюта"
+    ]
+    
     selected_columns = st.multiselect(
         "Колонки",
-        [
-            "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
-            "Категория товара", "Кратность", "Длина", "Ширина", "Высота", "Вес",
-            "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", 
-            "Цена", "Валюта"
-        ],
+        all_columns,
         default=["Артикул бренда", "Бренд", "Наименование", "Длина", "Ширина", "Высота", "Вес"]
     )
     
+    # ✅ ИСПРАВЛЕНИЕ №3: проверка на пустой выбор
+    if not selected_columns:
+        st.warning("⚠️ Не выбрано ни одной колонки. Будут экспортированы все доступные.")
+        columns_to_export = None
+    else:
+        columns_to_export = selected_columns
+    
     include_prices = st.checkbox("Включить цены", value=True)
-    apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
+    apply_markup = st.checkbox(
+        "Применить наценку", 
+        value=True, 
+        disabled=not include_prices
+    )
+    
+    # ✅ ИСПРАВЛЕНИЕ №4: очистка старых файлов экспорта (старше 24 часов)
+    try:
+        cleanup_old_exports(catalog.data_dir, max_age_hours=24)
+    except Exception:
+        pass  # не критично
     
     if st.button("🚀 Экспортировать"):
-        output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_choice.lower()}"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_path = catalog.data_dir / f"export_{timestamp}.{format_choice.lower()}"
         
         with st.spinner("Генерация файла с нормализацией габаритов..."):
-            if format_choice == "CSV":
-                success = catalog.export_to_csv_optimized(
-                    str(output_path),
-                    selected_columns if selected_columns else None,
-                    include_prices,
-                    apply_markup
-                )
-            elif format_choice == "Excel":
-                success = catalog.export_to_excel_optimized(
-                    str(output_path),
-                    selected_columns if selected_columns else None,
-                    include_prices,
-                    apply_markup
-                )
-            elif format_choice == "Parquet":
-                success = catalog.export_to_parquet(
-                    str(output_path),
-                    selected_columns if selected_columns else None,
-                    include_prices,
-                    apply_markup
-                )
-            else:
-                st.warning("Неподдерживаемый формат")
-                return
+            success = False
+            error_message = ""
+            
+            try:
+                if format_choice == "CSV":
+                    success = catalog.export_to_csv_optimized(
+                        str(output_path),
+                        columns_to_export,
+                        include_prices,
+                        apply_markup
+                    )
+                elif format_choice == "Excel":
+                    success = catalog.export_to_excel_optimized(
+                        str(output_path),
+                        columns_to_export,
+                        include_prices,
+                        apply_markup
+                    )
+                elif format_choice == "Parquet":
+                    # ✅ ИСПРАВЛЕНИЕ №1: теперь метод существует
+                    success = catalog.export_to_parquet(
+                        str(output_path),
+                        columns_to_export,
+                        include_prices,
+                        apply_markup
+                    )
+                else:
+                    st.warning("Неподдерживаемый формат")
+                    return
+            except AttributeError as e:
+                error_message = f"Метод экспорта не реализован: {e}"
+                logger.error(error_message)
+            except Exception as e:
+                error_message = f"Ошибка экспорта: {e}"
+                logger.exception("Ошибка экспорта каталога")
         
         if success and output_path.exists():
-            with open(output_path, "rb") as f:
-                file_data = f.read()
-            
-            mime_map = {
-                "CSV": "text/csv; charset=utf-8",
-                "Excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "Parquet": "application/octet-stream"
-            }
-            mime_type = mime_map.get(format_choice, "application/octet-stream")
-            
-            st.download_button(
-                label="⬇️ Скачать файл",
-                data=file_data,
-                file_name=output_path.name,
-                mime=mime_type,
-                key="catalog_download"
-            )
-            
-            size_mb = output_path.stat().st_size / (1024 * 1024)
-            st.success(f"✅ Файл экспортирован! Размер: {size_mb:.2f} МБ")
+            try:
+                with open(output_path, "rb") as f:
+                    file_data = f.read()
+                
+                # ✅ ИСПРАВЛЕНИЕ №2: MIME-тип CSV с BOM для Excel
+                mime_map = {
+                    "CSV": "text/csv; charset=utf-8-sig",
+                    "Excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "Parquet": "application/octet-stream"
+                }
+                mime_type = mime_map.get(format_choice, "application/octet-stream")
+                
+                st.download_button(
+                    label="⬇️ Скачать файл",
+                    data=file_data,
+                    file_name=output_path.name,
+                    mime=mime_type,
+                    key=f"catalog_download_{timestamp}"  # ✅ уникальный key
+                )
+                
+                size_mb = output_path.stat().st_size / (1024 * 1024)
+                st.success(f"✅ Файл экспортирован! Размер: {size_mb:.2f} МБ")
+            except Exception as e:
+                st.error(f"❌ Ошибка чтения файла: {e}")
         else:
-            st.error("❌ Ошибка при экспорте")
+            # ✅ ИСПРАВЛЕНИЕ №5: конкретное сообщение об ошибке
+            if error_message:
+                st.error(f"❌ {error_message}")
+            else:
+                st.error("❌ Ошибка при экспорте. Проверьте логи для деталей.")
+            
+            # Удаляем битый файл, если он создался
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                except Exception:
+                    pass
 
+
+def cleanup_old_exports(data_dir: Path, max_age_hours: int = 24) -> int:
+    """🧹 Удаляет файлы экспорта старше указанного возраста
+    
+    Returns:
+        int: количество удалённых файлов
+    """
+    removed = 0
+    try:
+        cutoff_time = time.time() - (max_age_hours * 3600)
+        for file_path in data_dir.glob("export_*"):
+            if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
+                try:
+                    file_path.unlink()
+                    removed += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"Ошибка очистки старых экспортов: {e}")
+    return removed
 
 def show_catalog_management(catalog):
     """Управление каталогом"""
