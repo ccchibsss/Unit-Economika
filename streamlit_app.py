@@ -9904,11 +9904,11 @@ class SmartTariffLoader:
         
         return result
     
-    def _load_hybrid(self, marketplace: str, api_key: str, 
-                     client_id: str, result: Dict, force_refresh: bool) -> Dict:
-        """
-        Гибридный режим: сначала API, если нет — AI, если нет — кэш
-        """
+    def _load_hybrid(self, marketplace: str, api_key: str,
+                 client_id: str, result: Dict, force_refresh: bool) -> Dict:
+    """
+    Гибридный режим: сначала API, если нет - AI, если нет - кэш
+    """
         result["source_used"] = "Hybrid"
         result["warnings"].append("🔄 Используется гибридный режим загрузки")
         
