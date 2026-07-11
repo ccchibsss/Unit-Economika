@@ -10337,7 +10337,7 @@ class CategoryDimensionsDB:
     
     def import_from_excel(self, file_path: str) -> Dict[str, Any]:
         """
-         Импорт категорий из Excel файла
+        Импорт категорий из Excel файла
         
         Ожидаемые колонки:
         - Категория (обязательно)
@@ -10466,7 +10466,7 @@ class CategoryDimensionsDB:
             df.to_excel(file_path, index=False, engine='openpyxl')
             return True
         except Exception as e:
-            self.logger.error(f" Ошибка экспорта: {e}")
+            self.logger.error(f"❌ Ошибка экспорта: {e}")
             return False
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -10520,7 +10520,7 @@ def show_category_dimensions_interface():
     # Меню
     menu = st.sidebar.radio(
         "🧭 Меню",
-        ["📥 Загрузка из Excel", "➕ Добавить вручную", "📋 Список категорий", " Экспорт", "📊 Статистика"],
+        ["📥 Загрузка из Excel", "➕ Добавить вручную", "📋 Список категорий", "📤 Экспорт", "📊 Статистика"],
         key="category_menu"
     )
     
@@ -10593,7 +10593,7 @@ def show_category_upload(db: CategoryDimensionsDB):
                 st.rerun()
             else:
                 st.error("❌ Ошибка импорта")
-                with st.expander(" Показать ошибки"):
+                with st.expander("❌ Показать ошибки"):
                     for error in result["errors"]:
                         st.error(error)
         
@@ -10677,7 +10677,7 @@ def show_category_add_manual(db: CategoryDimensionsDB):
         )
         
         unit = st.selectbox(
-            " Единица длины",
+            "📏 Единица длины",
             ["см", "мм", "м"],
             key="category_unit"
         )
@@ -10714,7 +10714,7 @@ def show_category_list(db: CategoryDimensionsDB):
     categories = db.get_all_categories()
     
     if not categories:
-        st.info("️ Категории не добавлены")
+        st.info("ℹ️ Категории не добавлены")
         return
     
     st.info(f"📊 Всего категорий: {len(categories)}")
@@ -10800,7 +10800,7 @@ def show_category_stats(db: CategoryDimensionsDB):
     stats = db.get_statistics()
     
     if stats.get('total', 0) == 0:
-        st.info("️ Нет данных для статистики")
+        st.info("ℹ️ Нет данных для статистики")
         return
     
     col1, col2, col3, col4 = st.columns(4)
@@ -10919,6 +10919,8 @@ def validate_dimensions_with_category(
             result["warnings"].append(f"⚠️ Категория '{category}' не найдена в базе")
     
     return result
+
+
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
@@ -10944,7 +10946,7 @@ def main():
             "📏 Категории с весогабаритами",  # ✅ НОВЫЙ РАЗДЕЛ
             "🤖 AI Тарифы",
             "🌐 API Тарифы маркетплейсов",
-            " Умная загрузка тарифов"
+            "🧠 Умная загрузка тарифов"       # ✅ ИСПРАВЛЕНО: добавлен эмодзи и убран лишний пробел
         ],
         key="main_navigation"
     )
