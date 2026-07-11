@@ -3040,6 +3040,11 @@ class ProfessionalExcelExporter:
                           index=False, startrow=1)
         
         ws = writer.sheets[sheet_name]
+        apply_excel_text_format_to_sheet(
+            ws,
+            df_export,
+            ["Оплач. вес", "Точка безубыт.", "Мин. цена рек."],
+        )
         
         header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
         header_font = Font(bold=True, color="FFFFFF", size=10)
@@ -6432,16 +6437,33 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df[col] = df[col].astype(str).replace(
                     {r'^nan$': '', r'^0\.0$': '', r'^0$': ''}, regex=True)
+
+        df = normalize_dataframe_for_excel_export(
+            df,
+            ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"],
+        )
         
         if len(df) <= EXCEL_ROW_LIMIT:
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False)
+                sheet = writer.sheets['Sheet1']
+                apply_excel_text_format_to_sheet(
+                    sheet,
+                    df,
+                    ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"],
+                )
         else:
             sheets = (len(df) // EXCEL_ROW_LIMIT) + 1
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                 for i in range(sheets):
-                    df.iloc[i*EXCEL_ROW_LIMIT:(i+1)*EXCEL_ROW_LIMIT].to_excel(
-                        writer, index=False, sheet_name=f"Данные_{i+1}")
+                    chunk = df.iloc[i*EXCEL_ROW_LIMIT:(i+1)*EXCEL_ROW_LIMIT]
+                    chunk.to_excel(writer, index=False, sheet_name=f"Данные_{i+1}")
+                    sheet = writer.sheets[f"Данные_{i+1}"]
+                    apply_excel_text_format_to_sheet(
+                        sheet,
+                        chunk,
+                        ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"],
+                    )
         
         return True
     
