@@ -11,7 +11,7 @@
 ПРАВИЛЬНЫЙ ПОРЯДОК ЧТЕНИЯ CSV (UTF-8 приоритет)
 ОБЪЁМНЫЙ ВЕС ДЛЯ ТОЧНОЙ ЛОГИСТИКИ
 ПРОГРЕССИВНАЯ СТОИМОСТЬ ХРАНЕНИЯ
-РЕАЛЬНЫЕ ВОЗВРАТЫ С ОБРАТНОЙ ЛОГИСТИКОЙ
+РЕАЛЬНЫЕ ВОЗВРАТЫ С ОБРАТНОЙ ЛОГИСТИКОЙа
 СПЕЦИФИЧЕСКИЕ РАСХОДЫ АВТОЗАПЧАСТЕЙ
 УЧЁТ СКИДОК И АКЦИЙ В КОМИССИЯХ
 РЕКЛАМНЫЕ РАСХОДЫ (ДРР)
@@ -1621,8 +1621,8 @@ def normalize_key_for_match(value: str) -> str:
 # ============================================================================
 # ФУНКЦИЯ РАСЧЕТА РЕКОМЕНДУЕМОЙ МИНИМАЛЬНОЙ ЦЕНЫ
 # ============================================================================
-def calculate_recommended_min_price():
-    cost: float,
+def calculate_recommended_min_price(
+        cost: float,
     commission_rate: float,
     logistics: float,
     storage_cost: float,
@@ -2203,8 +2203,8 @@ class PriceCalculator:
         self.config = marketplace_config
         self.logger = logging.getLogger('PriceCalculator')
 
-    def calculate_retail_price():
-        self,
+    def calculate_retail_price(
+            self,
         purchase_price: float,
         desired_margin: float = 30.0,
         weight: float = 1.0,
@@ -2284,8 +2284,8 @@ class PriceCalculator:
             "profit": money_round(retail_price - purchase_price - fixed_costs - retail_price * variable_ratio)
         }
 
-    def calculate_margin_at_price():
-        self,
+    def calculate_margin_at_price(
+            self,
         retail_price: float,
         purchase_price: float,
         weight: float = 1.0,
@@ -2324,8 +2324,8 @@ class PriceCalculator:
             "logistics": money_round(logistics)
         }
 
-    def find_optimal_price():
-        self,
+    def find_optimal_price(
+            self,
         purchase_price: float,
         target_margin: float = 30.0,
         weight: float = 1.0,
@@ -2908,8 +2908,8 @@ class PersistentHistoryDB:
         except Exception as e:
             logger.warning(f"Ошибка миграции: {e}")
 
-    def save_calculation():
-        self,
+    def save_calculation(
+            self,
         result: 'UnitEconomicsResult',
         article: str = "",
         brand: str = ""
@@ -3135,8 +3135,8 @@ class ProfessionalExcelExporter:
             bottom=Side(style='thin', color=self.COLORS["border"])
         )
 
-    def export_unit_economics():
-        self,
+    def export_unit_economics(
+            self,
         df: pd.DataFrame,
         output_path: str,
         metadata: Dict = None
@@ -4634,8 +4634,8 @@ class PriceCalculator:
         self.config = marketplace_config
         self.logger = logging.getLogger('PriceCalculator')
 
-    def calculate_retail_price():
-        self,
+    def calculate_retail_price(
+            self,
         purchase_price: float,
         desired_margin: float = 30.0,
         weight: float = 1.0,
@@ -4725,8 +4725,8 @@ class PriceCalculator:
             )
         }
 
-    def calculate_margin_at_price():
-        self,
+    def calculate_margin_at_price(
+            self,
         retail_price: float,
         purchase_price: float,
         weight: float = 1.0,
@@ -4771,8 +4771,8 @@ class PriceCalculator:
             "logistics": money_round(logistics)
         }
 
-    def find_optimal_price():
-        self,
+    def find_optimal_price(
+            self,
         purchase_price: float,
         target_margin: float = 30.0,
         weight: float = 1.0,
@@ -5385,8 +5385,8 @@ class DeepSeekRateUpdater:
 
         return base_prompt
 
-    def _call_ai_api():
-        self,
+    def _call_ai_api(
+            self,
         prompt: str
     ) -> Tuple[Optional[Dict], Optional[Dict]]:
         """Вызов DeepSeek API"""
@@ -5467,8 +5467,8 @@ class DeepSeekRateUpdater:
 
         return forecast
 
-    def update_all_marketplaces():
-        self,
+    def update_all_marketplaces(
+            self,
         force_refresh: bool = False,
         include_forecast: bool = False
     ) -> Dict[str, Tuple[Optional[Dict], TariffSource, Optional[Dict]]]:
@@ -5607,8 +5607,8 @@ class CatalogEnhancer:
                     self.cross_index[(artikul, brand)].append(oe)
                     self.oe_to_parts[oe].append((artikul, brand))
 
-    def get_analog_data():
-        self,
+    def get_analog_data(
+            self,
         artikul: str,
         brand: str,
         max_analogs: int = 20
@@ -5776,8 +5776,8 @@ class MarketplaceAPIConnector:
         self.cache = {}
         self.cache_ttl = 3600
 
-    def get_ozon_tariffs():
-        self,
+    def get_ozon_tariffs(
+            self,
         api_key: str,
         client_id: str,
         category_id: int = 0
@@ -5871,8 +5871,8 @@ class MarketplaceAPIConnector:
                 "error": f"Неожиданная ошибка: {str(e)}"
             }
 
-    def get_wildberries_tariffs():
-        self,
+    def get_wildberries_tariffs(
+            self,
         api_key: str,
         date: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -5976,8 +5976,8 @@ class MarketplaceAPIConnector:
                 "error": f"Неожиданная ошибка: {str(e)}"
             }
 
-    def get_yandex_market_campaigns():
-        self,
+    def get_yandex_market_campaigns(
+            self,
         oauth_token: str
     ) -> Dict[str, Any]:
         """Получение списка кампаний Яндекс Маркет"""
@@ -6235,8 +6235,8 @@ class MarketplaceUnitEconomics:
                 return None
         return self._ai_updater
 
-    def get_tariff_forecast():
-        self,
+    def get_tariff_forecast(
+            self,
         marketplace: str,
         category: str = None,
         months_ahead: int = 3
@@ -6246,8 +6246,8 @@ class MarketplaceUnitEconomics:
             return None
         return updater.get_tariff_forecast(marketplace, category, months_ahead)
 
-    def refresh_tariffs_from_ai():
-        self,
+    def refresh_tariffs_from_ai(
+            self,
         marketplace: Optional[str] = None,
         category: Optional[str] = None,
         force: bool = True,
@@ -6331,8 +6331,8 @@ class MarketplaceUnitEconomics:
         self._logger.info(f"✅ AI-тарифы применены для {marketplace}")
 
     @timer_decorator
-    def calculate_unit_economics():
-        self,
+    def calculate_unit_economics(
+            self,
         price: float,
         cost: float,
         marketplace: str,
@@ -6607,8 +6607,8 @@ class MarketplaceUnitEconomics:
     # Теперь используется только _calculate_chunk_threadsafe()
 
     @timer_decorator
-    def calculate_for_catalog_batch_parallel():
-        self,
+    def calculate_for_catalog_batch_parallel(
+            self,
         df: pd.DataFrame,
         price_col: str = "Цена",
         cost_col: str = "Себестоимость",
@@ -6735,8 +6735,8 @@ class MarketplaceUnitEconomics:
         return pd.DataFrame(all_results)
 
     # ИСПРАВЛЕНИЕ v100.11: Метод теперь возвращает (results, errors)
-    def _calculate_chunk_threadsafe():
-        self,
+    def _calculate_chunk_threadsafe(
+            self,
         chunk_df: pd.DataFrame,
         marketplace: str,
         operation_mode: str = "FBS",
@@ -6834,8 +6834,8 @@ class MarketplaceUnitEconomics:
         return results, errors
 
     @timer_decorator
-    def calculate_for_catalog_batch():
-        self,
+    def calculate_for_catalog_batch(
+            self,
         df: pd.DataFrame,
         price_col: str = "Цена",
         cost_col: str = "Себестоимость",
@@ -8161,8 +8161,8 @@ class HighVolumeAutoPartsCatalog:
             else "SELECT NULL AS brand, NULL AS markup LIMIT 0"
         )
 
-    def build_export_query():
-        self,
+    def build_export_query(
+            self,
         selected_columns=None,
         include_prices=True,
         apply_markup=True
@@ -8467,8 +8467,8 @@ class HighVolumeAutoPartsCatalog:
     # ========================================================================
     # МЕТОДЫ ЭКСПОРТА (ИСПРАВЛЕННЫЕ)
     # ========================================================================
-    def export_to_csv_optimized():
-        self,
+    def export_to_csv_optimized(
+            self,
         output_path,
         selected_columns=None,
         include_prices=True,
@@ -8582,8 +8582,8 @@ class HighVolumeAutoPartsCatalog:
             st.error(f"❌ Ошибка при экспорте в Excel: {str(e)}")
             return False
 
-    def export_to_parquet():
-        self,
+    def export_to_parquet(
+            self,
         output_path,
         selected_columns=None,
         include_prices=True,
@@ -9088,8 +9088,8 @@ class HighVolumeAutoPartsCatalog:
             st.subheader("Топ 10 брендов")
             st_dataframe_compat(stats['top_brands'])
 
-    def merge_all_data_parallel():
-        self,
+    def merge_all_data_parallel(
+            self,
         file_paths: Dict[str, str],
         max_workers: int = 4
     ) -> Dict[str, pl.DataFrame]:
@@ -9315,8 +9315,8 @@ class AdvancedDimensionsValidator:
         }
 
     @staticmethod
-    def validate_and_normalize_row():
-        row: pd.Series,
+    def validate_and_normalize_row(
+            row: pd.Series,
         length_col: Optional[str] = None,
         width_col: Optional[str] = None,
         height_col: Optional[str] = None,
@@ -10338,8 +10338,8 @@ class SuperProExcelExporter:
             logger.error(traceback.format_exc())
             return False
 
-    def _write_dashboard_super():
-        self,
+    def _write_dashboard_super(
+            self,
         workbook,
         df: pd.DataFrame,
         metadata: Dict
@@ -11287,8 +11287,8 @@ class SuperProExcelExporter:
         ws.set_column('B:D', 30)
         return ws
 
-    def _write_export_summary():
-        self,
+    def _write_export_summary(
+            self,
         workbook,
         df: pd.DataFrame,
         metadata: Dict
@@ -11589,8 +11589,8 @@ class SuperProExcelExporter:
             logger.error(traceback.format_exc())
             return False
 
-    def _write_dashboard_super():
-        self,
+    def _write_dashboard_super(
+            self,
         workbook,
         df: pd.DataFrame,
         metadata: Dict
@@ -12538,8 +12538,8 @@ class SuperProExcelExporter:
         ws.set_column('B:D', 30)
         return ws
 
-    def _write_export_summary():
-        self,
+    def _write_export_summary(
+            self,
         workbook,
         df: pd.DataFrame,
         metadata: Dict
@@ -14126,8 +14126,8 @@ class SmartTariffLoader:
 
         return result
 
-    def _load_from_ai():
-        self,
+    def _load_from_ai(
+            self,
         marketplace: str,
         result: Dict,
         force_refresh: bool
@@ -14197,8 +14197,8 @@ class SmartTariffLoader:
 
         return result
 
-    def _load_hybrid():
-        self,
+    def _load_hybrid(
+            self,
         marketplace: str,
         api_key: str,
         client_id: str,
@@ -14686,8 +14686,8 @@ class CategoryDimensionsDB:
             self.logger.error(f"❌ Ошибка сохранения: {e}")
             return False
 
-    def add_category():
-        self,
+    def add_category(
+            self,
         name: str,
         length: float,
         width: float,
@@ -15290,8 +15290,8 @@ def show_category_stats(db: CategoryDimensionsDB):
 # ============================================================================
 # БЛОК 23: ИНТЕГРАЦИЯ С ВАЛИДАТОРОМ ВЕСОГАБАРИТОВ
 # ============================================================================
-def validate_dimensions_with_category():
-    length: float,
+def validate_dimensions_with_category(
+        length: float,
     width: float,
     height: float,
     weight: float,
