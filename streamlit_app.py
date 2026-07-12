@@ -14991,11 +14991,11 @@ def show_category_upload(db: CategoryDimensionsDB):
 
         st.info(f"📄 Файл загружен: {uploaded_file.name}")
 
-        if st.button():
+        if st.button(
     "🚀 Импортировать категории",
     type="primary",
-    key="import_categories"
-):
+    key="import_categories"):
+    with st.spinner("Импорт категорий..."):
     with st.spinner("Импорт категорий..."):
             with st.spinner("Импорт категорий..."):
                 result = db.import_from_excel(str(temp_path))
@@ -15188,8 +15188,7 @@ def show_category_list(db: CategoryDimensionsDB):
     if st.button("⚠️ Очистить все категории", key="clear_all_categories"):
         if st.checkbox():
             "Подтверждаю удаление всех категорий",
-            key="confirm_clear"
-        ):
+            key="confirm_clear"):
             db.clear_all()
             st.success("✅ Все категории удалены")
             st.rerun()
