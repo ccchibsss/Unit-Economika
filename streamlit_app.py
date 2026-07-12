@@ -5406,16 +5406,18 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.21)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.22)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.21:
-# 1. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
-# 2. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
-# 3. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
-# 4. Правильный порядок колонок при вставке в таблицу oe
-# 5. ПОЛНОЕ ИСПРАВЛЕНИЕ ПРОБЛЕМЫ С ДАТАМИ В ГАБАРИТАХ
-# 6. Приоритет габаритов: данные > OE > аналоги
-# 7. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
+# ✅ ИСПРАВЛЕНИЯ v100.22:
+# 1. ДОБАВЛЕН МЕТОД recreate_oe_table() - принудительное пересоздание таблицы oe
+# 2. ДОБАВЛЕН МЕТОД delete_database_file() - удаление файла БД
+# 3. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
+# 4. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
+# 5. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
+# 6. Правильный порядок колонок при вставке в таблицу oe
+# 7. ПОЛНОЕ ИСПРАВЛЕНИЕ ПРОБЛЕМЫ С ДАТАМИ В ГАБАРИТАХ
+# 8. Приоритет габаритов: данные > OE > аналоги
+# 9. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
 # ============================================================================
 
 @st.cache_resource
@@ -6021,7 +6023,7 @@ class HighVolumeAutoPartsCatalog:
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
         """
-        ✅ ИСПРАВЛЕНО v100.21: Габариты тянутся из OE файла + защита от дат
+        ✅ ИСПРАВЛЕНО v100.22: Габариты тянутся из OE файла + защита от дат
         ✅ ИСПРАВЛЕНИЕ: Исправлена ошибка "table oe has 10 columns but 5 values were supplied"
         """
         st.info("🔄 Начало загрузки и обновления данных в базе...")
@@ -6042,7 +6044,7 @@ class HighVolumeAutoPartsCatalog:
             
             df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
             
-            # ✅ ИСПРАВЛЕНИЕ v100.21: ЯВНО УКАЗЫВАЕМ ВСЕ 10 КОЛОНОК
+            # ✅ ИСПРАВЛЕНИЕ v100.22: ЯВНО УКАЗЫВАЕМ ВСЕ 10 КОЛОНОК
             
             # Проверяем и добавляем length
             if 'length' not in df.columns:
@@ -6267,6 +6269,102 @@ class HighVolumeAutoPartsCatalog:
         progress_bar.progress(1.0, text="Обновление базы данных завершено!")
         time.sleep(1)
         progress_bar.empty()
+    
+    # ========================================================================
+    # ✅ НОВЫЙ МЕТОД v100.22: ПРИНУДИТЕЛЬНОЕ ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE
+    # ========================================================================
+    def recreate_oe_table(self):
+        """✅ Принудительное пересоздание таблицы oe с правильной структурой (10 колонок)"""
+        try:
+            st.warning("🔄 Пересоздание таблицы oe...")
+            
+            # Сохраняем данные из старой таблицы
+            try:
+                old_data = self.conn.execute("SELECT * FROM oe").df()
+                st.info(f"📊 Найдено {len(old_data)} записей в старой таблице")
+            except Exception:
+                old_data = None
+                st.info("📊 Старая таблица пуста или не существует")
+            
+            # Удаляем старую таблицу
+            self.conn.execute("DROP TABLE IF EXISTS oe")
+            
+            # Создаем заново с правильной структурой (10 колонок)
+            self.conn.execute("""
+                CREATE TABLE oe (
+                    oe_number_norm VARCHAR PRIMARY KEY,
+                    oe_number VARCHAR,
+                    name VARCHAR,
+                    applicability VARCHAR,
+                    category VARCHAR,
+                    length DOUBLE,
+                    width DOUBLE,
+                    height DOUBLE,
+                    weight DOUBLE,
+                    dimensions_str VARCHAR
+                )
+            """)
+            
+            # Если были данные - восстанавливаем их
+            if old_data is not None and not old_data.empty:
+                # Определяем какие колонки есть в старых данных
+                available_cols = [col for col in ['oe_number_norm', 'oe_number', 'name', 'applicability', 'category'] 
+                                if col in old_data.columns]
+                
+                if available_cols:
+                    # Вставляем данные с правильным количеством колонок
+                    cols_str = ', '.join([f'"{c}"' for c in available_cols])
+                    placeholders = ', '.join(['?' for _ in available_cols])
+                    
+                    # Получаем данные из DataFrame
+                    values = old_data[available_cols].values.tolist()
+                    
+                    # Вставляем по одной записи
+                    inserted = 0
+                    for row in values:
+                        try:
+                            self.conn.execute(f"""
+                                INSERT INTO oe ({cols_str})
+                                VALUES ({placeholders})
+                            """, row)
+                            inserted += 1
+                        except Exception as e:
+                            logger.warning(f"Не удалось вставить запись: {e}")
+                    
+                    st.info(f"✅ Восстановлено {inserted} записей")
+            
+            st.success("✅ Таблица oe пересоздана с правильной структурой (10 колонок)!")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка пересоздания таблицы oe: {e}")
+            logger.error(f"Ошибка пересоздания таблицы oe: {traceback.format_exc()}")
+            return False
+    
+    # ========================================================================
+    # ✅ НОВЫЙ МЕТОД v100.22: УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ
+    # ========================================================================
+    def delete_database_file(self):
+        """✅ Удаление файла базы данных для полного сброса"""
+        try:
+            # Закрываем соединение
+            if self.conn:
+                self.conn.close()
+                self.conn = None
+            
+            # Удаляем файл
+            if self.db_path.exists():
+                self.db_path.unlink()
+                st.success("✅ Файл базы данных удален. При следующей загрузке он создастся заново.")
+                return True
+            else:
+                st.warning("⚠️ Файл базы данных не найден")
+                return False
+                
+        except Exception as e:
+            st.error(f"❌ Ошибка удаления файла БД: {e}")
+            logger.error(f"Ошибка удаления файла БД: {traceback.format_exc()}")
+            return False
     
     # ========================================================================
     # ЭКСПОРТ (✅ v100.20 - ГАРАНТИРОВАННОЕ ЗАПОЛНЕНИЕ ГАБАРИТОВ)
