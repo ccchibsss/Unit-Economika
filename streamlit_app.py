@@ -8449,19 +8449,17 @@ class HighVolumeAutoPartsCatalog:
         """ if include_prices else ""
 
         query = f"""
-            {ctes}
-            SELECT
-                {select_clause}
-            FROM RankedData r
-            CROSS JOIN DescriptionTemplate dt
-            {price_join}
-            WHERE r.rn = 1
-            ORDER BY r.brand, r.artikul
-        """
-
-        # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
-        return "\n".join([line.rstrip() for line in query.strip().splitlines()])
-
+{ctes}
+SELECT
+{select_clause}
+FROM RankedData r
+CROSS JOIN DescriptionTemplate dt
+{price_join}
+WHERE r.rn = 1
+ORDER BY r.brand, r.artikul
+"""
+# ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
+return "\n".join([line.rstrip() for line in query.strip().splitlines()])
     # ========================================================================
     # МЕТОДЫ ЭКСПОРТА (ИСПРАВЛЕННЫЕ)
     # ========================================================================
@@ -8911,23 +8909,22 @@ class HighVolumeAutoPartsCatalog:
             st.success("✅ Все настройки цен сохранены")
 
     def show_exclusion_settings(self):
-        st.header("🚫 Управление исключениями при экспорте")
-        st.info(
-            "Товары, содержащие эти слова в названии, "
-            "будут исключены из экспорта"
+    st.header("🚫 Управление исключениями при экспорте")
+    st.info(
+        "Товары, содержащие эти слова в названии, "
+        "будут исключены из экспорта"
+    )
+    # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
+    current_exclusions = "\n".join(self.exclusion_rules)
+    new_exclusions = st.text_area(
+        "Список исключений (по одному на строку):",
+        value=current_exclusions,
+        height=200,
+        placeholder=(
+            "Введите слова для исключения, например:\n"
+            "Кузов\nСтекла\nМасла"
         )
-
-        # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
-        current_exclusions = "\n".join(self.exclusion_rules)
-        new_exclusions = st.text_area(
-            "Список исключений (по одному на строку):",
-            value=current_exclusions,
-            height=200,
-            placeholder=(
-                "Введите слова для исключения, например:\n"
-                "Кузов\nСтекла\nМасла"
-            )
-        )
+    )
 
         if st.button("Сохранить правила исключения"):
             cleaned = [
@@ -15001,7 +14998,6 @@ def show_category_upload(db: CategoryDimensionsDB):
         ):
             with st.spinner("Импорт категорий..."):
                 result = db.import_from_excel(str(temp_path))
-
                 if result["success"]:
                     st.success(
                         f"✅ Импортировано {result['imported']} категорий"
