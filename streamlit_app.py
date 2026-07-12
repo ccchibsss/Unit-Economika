@@ -6042,55 +6042,68 @@ class HighVolumeAutoPartsCatalog:
             
             df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
             
-            # ✅ ИСПРАВЛЕНИЕ v100.21: Сохраняем ВСЕ колонки, включая габариты
-            oe_columns = ['oe_number_norm', 'oe_number', 'name', 'applicability']
+            # ✅ ИСПРАВЛЕНИЕ v100.21: ЯВНО УКАЗЫВАЕМ ВСЕ 10 КОЛОНОК
             
-            # Добавляем габариты, если они есть в данных
-            if 'length' in df.columns:
-                oe_columns.append('length')
-            else:
+            # Проверяем и добавляем length
+            if 'length' not in df.columns:
                 df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('length'))
-                oe_columns.append('length')
             
-            if 'width' in df.columns:
-                oe_columns.append('width')
-            else:
+            # Проверяем и добавляем width
+            if 'width' not in df.columns:
                 df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('width'))
-                oe_columns.append('width')
             
-            if 'height' in df.columns:
-                oe_columns.append('height')
-            else:
+            # Проверяем и добавляем height
+            if 'height' not in df.columns:
                 df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('height'))
-                oe_columns.append('height')
             
-            if 'weight' in df.columns:
-                oe_columns.append('weight')
-            else:
+            # Проверяем и добавляем weight
+            if 'weight' not in df.columns:
                 df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('weight'))
-                oe_columns.append('weight')
             
-            if 'dimensions_str' in df.columns:
-                oe_columns.append('dimensions_str')
-            else:
+            # Проверяем и добавляем dimensions_str
+            if 'dimensions_str' not in df.columns:
                 df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias('dimensions_str'))
-                oe_columns.append('dimensions_str')
             
-            # ✅ Теперь выбираем ВСЕ колонки, которые есть в таблице oe
-            oe_df = df.select(oe_columns).unique(subset=['oe_number_norm'], keep='first')
+            # ✅ ТЕПЕРЬ ВЫБИРАЕМ ВСЕ 10 КОЛОНОК В ПРАВИЛЬНОМ ПОРЯДКЕ
+            # Сначала берем существующие колонки
+            oe_df = df.select([
+                'oe_number_norm',
+                'oe_number',
+                'name',
+                'applicability',
+                'length',
+                'width',
+                'height',
+                'weight',
+                'dimensions_str'
+            ]).unique(subset=['oe_number_norm'], keep='first')
             
+            # Добавляем категорию
             if 'name' in oe_df.columns:
                 oe_df = oe_df.with_columns(
-                    self.determine_category_vectorized(pl.col('name')))
+                    self.determine_category_vectorized(pl.col('name')).alias('category')
+                )
             else:
-                oe_df = oe_df.with_columns(category=pl.lit('Разное'))
+                oe_df = oe_df.with_columns(pl.lit('Разное').alias('category'))
             
-            # ✅ Убеждаемся, что порядок колонок соответствует таблице
+            # ✅ УБЕЖДАЕМСЯ, ЧТО ПОРЯДОК КОЛОНОК СООТВЕТСТВУЕТ ТАБЛИЦЕ
             # Таблица oe: oe_number_norm, oe_number, name, applicability, category, length, width, height, weight, dimensions_str
             oe_df = oe_df.select([
-                'oe_number_norm', 'oe_number', 'name', 'applicability', 'category',
-                'length', 'width', 'height', 'weight', 'dimensions_str'
+                'oe_number_norm',
+                'oe_number',
+                'name',
+                'applicability',
+                'category',
+                'length',
+                'width',
+                'height',
+                'weight',
+                'dimensions_str'
             ])
+            
+            # ✅ ПРОВЕРЯЕМ КОЛОНКИ ПЕРЕД ВСТАВКОЙ
+            logger.info(f"Колонки oe_df перед upsert: {oe_df.columns}")
+            logger.info(f"Количество колонок в oe_df: {len(oe_df.columns)}")
             
             self.upsert_data('oe', oe_df, ['oe_number_norm'])
             
@@ -6190,7 +6203,6 @@ class HighVolumeAutoPartsCatalog:
                 if col not in parts_df.columns:
                     parts_df = parts_df.with_columns(pl.lit(0.0).cast(pl.Float64).alias(col))
                 else:
-                    # ✅ v100.20: Убеждаемся что все значения - числа, заменяем null на 0
                     parts_df = parts_df.with_columns(
                         pl.col(col).fill_null(0).cast(pl.Float64).alias(col)
                     )
