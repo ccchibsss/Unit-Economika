@@ -7459,68 +7459,66 @@ class HighVolumeAutoPartsCatalog:
         )
 
     def load_exclusion_rules(self) -> List[str]:
-        """ИСПРАВЛЕНО v100.16: разрыв строкового литерала заменён на \n"""
-        exclusion_path = self.data_dir / "exclusion_rules.txt"
-
-        if exclusion_path.exists():
-            try:
-                return [
-                    line.strip()
-                    for line in exclusion_path.read_text(encoding='utf-8').splitlines():
-                    if line.strip():
-                ]
-            except Exception as e:
-                logger.error(f"Ошибка чтения exclusion_rules.txt: {e}")
-                return []
-        else:
-            # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
-            content = "Кузов\nСтекла\nМасла"
-            exclusion_path.write_text(content, encoding='utf-8')
-            return ["Кузов", "Стекла", "Масла"]
+    """ИСПРАВЛЕНО v100.16: разрыв строкового литерала заменён на \n"""
+    exclusion_path = self.data_dir / "exclusion_rules.txt"
+    if exclusion_path.exists():
+        try:
+            return [
+                line.strip()
+                for line in exclusion_path.read_text(encoding='utf-8').splitlines()
+                if line.strip()
+            ]
+        except Exception as e:
+            logger.error(f"Ошибка чтения exclusion_rules.txt: {e}")
+            return []
+    else:
+        # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
+        content = "Кузов\nСтекла\nМасла"
+        exclusion_path.write_text(content, encoding='utf-8')
+        return ["Кузов", "Стекла", "Масла"]
 
     def save_exclusion_rules(self):
-        exclusion_path = self.data_dir / "exclusion_rules.txt"
-        # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
-        exclusion_path.write_text(
-            "\n".join(self.exclusion_rules),
-            encoding='utf-8'
-        )
+    exclusion_path = self.data_dir / "exclusion_rules.txt"
+    # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
+    exclusion_path.write_text(
+        "\n".join(self.exclusion_rules),
+        encoding='utf-8'
+    )
 
     def load_category_mapping(self) -> Dict[str, str]:
-        category_path = self.data_dir / "category_mapping.txt"
-        default_mapping = {
-            "Радиатор": "Охлаждение",
-            "Шаровая опора": "Подвеска",
-            "Фильтр масляный": "Фильтры",
-            "Тормозные колодки": "Тормоза"
-        }
-
-        if category_path.exists():
-            try:
-                mapping = {}
-                for line in category_path.read_text(encoding='utf-8').splitlines():
-                    if line.strip() and "|" in line:
-                        key, value = line.split("|", 1)
-                        mapping[key.strip()] = value.strip()
-                return mapping
-            except Exception as e:
-                logger.error(f"Ошибка чтения category_mapping.txt: {e}")
-                return default_mapping
-        else:
-            # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
-            content = "\n".join(
-                [f"{k}|{v}" for k, v in default_mapping.items()]
-            )
-            category_path.write_text(content, encoding='utf-8')
+    category_path = self.data_dir / "category_mapping.txt"
+    default_mapping = {
+        "Радиатор": "Охлаждение",
+        "Шаровая опора": "Подвеска",
+        "Фильтр масляный": "Фильтры",
+        "Тормозные колодки": "Тормоза"
+    }
+    if category_path.exists():
+        try:
+            mapping = {}
+            for line in category_path.read_text(encoding='utf-8').splitlines():
+                if line.strip() and "|" in line:
+                    key, value = line.split("|", 1)
+                    mapping[key.strip()] = value.strip()
+            return mapping
+        except Exception as e:
+            logger.error(f"Ошибка чтения category_mapping.txt: {e}")
             return default_mapping
-
-    def save_category_mapping(self):
-        category_path = self.data_dir / "category_mapping.txt"
+    else:
         # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
         content = "\n".join(
-            [f"{k}|{v}" for k, v in self.category_mapping.items()]
+            [f"{k}|{v}" for k, v in default_mapping.items()]
         )
         category_path.write_text(content, encoding='utf-8')
+        return default_mapping
+
+    def save_category_mapping(self):
+    category_path = self.data_dir / "category_mapping.txt"
+    # ИСПРАВЛЕНИЕ v100.16: используем \n вместо разрыва строки
+    content = "\n".join(
+        [f"{k}|{v}" for k, v in self.category_mapping.items()]
+    )
+    category_path.write_text(content, encoding='utf-8')
 
     # ========================================================================
     # БАЗА ДАННЫХ
@@ -8876,10 +8874,10 @@ class HighVolumeAutoPartsCatalog:
                     key=f"markup_{selected_brand}"
                 )
 
-                if st.button():
-                    "Сохранить наценку",
-                    key=f"save_{selected_brand}"
-                ):
+                if st.button(
+    "Сохранить наценку",
+    key=f"save_{selected_brand}"
+):
                     brand_markups[selected_brand] = brand_markup / 500
                     self.price_rules['brand_markups'] = brand_markups
                     self.save_price_rules()
