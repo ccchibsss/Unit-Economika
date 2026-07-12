@@ -6373,89 +6373,118 @@ class HighVolumeAutoPartsCatalog:
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
     
     def export_to_csv_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None, include_prices: bool = True, apply_markup: bool = True) -> bool:
-        total = self.conn.execute(
-            "SELECT count(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
-        
-        if total == 0:
-            st.warning("Нет данных для экспорта")
-            return False
-        
-        st.info(f"📤 Экспорт {total} записей в CSV...")
-        
-        try:
-            query = self.build_export_query(
-                selected_columns, include_prices, apply_markup)
-            logger.info(f"Executing export query: {query}")
-            
-            df = self.conn.execute(query).pl()
-            pdf = df.to_pandas()
-            
-            dimension_cols = ["Длина", "Ширина",
-                              "Высота", "Вес", "Длинна/Ширина/Высота"]
-            for col in dimension_cols:
-                if col in pdf.columns:
-                    pdf[col] = pdf[col].astype(str).replace({'nan': '', '0.0': '', '0': ''})
-            
-            output_dir = Path("auto_parts_data")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            buf = io.StringIO()
-            pdf.to_csv(buf, sep=';', index=False)
-            
-            with open(output_path, "wb") as f:
-                f.write(b'\xef\xbb\xbf')
-                f.write(buf.getvalue().encode('utf-8'))
-            
-            size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            st.success(
-                f"Данные экспортированы: {output_path} ({size_mb:.1f} МБ)")
-            return True
-        
-        except Exception as e:
-            logger.exception("Ошибка экспорта CSV")
-            st.error(f"Ошибка при экспорте в CSV: {str(e)}")
-            return False
-    
-    def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None, include_prices: bool = True, apply_markup: bool = True) -> bool:
-        total = self.conn.execute(
-            "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
-        
-        if total == 0:
-            st.warning("Нет данных для экспорта")
-            return False
-        
+    """
+    ✅ ИСПРАВЛЕНО: габариты в CSV теперь числовые, пустые значения — пустые строки
+    """
+    total = self.conn.execute(
+        "SELECT count(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
+    if total == 0:
+        st.warning("Нет данных для экспорта")
+        return False
+    st.info(f"📤 Экспорт {total} записей в CSV...")
+    try:
         query = self.build_export_query(
             selected_columns, include_prices, apply_markup)
-        df = pd.read_sql(query, self.conn)
-        
-        for col in ["Длина", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"]:
-            if col in df.columns:
-                df[col] = df[col].astype(str).replace(
-                    {r'^nan$': '', r'^0\.0$': '', r'^0$': ''}, regex=True)
-        
-        if len(df) <= EXCEL_ROW_LIMIT:
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False)
-        else:
-            sheets = (len(df) // EXCEL_ROW_LIMIT) + 1
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                for i in range(sheets):
-                    df.iloc[i*EXCEL_ROW_LIMIT:(i+1)*EXCEL_ROW_LIMIT].to_excel(
-                        writer, index=False, sheet_name=f"Данные_{i+1}")
-        
+        logger.info(f"Executing export query: {query}")
+        df = self.conn.execute(query).pl()
+        pdf = df.to_pandas()
+
+        # ✅ ИСПРАВЛЕНИЕ: габариты — числовые, NaN → пустая строка (стандарт CSV)
+        dimension_numeric_cols = ["Длина", "Ширина", "Высота", "Вес"]
+        for col in dimension_numeric_cols:
+            if col in pdf.columns:
+                pdf[col] = pd.to_numeric(pdf[col], errors='coerce')
+                # Округление до 2 знаков
+                pdf[col] = pdf[col].round(2)
+                # NaN заменяем на пустую строку — в CSV будет просто ,,
+                pdf[col] = pdf[col].fillna('')
+
+        if "Длинна/Ширина/Высота" in pdf.columns:
+            pdf["Длинна/Ширина/Высота"] = (
+                pdf["Длинна/Ширина/Высота"]
+                .astype(str)
+                .replace({'nan': '', 'None': '', '0.0x0.0x0.0': '', 'x': ''})
+            )
+
+        output_dir = Path("auto_parts_data")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        buf = io.StringIO()
+        pdf.to_csv(buf, sep=';', index=False)
+        with open(output_path, "wb") as f:
+            f.write(b'\xef\xbb\xbf')  # BOM для корректного открытия в Excel
+            f.write(buf.getvalue().encode('utf-8'))
+
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        st.success(
+            f"Данные экспортированы: {output_path} ({size_mb:.1f} МБ)")
         return True
+    except Exception as e:
+        logger.exception("Ошибка экспорта CSV")
+        st.error(f"Ошибка при экспорте в CSV: {str(e)}")
+        return False
     
-    def export_to_parquet(self, output_path: str, selected_columns: Optional[List[str]] = None, include_prices: bool = True, apply_markup: bool = True) -> bool:
-        try:
-            query = self.build_export_query(
-                selected_columns, include_prices, apply_markup)
-            df = self.conn.execute(query).pl()
-            df.write_parquet(output_path)
-            return True
-        except Exception as e:
-            logger.exception("Ошибка экспорта Parquet")
-            st.error(f"Ошибка при экспорте в Parquet: {str(e)}")
-            return False
+    def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None, include_prices: bool = True, apply_markup: bool = True) -> bool:
+    """
+    ✅ ИСПРАВЛЕНО: колонки Длина/Ширина/Высота/Вес теперь числовые в Excel
+    """
+    total = self.conn.execute(
+        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
+    if total == 0:
+        st.warning("Нет данных для экспорта")
+        return False
+    query = self.build_export_query(
+        selected_columns, include_prices, apply_markup)
+    df = pd.read_sql(query, self.conn)
+
+    # ✅ ИСПРАВЛЕНИЕ: приводим габариты к числовому типу, NaN → None (пустая ячейка в Excel)
+    dimension_numeric_cols = ["Длина", "Ширина", "Высота", "Вес"]
+    for col in dimension_numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            # Заменяем NaN на None — openpyxl запишет как пустую ячейку, а не строку "nan"
+            df[col] = df[col].where(df[col].notna(), None)
+
+    # Колонка "Длинна/Ширина/Высота" — строковая (составная), оставляем как есть,
+    # но чистим мусор
+    if "Длинна/Ширина/Высота" in df.columns:
+        df["Длинна/Ширина/Высота"] = (
+            df["Длинна/Ширина/Высота"]
+            .astype(str)
+            .replace({'nan': '', 'None': '', '0.0x0.0x0.0': '', 'x': ''})
+            .replace('', None)
+        )
+
+    if len(df) <= EXCEL_ROW_LIMIT:
+        sheets_data = [(df, "Данные")]
+    else:
+        sheets = (len(df) // EXCEL_ROW_LIMIT) + 1
+        sheets_data = [
+            (df.iloc[i * EXCEL_ROW_LIMIT:(i + 1) * EXCEL_ROW_LIMIT], f"Данные_{i + 1}")
+            for i in range(sheets)
+        ]
+
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        for sheet_df, sheet_name in sheets_data:
+            sheet_df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+        # ✅ Применяем числовой формат к ячейкам с габаритами на каждом листе
+        for _, sheet_name in sheets_data:
+            ws = writer.sheets[sheet_name]
+            # Находим индексы колонок с габаритами
+            header = [cell.value for cell in ws[1]]
+            for col_idx, col_name in enumerate(header, start=1):
+                if col_name in dimension_numeric_cols:
+                    col_letter = get_column_letter(col_idx)
+                    # Числовой формат с 2 знаками после запятой
+                    number_format = '#,##0.00'
+                    for row in range(2, ws.max_row + 1):
+                        cell = ws[f'{col_letter}{row}']
+                        if cell.value is not None:
+                            cell.number_format = number_format
+                    # Автоматическая ширина колонки
+                    ws.column_dimensions[col_letter].width = 12
+
+    return True
     
     # ========================================================================
     # УПРАВЛЕНИЕ ДАННЫМИ
