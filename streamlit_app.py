@@ -14992,10 +14992,11 @@ def show_category_upload(db: CategoryDimensionsDB):
         st.info(f"📄 Файл загружен: {uploaded_file.name}")
 
         if st.button():
-            "🚀 Импортировать категории",
-            type="primary",
-            key="import_categories"
-        ):
+    "🚀 Импортировать категории",
+    type="primary",
+    key="import_categories"
+):
+    with st.spinner("Импорт категорий..."):
             with st.spinner("Импорт категорий..."):
                 result = db.import_from_excel(str(temp_path))
                 if result["success"]:
