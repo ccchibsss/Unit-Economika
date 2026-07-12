@@ -6037,14 +6037,18 @@ class HighVolumeAutoPartsCatalog:
     def _upsert_prices(self, price_df: pl.DataFrame):
         self.upsert_prices(price_df)
     
-    # ====================================================================
-    # 🆕 v100.33: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ОПТИМИЗИРОВАННАЯ + НАДЁЖНАЯ)
-    # ====================================================================
+        # ========================================================================
+    # ✅ v100.34: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ИСПРАВЛЕНО ДЛЯ DUCKDB)
+    # ========================================================================
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """Обработка и загрузка данных с pipeline-параллелизмом и защитой от ошибок"""
+        """
+        🆕 v100.34: Обработка и загрузка данных.
+        ✅ ИСПРАВЛЕНИЕ: DuckDB connection НЕ потокобезопасен!
+        Параллелизм оставлен только для подготовки данных, загрузка последовательная.
+        """
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
-                # ✅ v100.33: Правильный расчет количества шагов (защита от деления на 0)
+                # Правильный расчет количества шагов
                 num_steps = 0
                 if 'oe' in dataframes:
                     num_steps += 1
@@ -6052,7 +6056,7 @@ class HighVolumeAutoPartsCatalog:
                     num_steps += 1
                 if 'prices' in dataframes:
                     num_steps += 1
-                num_steps += 1  # ШАГ 4: Сборка данных по артикулам (выполняется всегда)
+                num_steps += 1  # ШАГ 4: Сборка данных по артикулам
                 
                 if num_steps == 0:
                     num_steps = 1
@@ -6063,7 +6067,7 @@ class HighVolumeAutoPartsCatalog:
                 unique_artikuls = set()
                 
                 # ====================================================================
-                # 🆕 v100.33: ЭТАП 1 — Параллельная подготовка данных
+                # ✅ v100.34: ЭТАП 1 — Параллельная подготовка данных (БЕЗОПАСНО)
                 # ====================================================================
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
@@ -6072,6 +6076,7 @@ class HighVolumeAutoPartsCatalog:
                 prepared = {}
                 cross_from_oe = pl.DataFrame()
                 
+                # ✅ v100.34: Параллельная подготовка БЕЗОПАСНА (не использует DuckDB)
                 if len(dataframes) > 1:
                     with ThreadPoolExecutor(max_workers=min(4, len(dataframes))) as executor:
                         futures = {
@@ -6101,45 +6106,35 @@ class HighVolumeAutoPartsCatalog:
                                 prepared[key] = data
                 
                 # ====================================================================
-                # 🆕 v100.33: ЭТАП 2 — Параллельная загрузка в БД
+                # ✅ v100.34: ЭТАП 2 — ПОСЛЕДОВАТЕЛЬНАЯ загрузка в БД (БЕЗОПАСНО)
                 # ====================================================================
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
-                status.update(label=f"🚀 ({step_counter}/{num_steps}) Параллельная загрузка в БД...")
+                status.update(label=f"🚀 ({step_counter}/{num_steps}) Загрузка в БД...")
                 
-                with ThreadPoolExecutor(max_workers=2) as executor:
-                    futures = []
-                    if 'oe' in prepared:
-                        status.write(f"💾 Сохранение {len(prepared['oe']):,} записей в oe...")
-                        futures.append(executor.submit(self._upsert_oe, prepared['oe']))
-                    if 'cross' in prepared or not cross_from_oe.is_empty():
-                        cross_parts = []
-                        if 'cross' in prepared:
-                            cross_parts.append(prepared['cross'])
-                        if not cross_from_oe.is_empty():
-                            cross_parts.append(cross_from_oe)
-                        if cross_parts:
-                            combined_cross = pl.concat(cross_parts).unique()
-                            status.write(f"💾 Сохранение {len(combined_cross):,} кросс-ссылок...")
-                            futures.append(executor.submit(self._upsert_cross, combined_cross))
-                    if 'prices' in prepared:
-                        status.write(f"💾 Сохранение {len(prepared['prices']):,} цен...")
-                        futures.append(executor.submit(self._upsert_prices, prepared['prices']))
-                    
-                    for f in futures:
-                        try:
-                            f.result()
-                        except Exception as e:
-                            logger.error(f"Ошибка загрузки: {e}")
-                
+                # ✅ v100.34: DuckDB НЕ потокобезопасен — загрузка последовательная!
                 if 'oe' in prepared:
+                    status.write(f"💾 Сохранение {len(prepared['oe']):,} записей в oe...")
+                    self._upsert_oe(prepared['oe'])
                     total_records += len(prepared['oe'])
                     status.write(f"✅ Сохранено {len(prepared['oe']):,} записей в OE")
+                
                 if 'cross' in prepared or not cross_from_oe.is_empty():
-                    cross_count = len(prepared.get('cross', pl.DataFrame())) + len(cross_from_oe)
-                    total_records += cross_count
-                    status.write(f"✅ Сохранено {cross_count:,} кросс-ссылок")
+                    cross_parts = []
+                    if 'cross' in prepared:
+                        cross_parts.append(prepared['cross'])
+                    if not cross_from_oe.is_empty():
+                        cross_parts.append(cross_from_oe)
+                    if cross_parts:
+                        combined_cross = pl.concat(cross_parts).unique()
+                        status.write(f"💾 Сохранение {len(combined_cross):,} кросс-ссылок...")
+                        self._upsert_cross(combined_cross)
+                        total_records += len(combined_cross)
+                        status.write(f"✅ Сохранено {len(combined_cross):,} кросс-ссылок")
+                
                 if 'prices' in prepared:
+                    status.write(f"💾 Сохранение {len(prepared['prices']):,} цен...")
+                    self._upsert_prices(prepared['prices'])
                     total_records += len(prepared['prices'])
                     status.write(f"✅ Сохранено {len(prepared['prices']):,} ценовых записей")
                 
@@ -6218,8 +6213,7 @@ class HighVolumeAutoPartsCatalog:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
                     
                     # ====================================================================
-                    # 🆕 v100.33: ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight (×116 БЫСТРЕЕ)
-                    # + FALLBACK при ошибке (из v100.5.1)
+                    # ✅ v100.34: ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight (×116 БЫСТРЕЕ)
                     # ====================================================================
                     try:
                         parts_df = parts_df.with_columns(
@@ -6331,7 +6325,6 @@ class HighVolumeAutoPartsCatalog:
             logger.error(traceback.format_exc())
             st.error(f"❌ Ошибка загрузки данных: {str(e)}")
         finally:
-            # ✅ v100.33: Очистка памяти (из v100.5.1)
             gc.collect()
             if hasattr(pl, 'free_memory'):
                 pl.free_memory()
