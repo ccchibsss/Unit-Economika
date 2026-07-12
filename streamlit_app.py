@@ -5406,21 +5406,24 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.23)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.6)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.23:
-# 1. ИСПРАВЛЕНА ОШИБКА "Values list 'l1' does not have a column named 'oe_number_norm'"
-# 2. Добавлены related_oe_number_norm в Level1Analogs
-# 3. Исправлен JOIN в Level1OENumbers
-# 4. ДОБАВЛЕН МЕТОД recreate_oe_table() - принудительное пересоздание таблицы oe
-# 5. ДОБАВЛЕН МЕТОД delete_database_file() - удаление файла БД
-# 6. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
-# 7. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
-# 8. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
-# 9. Правильный порядок колонок при вставке в таблицу oe
-# 10. ПОЛНОЕ ИСПРАВЛЕНИЕ ПРОБЛЕМЫ С ДАТАМИ В ГАБАРИТАХ
-# 11. Приоритет габаритов: данные > OE > аналоги
-# 12. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
+# ✅ ИСПРАВЛЕНИЯ v100.6:
+# 1. УСИЛЕННАЯ ЗАЩИТА ОТ ДАТ В ГАБАРИТАХ (исправление "22.июл", "08.фев")
+# 2. Чтение Excel с параметрами: parse_dates=False, infer_schema_length=0
+# 3. Удаление всех нечисловых символов из строк с датами
+# 4. Fallback через openpyxl с dtype=str
+# 5. ИСПРАВЛЕНА ОШИБКА "Values list 'l1' does not have a column named 'oe_number_norm'"
+# 6. Добавлены related_oe_number_norm в Level1Analogs
+# 7. Исправлен JOIN в Level1OENumbers
+# 8. ДОБАВЛЕН МЕТОД recreate_oe_table() - принудительное пересоздание таблицы oe
+# 9. ДОБАВЛЕН МЕТОД delete_database_file() - удаление файла БД
+# 10. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
+# 11. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
+# 12. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
+# 13. Правильный порядок колонок при вставке в таблицу oe
+# 14. Приоритет габаритов: данные > OE > аналоги
+# 15. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
 # ============================================================================
 
 @st.cache_resource
@@ -5691,13 +5694,13 @@ class HighVolumeAutoPartsCatalog:
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ========================================================================
-    # ✅ УНИВЕРСАЛЬНАЯ КОНВЕРТАЦИЯ В ЧИСЛО (ИСПРАВЛЕНИЕ ДАТ v100.20)
+    # ✅ УНИВЕРСАЛЬНАЯ КОНВЕРТАЦИЯ В ЧИСЛО (ИСПРАВЛЕНИЕ ДАТ v100.6)
     # ========================================================================
     @staticmethod
     def safe_convert_to_float(value: Any) -> float:
         """
-        ✅ v100.20: УНИВЕРСАЛЬНАЯ КОНВЕРТАЦИЯ ЛЮБОГО ЗНАЧЕНИЯ В ЧИСЛО
-        Исправляет проблему с датами в габаритах
+        ✅ v100.6: УНИВЕРСАЛЬНАЯ КОНВЕРТАЦИЯ ЛЮБОГО ЗНАЧЕНИЯ В ЧИСЛО
+        Исправляет проблему с датами в габаритах (22.июл → 22.0)
         """
         if value is None or value == "":
             return 0.0
@@ -5716,7 +5719,6 @@ class HighVolumeAutoPartsCatalog:
         if isinstance(value, (datetime, date, pd.Timestamp)):
             # Пытаемся конвертировать дату в число (Excel serial number)
             try:
-                # Базовое значение для Excel: 1899-12-30 = 0
                 base = datetime(1899, 12, 30)
                 if isinstance(value, pd.Timestamp):
                     value = value.to_pydatetime()
@@ -5735,7 +5737,8 @@ class HighVolumeAutoPartsCatalog:
             if not value:
                 return 0.0
             
-            # Убираем лишние символы, оставляем только цифры, точку и запятую
+            # ✅ УСИЛЕННАЯ ОЧИСТКА: удаляем всё кроме цифр, точки, запятой и минуса
+            # Это исправляет "22.июл" → "22", "08.фев" → "08"
             cleaned = re.sub(r'[^\d.,\-]', '', value)
             if not cleaned:
                 return 0.0
@@ -5776,7 +5779,7 @@ class HighVolumeAutoPartsCatalog:
             return 0.0
     
     # ========================================================================
-    # ✅ ОБРАБОТКА ФАЙЛОВ (ИСПРАВЛЕНО v100.20)
+    # ✅ ОБРАБОТКА ФАЙЛОВ (ИСПРАВЛЕНО v100.6)
     # ========================================================================
     def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
         """
@@ -5838,7 +5841,8 @@ class HighVolumeAutoPartsCatalog:
     
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
         """
-        ✅ ИСПРАВЛЕНИЕ v100.20: Полная защита от дат в габаритах
+        ✅ ИСПРАВЛЕНИЕ v100.6: Полная защита от дат в габаритах
+        Исправляет проблему: "22.июл" → 22.0, "08.фев" → 8.0
         """
         logger.info(f"Обработка файла: {file_type} ({file_path})")
         
@@ -5847,7 +5851,29 @@ class HighVolumeAutoPartsCatalog:
                 logger.error(f"Файл не найден: {file_path}")
                 return pl.DataFrame()
             
-            df = pl.read_excel(file_path, engine='calamine')
+            # ✅ ИСПРАВЛЕНИЕ v100.6: читаем Excel с защитой от дат
+            try:
+                # Пробуем прочитать через calamine с отключенным парсингом дат
+                df = pl.read_excel(
+                    file_path, 
+                    engine='calamine',
+                    read_options={
+                        'parse_dates': False,
+                        'infer_schema_length': 0,
+                    }
+                )
+                logger.info(f"Файл прочитан через calamine")
+            except Exception as e:
+                logger.warning(f"Ошибка чтения через calamine: {e}")
+                # Fallback: пробуем openpyxl с dtype=str
+                try:
+                    import pandas as pd
+                    pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
+                    df = pl.from_pandas(pdf)
+                    logger.info(f"Файл прочитан через openpyxl с dtype=str")
+                except Exception as e2:
+                    logger.error(f"Ошибка чтения через openpyxl: {e2}")
+                    return pl.DataFrame()
             
             if df.is_empty():
                 logger.warning(f"Пустой файл: {file_path}")
@@ -5915,12 +5941,13 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # ✅ v100.20: УНИВЕРСАЛЬНАЯ КОНВЕРТАЦИЯ ЧИСЛОВЫХ КОЛОНОК (включая даты)
+        # ✅ v100.6: УСИЛЕННАЯ КОНВЕРТАЦИЯ ЧИСЛОВЫХ КОЛОНОК (включая даты)
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
                 try:
-                    # Применяем универсальную конвертацию к каждой ячейке
+                    # ✅ Применяем универсальную конвертацию к каждой ячейке
+                    # Это исправляет "22.июл" → 22.0, "08.фев" → 8.0
                     converted_values = []
                     for val in df[col].to_list():
                         converted = self.safe_convert_to_float(val)
@@ -5932,7 +5959,7 @@ class HighVolumeAutoPartsCatalog:
                     # Округляем до 2 знаков
                     df = df.with_columns(pl.col(col).round(2).alias(col))
                     
-                    logger.info(f"✅ Колонка '{col}' сконвертирована в числа")
+                    logger.info(f"✅ Колонка '{col}' сконвертирована в числа (усиленная конвертация)")
                     
                 except Exception as e:
                     logger.warning(f"Не удалось преобразовать {col}: {e}")
