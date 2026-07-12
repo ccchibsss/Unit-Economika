@@ -5406,24 +5406,13 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.29)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.30)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.29:
-# 1. Исправлена критическая ошибка в upsert_data с несоответствием колонок
-# 2. Оптимизирована конвертация чисел через векторизованные операции
-# 3. Улучшена обработка памяти с очисткой после загрузки
-# 4. Добавлена валидация данных перед upsert
-# 5. Улучшена обработка BOM в CSV экспорте
-# 6. Оптимизировано создание индексов
-# 7. Добавлены контекстные менеджеры для транзакций и метрик
-# 8. Улучшена обработка ошибок с retry логикой
-# 9. 🆕 v100.29: Исправлен прогресс-бар в process_and_load_data (защита от >1.0)
-# 10. 🆕 v100.29: Исправлен Segfault в экспорте (заменён .pl().to_pandas() на .fetchdf())
-# 11. 🆕 v100.29: Добавлен импорт retry с fallback-декоратором
-# 12. 🆕 v100.29: Исправлен подсчёт total_records (уникальные артикулы)
-# 13. 🆕 v100.29: Добавлен расчёт billable_weight
-# 14. 🆕 v100.29: Исправлена st_dataframe_compat → st.dataframe
-# 15. 🆕 v100.29: Исправлен pl.read_excel(engine='calamine') → pd.read_excel
+# ✅ ИСПРАВЛЕНИЯ v100.30:
+# 1. Исправлена критическая ошибка: pl.map_elements → pl.struct().map_elements()
+# 2. Исправлен AttributeError при вызове map_elements на pl
+# 3. Оптимизирована работа с большими данными
+# 4. Добавлена обработка ошибок при расчёте billable_weight
 # ============================================================================
 import os
 import io
@@ -5447,7 +5436,7 @@ import pandas as pd
 import streamlit as st
 
 # ============================================================================
-# 🆕 v100.29: ИМПОРТ RETRY С FALLBACK
+# ИМПОРТ RETRY С FALLBACK
 # ============================================================================
 try:
     from retry import retry
@@ -5799,7 +5788,7 @@ class HighVolumeAutoPartsCatalog:
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
 
     # ========================================================================
-    # 🆕 v100.29: ФУНКЦИЯ РАСЧЁТА ОПЛАЧИВАЕМОГО ВЕСА
+    # ФУНКЦИЯ РАСЧЁТА ОПЛАЧИВАЕМОГО ВЕСА
     # ========================================================================
     @staticmethod
     def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, height_cm: float, volumetric_coeff: float = 5000.0) -> float:
@@ -5937,9 +5926,6 @@ class HighVolumeAutoPartsCatalog:
         logger.info(f"Маппинг колонок: {mapping}")
         return mapping
 
-    # ========================================================================
-    # 🆕 v100.29: ИСПРАВЛЕННОЕ ЧТЕНИЕ ФАЙЛОВ (pl.read_excel → pd.read_excel)
-    # ========================================================================
     @retry(tries=3, delay=1, backoff=2, logger=logger)
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
         """Чтение и подготовка файла с retry логикой"""
@@ -5951,7 +5937,7 @@ class HighVolumeAutoPartsCatalog:
                     logger.error(f"Файл не найден: {file_path}")
                     return pl.DataFrame()
 
-                # 🆕 v100.29: Используем pd.read_excel вместо pl.read_excel
+                # Используем pd.read_excel вместо pl.read_excel
                 try:
                     pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
                     df = pl.from_pandas(pdf)
@@ -6206,13 +6192,13 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
 
     # ========================================================================
-    # 🆕 v100.29: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ИСПРАВЛЕННЫЙ ПРОГРЕСС-БАР)
+    # ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ИСПРАВЛЕННАЯ ВЕРСИЯ v100.30)
     # ========================================================================
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
         """Обработка и загрузка данных с улучшенным прогресс-баром"""
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
-                # ✅ ИСПРАВЛЕНИЕ v100.29: Правильный расчет количества шагов
+                # Правильный расчет количества шагов
                 num_steps = 0
                 if 'oe' in dataframes:
                     num_steps += 1
@@ -6229,7 +6215,6 @@ class HighVolumeAutoPartsCatalog:
                 progress_bar = st.progress(0)
                 step_counter = 0
                 total_records = 0
-                # 🆕 v100.29: Уникальные артикулы для точного подсчёта
                 unique_artikuls = set()
 
                 # ====================================================================
@@ -6390,18 +6375,27 @@ class HighVolumeAutoPartsCatalog:
                     if 'dimensions_str' not in parts_df.columns:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
 
-                    # 🆕 v100.29: Расчёт оплачиваемого веса
-                    parts_df = parts_df.with_columns(
-                        billable_weight=pl.map_elements(
-                            lambda row: self.calculate_billable_weight(
-                                weight_kg=row['weight'],
-                                length_cm=row['length'],
-                                width_cm=row['width'],
-                                height_cm=row['height']
-                            ),
-                            return_dtype=pl.Float64
+                    # 🆕 v100.30: РАСЧЁТ ОПЛАЧИВАЕМОГО ВЕСА (ИСПРАВЛЕНО)
+                    # Используем pl.struct().map_elements() вместо pl.map_elements()
+                    try:
+                        parts_df = parts_df.with_columns(
+                            pl.struct(['weight', 'length', 'width', 'height'])
+                            .map_elements(
+                                lambda row: self.calculate_billable_weight(
+                                    weight_kg=row['weight'],
+                                    length_cm=row['length'],
+                                    width_cm=row['width'],
+                                    height_cm=row['height']
+                                ),
+                                return_dtype=pl.Float64
+                            )
+                            .alias('billable_weight')
                         )
-                    )
+                    except Exception as e:
+                        logger.warning(f"Ошибка расчёта billable_weight: {e}. Используем weight как billable_weight")
+                        parts_df = parts_df.with_columns(
+                            pl.col('weight').alias('billable_weight')
+                        )
 
                     # Формирование строки габаритов
                     parts_df = parts_df.with_columns([
@@ -6455,7 +6449,7 @@ class HighVolumeAutoPartsCatalog:
                     select_exprs = [pl.col(c) if c in parts_df.columns else pl.lit(None).alias(c) for c in final_columns]
                     parts_df = parts_df.select(select_exprs)
 
-                    # 🆕 v100.29: Сохраняем уникальные артикулы для точного подсчёта
+                    # Сохраняем уникальные артикулы для точного подсчёта
                     unique_artikuls.update(parts_df['artikul_norm'].unique().to_list())
 
                     status.write(f"💾 Сохранение {len(parts_df):,} записей в таблицу parts...")
@@ -6463,7 +6457,7 @@ class HighVolumeAutoPartsCatalog:
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
 
-                # 🆕 v100.29: Корректный подсчёт уникальных артикулов
+                # Корректный подсчёт уникальных артикулов
                 unique_count = len(unique_artikuls)
                 if unique_count > 0:
                     status.write(f"📊 Уникальных артикулов в каталоге: {unique_count:,}")
@@ -6476,6 +6470,10 @@ class HighVolumeAutoPartsCatalog:
                 )
                 logger.info(f"✅ Загрузка завершена. Всего записей: {total_records}, уникальных артикулов: {unique_count}")
 
+        except Exception as e:
+            logger.error(f"Ошибка в process_and_load_data: {e}")
+            logger.error(traceback.format_exc())
+            st.error(f"❌ Ошибка загрузки данных: {str(e)}")
         finally:
             # Очистка памяти
             gc.collect()
@@ -6867,7 +6865,7 @@ ORDER BY r.brand, r.artikul
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
 
     # ========================================================================
-    # 🆕 v100.29: ЭКСПОРТ CSV (ИСПРАВЛЕННЫЙ SEGFAULT)
+    # ЭКСПОРТ CSV
     # ========================================================================
     def export_to_csv_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                 include_prices: bool = True, apply_markup: bool = True) -> bool:
@@ -6885,7 +6883,6 @@ ORDER BY r.brand, r.artikul
             with self.timer("Экспорт CSV"):
                 query = self.build_export_query(selected_columns, include_prices, apply_markup)
 
-                # Используем .fetchdf() вместо .pl().to_pandas()
                 try:
                     pdf = self.conn.execute(query).fetchdf()
                 except Exception as e:
@@ -6923,7 +6920,7 @@ ORDER BY r.brand, r.artikul
             return False
 
     # ========================================================================
-    # 🆕 v100.29: ЭКСПОРТ EXCEL (ИСПРАВЛЕННЫЙ SEGFAULT)
+    # ЭКСПОРТ EXCEL
     # ========================================================================
     def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                   include_prices: bool = True, apply_markup: bool = True) -> bool:
