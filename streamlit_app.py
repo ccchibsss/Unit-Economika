@@ -9410,15 +9410,13 @@ def show_catalog_calculation_parallel():
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 
 # ============================================================================
-# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ v100.5.2)
+# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ v100.5.3)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.5.2:
-# 1. st.sidebar.radio заменён на st.radio(horizontal=True),
-#    чтобы не ломать главное меню навигации в боковой панели.
-# 2. Удалён st.sidebar.title("🧭 Меню каталога"), который конфликтовал
-#    с главным меню навигации.
-# 3. Исправлен MIME-тип для Parquet экспорта.
-# 4. Улучшена обработка ошибок при экспорте.
+# ✅ ИСПРАВЛЕНИЯ v100.5.3:
+# 1. Использован st.sidebar для меню каталога (НЕ конфликтует с главным меню)
+# 2. Добавлен st.sidebar.markdown("---") для разделения
+# 3. Исправлен конфликт с главной навигацией
+# 4. Все подразделы теперь видны и доступны
 # ============================================================================
 def show_catalog_grouping_interface():
     """
@@ -9451,17 +9449,26 @@ def show_catalog_grouping_interface():
         st.error("❌ Ошибка подключения к базе данных")
         return
 
-    # ✅ ИСПРАВЛЕНИЕ v100.5.2: используем st.radio с horizontal=True
-    # вместо st.sidebar.radio, чтобы не ломать главное меню
-    # ✅ УДАЛЁН st.sidebar.title("🧭 Меню каталога") — он конфликтовал с главным меню
-    option = st.radio(
-        "🧭 Выберите подраздел каталога:",
-        ["📥 Загрузка данных", "🔍 Поиск и фильтрация", "📊 Статистика",
-         "📤 Экспорт", "🔧 Управление"],
-        horizontal=True,
-        key="catalog_menu_inline",
-    )
+    # ✅ ИСПРАВЛЕНИЕ v100.5.3: используем st.sidebar для меню каталога
+    # Но с уникальным ключом, чтобы не конфликтовать с главным меню
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 🗂️ Меню каталога")
+        option = st.radio(
+            "Выберите подраздел:",
+            [
+                "📥 Загрузка данных",
+                "🔍 Поиск и фильтрация",
+                "📊 Статистика",
+                "📤 Экспорт",
+                "🔧 Управление"
+            ],
+            key="catalog_submenu",
+            label_visibility="collapsed"
+        )
+        st.markdown("---")
 
+    # Отображаем выбранный подраздел
     if option == "📥 Загрузка данных":
         show_catalog_upload(catalog)
     elif option == "🔍 Поиск и фильтрация":
@@ -9525,7 +9532,7 @@ def show_catalog_upload(catalog):
 
 
 def show_catalog_search(catalog):
-    """Поиск и фильтрация в каталоге"""
+    """🔍 Поиск и фильтрация в каталоге"""
     st.subheader("🔍 Поиск и фильтрация")
 
     col1, col2 = st.columns(2)
@@ -9571,10 +9578,12 @@ def show_catalog_search(catalog):
                 st_dataframe_compat(df)
             except duckdb.Error as e:
                 st.error(f"❌ Ошибка поиска: {e}")
+        else:
+            st.warning("⚠️ Введите хотя бы один критерий поиска")
 
 
 def show_catalog_statistics(catalog):
-    """Статистика каталога"""
+    """📊 Статистика каталога"""
     st.subheader("📊 Статистика каталога")
 
     stats = catalog.get_statistics()
@@ -9595,10 +9604,12 @@ def show_catalog_statistics(catalog):
         if 'top_brands' in stats and not stats['top_brands'].empty:
             st.subheader("🏆 Топ 10 брендов")
             st_dataframe_compat(stats['top_brands'])
+    else:
+        st.info("ℹ️ Нет данных для статистики. Загрузите данные в каталог.")
 
 
 def show_catalog_export(catalog):
-    """Экспорт каталога"""
+    """📤 Экспорт каталога"""
     st.subheader("📤 Экспорт каталога")
 
     total = catalog.conn.execute(
@@ -9611,21 +9622,28 @@ def show_catalog_export(catalog):
         st.warning("⚠️ Нет данных для экспорта")
         return
 
-    format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"])
+    col1, col2 = st.columns(2)
 
-    selected_columns = st.multiselect("Колонки", [
-        "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
-        "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
-        "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
-    ])
+    with col1:
+        format_choice = st.radio("📁 Формат файла", ["CSV", "Excel", "Parquet"])
+        
+        selected_columns = st.multiselect("📋 Выберите колонки для экспорта", [
+            "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
+            "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
+            "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
+        ])
 
-    include_prices = st.checkbox("Включить цены", value=True)
-    apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
+    with col2:
+        include_prices = st.checkbox("💰 Включить цены", value=True)
+        apply_markup = st.checkbox("📈 Применить наценку", value=True, disabled=not include_prices)
 
-    if st.button("🚀 Экспортировать"):
+        st.markdown("---")
+        st.caption("💡 Если не выбраны колонки - экспортируются все")
+
+    if st.button("🚀 Экспортировать", type="primary", key="catalog_export_btn"):
         output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_choice.lower()}"
 
-        with st.spinner("Генерация файла..."):
+        with st.spinner(f"Генерация файла {format_choice}..."):
             if format_choice == "CSV":
                 success = catalog.export_to_csv_optimized(
                     str(output_path),
@@ -9655,7 +9673,6 @@ def show_catalog_export(catalog):
             with open(output_path, "rb") as f:
                 file_data = f.read()
 
-            # ✅ ИСПРАВЛЕНИЕ v100.11: правильный MIME-тип для каждого формата
             mime_map = {
                 "CSV": "text/csv; charset=utf-8",
                 "Excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -9664,52 +9681,46 @@ def show_catalog_export(catalog):
             mime_type = mime_map.get(format_choice, "application/octet-stream")
 
             st.download_button(
-                label="⬇️ Скачать файл",
+                label=f"⬇️ Скачать {format_choice} файл",
                 data=file_data,
                 file_name=output_path.name,
                 mime=mime_type,
                 key="catalog_download"
             )
+            st.success(f"✅ Файл {output_path.name} готов к скачиванию!")
         else:
             st.error("❌ Ошибка при экспорте")
 
 
 def show_catalog_management(catalog):
-    """Управление каталогом"""
+    """🔧 Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
     st.warning("⚠️ Операции необратимы!")
 
     management_option = st.radio(
         "Выберите действие:",
         [
-            "Удалить по бренду",
-            "Удалить по артикули",
-            "Управление ценами",
-            "Исключения",
-            "Категории",
-            "Облачная синхронизация"
+            "🏭 Удалить по бренду",
+            "📦 Удалить по артикулу",
+            "💰 Управление ценами",
+            "🚫 Исключения при экспорте",
+            "🗂️ Категории товаров",
+            "☁️ Облачная синхронизация"
         ],
-        format_func=lambda x: {
-            "Удалить по бренду": "🏭 Удалить все записи бренда",
-            "Удалить по артикули": "📦 Удалить все записи артикула",
-            "Управление ценами": "💰 Цены и наценки",
-            "Исключения": "🚫 Исключения при экспорте",
-            "Категории": "🗂️ Категории товаров",
-            "Облачная синхронизация": "☁️ Облачная синхронизация"
-        }[x]
+        key="catalog_management_option"
     )
 
-    if management_option == "Удалить по бренду":
+    if management_option == "🏭 Удалить по бренду":
         catalog._show_delete_by_brand()
-    elif management_option == "Удалить по артикули":
+    elif management_option == "📦 Удалить по артикулу":
         catalog._show_delete_by_artikul()
-    elif management_option == "Управление ценами":
+    elif management_option == "💰 Управление ценами":
         catalog.show_price_settings()
-    elif management_option == "Исключения":
+    elif management_option == "🚫 Исключения при экспорте":
         catalog.show_exclusion_settings()
-    elif management_option == "Категории":
+    elif management_option == "🗂️ Категории товаров":
         catalog.show_category_mapping()
-    elif management_option == "Облачная синхронизация":
+    elif management_option == "☁️ Облачная синхронизация":
         catalog.show_cloud_sync()
 # ============================================================================
 # 🆕 БЛОК 18: КЛАСС DeepSeekRateUpdater (ЗАГЛУШКА)
