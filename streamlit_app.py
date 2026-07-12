@@ -5419,6 +5419,11 @@ class MarketplaceUnitEconomics:
 # 8. Улучшена обработка ошибок с retry логикой
 # 9. 🆕 v100.29: Исправлен прогресс-бар в process_and_load_data (защита от >1.0)
 # 10. 🆕 v100.29: Исправлен Segfault в экспорте (заменён .pl().to_pandas() на .fetchdf())
+# 11. 🆕 v100.29: Добавлен импорт retry с fallback-декоратором
+# 12. 🆕 v100.29: Исправлен подсчёт total_records (уникальные артикулы)
+# 13. 🆕 v100.29: Добавлен расчёт billable_weight
+# 14. 🆕 v100.29: Исправлена st_dataframe_compat → st.dataframe
+# 15. 🆕 v100.29: Исправлен pl.read_excel(engine='calamine') → pd.read_excel
 # ============================================================================
 import os
 import io
@@ -5440,7 +5445,21 @@ import duckdb
 import polars as pl
 import pandas as pd
 import streamlit as st
-from retry import retry
+
+# ============================================================================
+# 🆕 v100.29: ИМПОРТ RETRY С FALLBACK
+# ============================================================================
+try:
+    from retry import retry
+    RETRY_AVAILABLE = True
+except ImportError:
+    RETRY_AVAILABLE = False
+    # Создаём декоратор-заглушку
+    def retry(tries=3, delay=1, backoff=2, logger=None):
+        def decorator(func):
+            return func
+        return decorator
+    logger.warning("⚠️ Пакет 'retry' не установлен. Используется заглушка.")
 
 # Настройка логирования
 logging.basicConfig(
@@ -5606,7 +5625,7 @@ class HighVolumeAutoPartsCatalog:
                 mapping = {}
                 for line in category_path.read_text(encoding='utf-8').splitlines():
                     if line.strip() and "|" in line:
-                        parts = line.split("|", 1)  # Ограничиваем до 2 частей
+                        parts = line.split("|", 1)
                         if len(parts) == 2:
                             key, value = parts
                             mapping[key.strip()] = value.strip()
@@ -5663,6 +5682,7 @@ class HighVolumeAutoPartsCatalog:
                     image_url VARCHAR,
                     dimensions_str VARCHAR,
                     description VARCHAR,
+                    billable_weight DOUBLE DEFAULT 0.0,
                     PRIMARY KEY (artikul_norm, brand_norm)
                 )
             """)
@@ -5777,6 +5797,19 @@ class HighVolumeAutoPartsCatalog:
             ).then(pl.lit(category))
 
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
+
+    # ========================================================================
+    # 🆕 v100.29: ФУНКЦИЯ РАСЧЁТА ОПЛАЧИВАЕМОГО ВЕСА
+    # ========================================================================
+    @staticmethod
+    def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, height_cm: float, volumetric_coeff: float = 5000.0) -> float:
+        """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
+        if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
+            return weight_kg
+        volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
+        billable = max(weight_kg, volumetric_weight)
+        billable = math.ceil(billable * 2) / 2
+        return billable
 
     # ========================================================================
     # КОНВЕРТАЦИЯ ЧИСЕЛ
@@ -5904,6 +5937,9 @@ class HighVolumeAutoPartsCatalog:
         logger.info(f"Маппинг колонок: {mapping}")
         return mapping
 
+    # ========================================================================
+    # 🆕 v100.29: ИСПРАВЛЕННОЕ ЧТЕНИЕ ФАЙЛОВ (pl.read_excel → pd.read_excel)
+    # ========================================================================
     @retry(tries=3, delay=1, backoff=2, logger=logger)
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
         """Чтение и подготовка файла с retry логикой"""
@@ -5915,19 +5951,26 @@ class HighVolumeAutoPartsCatalog:
                     logger.error(f"Файл не найден: {file_path}")
                     return pl.DataFrame()
 
-                # Читаем Excel
+                # 🆕 v100.29: Используем pd.read_excel вместо pl.read_excel
                 try:
-                    df = pl.read_excel(file_path, engine='calamine')
-                    logger.info(f"Файл прочитан через calamine")
+                    pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
+                    df = pl.from_pandas(pdf)
+                    logger.info(f"Файл прочитан через openpyxl")
                 except Exception as e:
-                    logger.warning(f"Ошибка чтения через calamine: {e}")
+                    logger.warning(f"Ошибка чтения через openpyxl: {e}")
                     try:
-                        pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
+                        pdf = pd.read_excel(file_path, engine='xlrd', dtype=str)
                         df = pl.from_pandas(pdf)
-                        logger.info(f"Файл прочитан через openpyxl с dtype=str")
+                        logger.info(f"Файл прочитан через xlrd")
                     except Exception as e2:
-                        logger.error(f"Ошибка чтения через openpyxl: {e2}")
-                        return pl.DataFrame()
+                        logger.error(f"Ошибка чтения через xlrd: {e2}")
+                        try:
+                            # Последняя попытка: читаем как CSV
+                            df = pl.read_csv(file_path, ignore_errors=True)
+                            logger.info(f"Файл прочитан как CSV")
+                        except Exception as e3:
+                            logger.error(f"Ошибка чтения файла: {e3}")
+                            return pl.DataFrame()
 
                 if df.is_empty():
                     logger.warning(f"Пустой файл: {file_path}")
@@ -6098,8 +6141,7 @@ class HighVolumeAutoPartsCatalog:
         temp_view_name = f"temp_{table_name}_{int(time.time())}"
 
         try:
-            # ✅ ИСПРАВЛЕНИЕ v100.29: Используем PyArrow для безопасной регистрации
-            # Это устраняет Segfault при конвертации Polars → Pandas
+            # Используем PyArrow для безопасной регистрации
             logger.info(f"Регистрация временного представления {temp_view_name}")
             try:
                 arrow_table = df.to_arrow()
@@ -6171,7 +6213,6 @@ class HighVolumeAutoPartsCatalog:
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
                 # ✅ ИСПРАВЛЕНИЕ v100.29: Правильный расчет количества шагов
-                # ШАГ 4 (Сборка данных) выполняется ВСЕГДА, даже если нет oe/cross/prices
                 num_steps = 0
                 if 'oe' in dataframes:
                     num_steps += 1
@@ -6188,13 +6229,14 @@ class HighVolumeAutoPartsCatalog:
                 progress_bar = st.progress(0)
                 step_counter = 0
                 total_records = 0
+                # 🆕 v100.29: Уникальные артикулы для точного подсчёта
+                unique_artikuls = set()
 
                 # ====================================================================
                 # ШАГ 1: Обработка OE данных
                 # ====================================================================
                 if 'oe' in dataframes:
                     step_counter += 1
-                    # ✅ ИСПРАВЛЕНИЕ v100.29: Защита от значений > 1.0
                     progress_bar.progress(min(step_counter / num_steps, 1.0))
                     status.update(label=f"📋 ({step_counter}/{num_steps}) Обработка OE данных...")
 
@@ -6238,7 +6280,6 @@ class HighVolumeAutoPartsCatalog:
                 # ====================================================================
                 if 'cross' in dataframes:
                     step_counter += 1
-                    # ✅ ИСПРАВЛЕНИЕ v100.29: Защита от значений > 1.0
                     progress_bar.progress(min(step_counter / num_steps, 1.0))
                     status.update(label=f"🔗 ({step_counter}/{num_steps}) Обработка кросс-ссылок...")
 
@@ -6258,7 +6299,6 @@ class HighVolumeAutoPartsCatalog:
                 # ====================================================================
                 if 'prices' in dataframes:
                     step_counter += 1
-                    # ✅ ИСПРАВЛЕНИЕ v100.29: Защита от значений > 1.0
                     progress_bar.progress(min(step_counter / num_steps, 1.0))
                     status.update(label=f"💰 ({step_counter}/{num_steps}) Обработка цен...")
 
@@ -6273,7 +6313,6 @@ class HighVolumeAutoPartsCatalog:
                 # ШАГ 4: Сборка и обновление данных по артикулам
                 # ====================================================================
                 step_counter += 1
-                # ✅ ИСПРАВЛЕНИЕ v100.29: Защита от значений > 1.0
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"📦 ({step_counter}/{num_steps}) Сборка данных по артикулам...")
 
@@ -6351,6 +6390,19 @@ class HighVolumeAutoPartsCatalog:
                     if 'dimensions_str' not in parts_df.columns:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
 
+                    # 🆕 v100.29: Расчёт оплачиваемого веса
+                    parts_df = parts_df.with_columns(
+                        billable_weight=pl.map_elements(
+                            lambda row: self.calculate_billable_weight(
+                                weight_kg=row['weight'],
+                                length_cm=row['length'],
+                                width_cm=row['width'],
+                                height_cm=row['height']
+                            ),
+                            return_dtype=pl.Float64
+                        )
+                    )
+
                     # Формирование строки габаритов
                     parts_df = parts_df.with_columns([
                         pl.col('length').cast(pl.Utf8).fill_null('').alias('_length_str'),
@@ -6398,20 +6450,31 @@ class HighVolumeAutoPartsCatalog:
                     # Финальный выбор колонок
                     final_columns = [
                         'artikul_norm', 'brand_norm', 'artikul', 'brand', 'multiplicity', 'barcode',
-                        'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 'description'
+                        'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 'description', 'billable_weight'
                     ]
                     select_exprs = [pl.col(c) if c in parts_df.columns else pl.lit(None).alias(c) for c in final_columns]
                     parts_df = parts_df.select(select_exprs)
+
+                    # 🆕 v100.29: Сохраняем уникальные артикулы для точного подсчёта
+                    unique_artikuls.update(parts_df['artikul_norm'].unique().to_list())
 
                     status.write(f"💾 Сохранение {len(parts_df):,} записей в таблицу parts...")
                     self.upsert_data('parts', parts_df, ['artikul_norm', 'brand_norm'])
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
 
+                # 🆕 v100.29: Корректный подсчёт уникальных артикулов
+                unique_count = len(unique_artikuls)
+                if unique_count > 0:
+                    status.write(f"📊 Уникальных артикулов в каталоге: {unique_count:,}")
+
                 # Завершение
                 progress_bar.progress(1.0)
-                status.update(label=f"✅ Загрузка завершена! Загружено {total_records:,} записей", state="complete")
-                logger.info(f"✅ Загрузка завершена. Всего записей: {total_records}")
+                status.update(
+                    label=f"✅ Загрузка завершена! Загружено {total_records:,} записей, уникальных артикулов: {unique_count:,}",
+                    state="complete"
+                )
+                logger.info(f"✅ Загрузка завершена. Всего записей: {total_records}, уникальных артикулов: {unique_count}")
 
         finally:
             # Очистка памяти
@@ -6782,7 +6845,7 @@ RankedData AS (
     FROM parts p
     LEFT JOIN PartDetails pd ON p.artikul_norm = pd.artikul_norm AND p.brand_norm = pd.brand_norm
     LEFT JOIN AllAnalogs aa ON p.artikul_norm = aa.artikul_norm AND p.brand_norm = aa.brand_norm
-    LEFT JOIN AggregatedAnalogData p_analog ON p.artikul_norm = p_analog.artikul_norm AND p.analog_brand_norm = p_analog.brand_norm
+    LEFT JOIN AggregatedAnalogData p_analog ON p.artikul_norm = p_analog.artikul_norm AND p_analog.brand_norm = p_analog.brand_norm
 )
 """
 
@@ -6822,13 +6885,11 @@ ORDER BY r.brand, r.artikul
             with self.timer("Экспорт CSV"):
                 query = self.build_export_query(selected_columns, include_prices, apply_markup)
 
-                # ✅ ИСПРАВЛЕНИЕ v100.29: Используем .fetchdf() вместо .pl().to_pandas()
-                # Это устраняет Segfault при больших объёмах данных
+                # Используем .fetchdf() вместо .pl().to_pandas()
                 try:
                     pdf = self.conn.execute(query).fetchdf()
                 except Exception as e:
                     logger.error(f"Ошибка fetchdf: {e}")
-                    # Fallback: используем PyArrow
                     try:
                         arrow_table = self.conn.execute(query).arrow()
                         pdf = arrow_table.to_pandas()
@@ -6850,7 +6911,6 @@ ORDER BY r.brand, r.artikul
                 output_dir = Path("auto_parts_data")
                 output_dir.mkdir(parents=True, exist_ok=True)
 
-                # Используем utf-8-sig для автоматического добавления BOM
                 pdf.to_csv(output_path, sep=';', index=False, encoding='utf-8-sig')
 
                 size_mb = os.path.getsize(output_path) / (1024 * 1024)
@@ -6879,13 +6939,10 @@ ORDER BY r.brand, r.artikul
             try:
                 query = self.build_export_query(selected_columns, include_prices, apply_markup)
 
-                # ✅ ИСПРАВЛЕНИЕ v100.29: Используем .fetchdf() вместо pd.read_sql()
-                # Это быстрее и безопаснее для больших объёмов
                 try:
                     df = self.conn.execute(query).fetchdf()
                 except Exception as e:
                     logger.error(f"Ошибка fetchdf: {e}")
-                    # Fallback: используем PyArrow
                     try:
                         arrow_table = self.conn.execute(query).arrow()
                         df = arrow_table.to_pandas()
