@@ -5406,15 +5406,14 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.16)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.17)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.16:
+# ✅ ИСПРАВЛЕНИЯ v100.17:
 # 1. Полная защита от дубликатов колонок при маппинге (исправляет "column 'weight' is duplicate")
-# 2. Габариты тянутся из OE файла (если там есть длина/ширина/высота/вес)
-# 3. Упрощён upsert_data — используется WHERE (...) IN (SELECT ...)
-#    вместо сложного EXISTS с JOIN — это решает Segmentation fault в DuckDB
-# 4. build_export_query использует $${text}$$ синтаксис DuckDB
-# 5. Колонки габаритов: "Длинна", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"
+# 2. Добавлены габариты в OE schema (length, width, height, weight, dimensions_str)
+# 3. OE файл теперь тоже передаёт габариты в parts
+# 4. Упрощён upsert_data — используется WHERE (...) IN (SELECT ...)
+# 5. build_export_query использует $${text}$$ синтаксис DuckDB
 # 6. st.experimental_rerun() заменено на st.rerun()
 # ============================================================================
 
@@ -5622,7 +5621,7 @@ class HighVolumeAutoPartsCatalog:
             except Exception as e:
                 logger.warning(f"Не удалось создать индекс: {e}")
         
-        st.success("🛠️ Индексы созданы.")
+        st.success("️ Индексы созданы.")
     
     # ========================================================================
     # НОРМАЛИЗАЦИЯ И ОЧИСТКА
@@ -5653,13 +5652,11 @@ class HighVolumeAutoPartsCatalog:
         
         categorization_expr = pl.when(pl.lit(False)).then(pl.lit(None))
         
-        # Пользовательские правила — приоритет
         for key, category in self.category_mapping.items():
             categorization_expr = categorization_expr.when(
                 name_lower.str.contains(key.lower())
             ).then(pl.lit(category))
         
-        # Стандартные правила
         categories_map = {
             'Фильтр': 'фильтр|filter',
             'Тормоза': 'тормоз|brake|колодк|диск|суппорт',
@@ -5681,11 +5678,11 @@ class HighVolumeAutoPartsCatalog:
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ========================================================================
-    # ✅ ОБРАБОТКА ФАЙЛОВ (ИСПРАВЛЕНО v100.16 — ЗАЩИТА ОТ ДУБЛИКАТОВ)
+    # ✅ ОБРАБОТКА ФАЙЛОВ (ИСПРАВЛЕНО v100.17 — ЗАЩИТА ОТ ДУБЛИКАТОВ + ГАБАРИТЫ В OE)
     # ========================================================================
     def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
         """
-        ✅ ИСПРАВЛЕНИЕ v100.16: Защита от дубликатов при маппинге колонок
+        ✅ ИСПРАВЛЕНИЕ v100.17: Защита от дубликатов при маппинге колонок
         Использует систему приоритетов для выбора лучшего варианта
         """
         column_variants = {
@@ -5745,7 +5742,7 @@ class HighVolumeAutoPartsCatalog:
     
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
         """
-        ✅ ИСПРАВЛЕНИЕ v100.16: Полная защита от дубликатов колонок
+        ✅ ИСПРАВЛЕНИЕ v100.17: Полная защита от дубликатов колонок
         """
         logger.info(f"Обработка файла: {file_type} ({file_path})")
         
@@ -5766,6 +5763,7 @@ class HighVolumeAutoPartsCatalog:
             logger.exception(f"Ошибка чтения файла {file_path}: {e}")
             return pl.DataFrame()
         
+        # ✅ ИСПРАВЛЕНИЕ v100.17: OE schema теперь включает габариты
         schemas = {
             'oe': ['oe_number', 'artikul', 'brand', 'name', 'applicability',
                    'length', 'width', 'height', 'weight', 'dimensions_str', 'price', 'currency'],
@@ -5789,7 +5787,7 @@ class HighVolumeAutoPartsCatalog:
         
         logger.info(f"Маппинг колонок для {file_type}: {column_mapping}")
         
-        # ✅ ИСПРАВЛЕНИЕ v100.16: Безопасное переименование с защитой от дубликатов
+        # ✅ ИСПРАВЛЕНИЕ v100.17: Безопасное переименование с защитой от дубликатов
         try:
             df = df.rename(column_mapping)
         except Exception as e:
@@ -5804,7 +5802,7 @@ class HighVolumeAutoPartsCatalog:
                 except Exception as e2:
                     logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
         
-        # ✅ ИСПРАВЛЕНИЕ v100.16: Удаляем дубликаты колонок после rename
+        # ✅ ИСПРАВЛЕНИЕ v100.17: Удаляем дубликаты колонок после rename
         if len(df.columns) != len(set(df.columns)):
             logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
             seen = set()
@@ -5865,26 +5863,22 @@ class HighVolumeAutoPartsCatalog:
         cols = df.columns
         temp_view_name = f"temp_{table_name}_{int(time.time())}"
         
-        # Регистрация временной таблицы в DuckDB
         try:
             self.conn.register(temp_view_name, df.to_arrow())
         except Exception as e:
             logger.error(f"Ошибка регистрации временной таблицы: {e}")
             return
         
-        # DuckDB не гарантирует синтаксис ON CONFLICT как в Postgres -> используем delete+insert
         try:
             pk_list = pk
             pk_cols_csv = ", ".join(f'"{c}"' for c in pk_list)
             
-            # удалить существующие записи, которые совпадают по PK
             delete_sql = f"""
                 DELETE FROM {table_name}
                 WHERE ({pk_cols_csv}) IN (SELECT {pk_cols_csv} FROM {temp_view_name});
             """
             self.conn.execute(delete_sql)
             
-            # вставить новые записи
             insert_sql = f"""
                 INSERT INTO {table_name}
                 SELECT * FROM {temp_view_name};
@@ -5927,7 +5921,7 @@ class HighVolumeAutoPartsCatalog:
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
         """
-        ✅ ИСПРАВЛЕНО v100.16: Габариты тянутся из OE файла
+        ✅ ИСПРАВЛЕНО v100.17: Габариты тянутся из OE файла
         """
         st.info("🔄 Начало загрузки и обновления данных в базе...")
         
@@ -5996,7 +5990,7 @@ class HighVolumeAutoPartsCatalog:
         progress_bar.progress(step_counter / (num_steps + 1),
                               text=f"({step_counter}/{num_steps}) Сборка и обновление данных по артикулам...")
         
-        # ✅ ИСПРАВЛЕНИЕ v100.16: Приоритет файлов для габаритов
+        # ✅ ИСПРАВЛЕНИЕ v100.17: Приоритет файлов для габаритов
         # OE идёт первым, чтобы габариты из OE подтянулись первыми
         file_priority = ['oe', 'dimensions', 'barcode', 'images']
         key_files = {ftype: df for ftype,
@@ -6018,7 +6012,7 @@ class HighVolumeAutoPartsCatalog:
                 if df.is_empty() or 'artikul_norm' not in df.columns:
                     continue
                 
-                # ✅ ИСПРАВЛЕНИЕ v100.16: Для OE и dimensions файлов принудительно добавляем габариты
+                # ✅ ИСПРАВЛЕНИЕ v100.17: Для OE и dimensions файлов принудительно добавляем габариты
                 if ftype in ['oe', 'dimensions']:
                     dims_to_add = ['length', 'width', 'height', 'weight', 'dimensions_str']
                     join_cols = [col for col in dims_to_add if col in df.columns]
@@ -6035,7 +6029,7 @@ class HighVolumeAutoPartsCatalog:
                 if not join_cols:
                     continue
                 
-                logger.info(f"🔗 Join {ftype}: колонки {join_cols}")
+                logger.info(f" Join {ftype}: колонки {join_cols}")
                 
                 df_subset = df.select(['artikul_norm', 'brand_norm'] + join_cols).unique(
                     subset=['artikul_norm', 'brand_norm'], keep='first')
@@ -6132,7 +6126,6 @@ class HighVolumeAutoPartsCatalog:
     def _get_brand_markups_sql(self) -> str:
         rows = []
         for brand, markup in self.price_rules['brand_markups'].items():
-            # экранируем одинарные кавычки в brand
             safe_brand = brand.replace("'", "''")
             rows.append(f"SELECT '{safe_brand}' AS brand, {markup} AS markup")
         return " UNION ALL ".join(rows) if rows else "SELECT NULL AS brand, NULL AS markup LIMIT 0"
@@ -6152,13 +6145,10 @@ class HighVolumeAutoPartsCatalog:
             "Выбирайте только лучшее — надежность и качество от ведущих производителей."
         )
         
-        # Подготовка SQL для наценок по брендам
         brand_markups_sql = self._get_brand_markups_sql()
         
-        # Составляем список выражений для SELECT последовательно
         select_parts = []
         
-        # Колонки с ценой
         price_requested = include_prices and (not selected_columns or "Цена" in selected_columns or "Валюта" in selected_columns)
         if price_requested:
             if apply_markup:
@@ -6170,7 +6160,6 @@ class HighVolumeAutoPartsCatalog:
                 select_parts.append('pr.price AS "Цена"')
             select_parts.append("COALESCE(pr.currency, 'RUB') AS \"Валюта\"")
         
-        # Остальные колонки (название -> выражение)
         columns_map = [
             ("Артикул бренда", 'r.artikul AS "Артикул бренда"'),
             ("Бренд", 'r.brand AS "Бренд"'),
@@ -6198,19 +6187,15 @@ class HighVolumeAutoPartsCatalog:
             ("Ссылка на изображение", 'r.image_url AS "Ссылка на изображение"')
         ]
         
-        # Добавляем остальные выражения
         for name, expr in columns_map:
             if not selected_columns or name in selected_columns:
                 select_parts.append(expr.strip())
         
-        # Если пользователь полностью снял все колонки — включаем минимум
         if not select_parts:
             select_parts = ['r.artikul AS "Артикул бренда"', 'r.brand AS "Бренд"']
         
-        # Собираем тело SELECT
         select_clause = ",\n        ".join(select_parts)
         
-        # ✅ Используем $${description_text}$$ синтаксис DuckDB
         ctes = f"""
         WITH DescriptionTemplate AS (
             SELECT CHR(10) || CHR(10) || $${description_text}$$ AS text
@@ -6412,7 +6397,6 @@ class HighVolumeAutoPartsCatalog:
             df = self.conn.execute(query).pl()
             pdf = df.to_pandas()
             
-            # Обработка колонок размеров
             dimension_cols = ["Длинна", "Ширина",
                               "Высота", "Вес", "Длинна/Ширина/Высота"]
             for col in dimension_cols:
@@ -6585,7 +6569,7 @@ class HighVolumeAutoPartsCatalog:
         apply_markup = st.checkbox(
             "Применить наценку", value=True, disabled=not include_prices)
         
-        if st.button("🚀 Экспортировать"):
+        if st.button(" Экспортировать"):
             output_path = self.data_dir / f"export.{format_choice.lower()}"
             
             with st.spinner("Генерация файла..."):
@@ -6698,7 +6682,7 @@ class HighVolumeAutoPartsCatalog:
             st.success("✅ Правила исключения сохранены")
     
     def show_category_mapping(self):
-        st.header("🗂️ Управление категориями товаров")
+        st.header("️ Управление категориями товаров")
         st.info("Настройте соответствие между названиями товаров и категориями")
         
         st.subheader("Текущие правила")
@@ -6733,7 +6717,7 @@ class HighVolumeAutoPartsCatalog:
                 st.success(
                     f"Добавлено: {name_pattern.strip()} → {category.strip()}")
                 
-                st.rerun()  # ✅ ИСПРАВЛЕНО: st.experimental_rerun() → st.rerun()
+                st.rerun()
             else:
                 st.error("Заполните оба поля")
         
@@ -6750,7 +6734,7 @@ class HighVolumeAutoPartsCatalog:
                 self.save_category_mapping()
                 st.success(f"Удалено: {rule_to_delete}")
                 
-                st.rerun()  # ✅ ИСПРАВЛЕНО: st.experimental_rerun() → st.rerun()
+                st.rerun()
     
     def show_cloud_sync(self):
         st.header("☁️ Облачная синхронизация")
@@ -6915,7 +6899,7 @@ class HighVolumeAutoPartsCatalog:
                 deleted = self.delete_by_brand(brand_norm)
                 st.success(f"Удалено {deleted} записей")
                 
-                st.rerun()  # ✅ ИСПРАВЛЕНО: st.experimental_rerun() → st.rerun()
+                st.rerun()
     
     def _show_delete_by_artikul(self):
         st.subheader("Удаление по артикулу")
@@ -6935,7 +6919,7 @@ class HighVolumeAutoPartsCatalog:
                     deleted = self.delete_by_artikul(artikul_norm)
                     st.success(f"Удалено {deleted} записей")
                     
-                    st.rerun()  # ✅ ИСПРАВЛЕНО: st.experimental_rerun() → st.rerun()
+                    st.rerun()
                     
 # ============================================================================
 # БЛОК 12: ВАЛИДАТОР ВЕСОГАБАРИТОВ
