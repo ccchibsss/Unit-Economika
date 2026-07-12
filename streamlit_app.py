@@ -5406,15 +5406,15 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.15)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.16)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.15:
-# 1. Упрощён upsert_data — используется WHERE (...) IN (SELECT ...)
+# ✅ ИСПРАВЛЕНИЯ v100.16:
+# 1. Полная защита от дубликатов колонок при маппинге (исправляет "column 'weight' is duplicate")
+# 2. Габариты тянутся из OE файла (если там есть длина/ширина/высота/вес)
+# 3. Упрощён upsert_data — используется WHERE (...) IN (SELECT ...)
 #    вместо сложного EXISTS с JOIN — это решает Segmentation fault в DuckDB
-# 2. build_export_query использует $${text}$$ синтаксис DuckDB
-# 3. Упрощены detect_columns и read_and_prepare_file
-# 4. Упрощены export_to_csv_optimized и export_to_excel_optimized
-# 5. Упрощён process_and_load_data
+# 4. build_export_query использует $${text}$$ синтаксис DuckDB
+# 5. Колонки габаритов: "Длинна", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"
 # 6. st.experimental_rerun() заменено на st.rerun()
 # ============================================================================
 
@@ -5681,44 +5681,72 @@ class HighVolumeAutoPartsCatalog:
         return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ========================================================================
-    # ОБРАБОТКА ФАЙЛОВ (✅ УПРОЩЕНО v100.15)
+    # ✅ ОБРАБОТКА ФАЙЛОВ (ИСПРАВЛЕНО v100.16 — ЗАЩИТА ОТ ДУБЛИКАТОВ)
     # ========================================================================
     def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
-        """Упрощённый маппинг колонок"""
+        """
+        ✅ ИСПРАВЛЕНИЕ v100.16: Защита от дубликатов при маппинге колонок
+        Использует систему приоритетов для выбора лучшего варианта
+        """
         column_variants = {
-            'oe_number': ['oe номер', 'oe', 'оe', 'номер', 'code', 'OE'],
-            'artikul': ['артикул', 'article', 'sku'],
-            'brand': ['бренд', 'brand', 'производитель', 'manufacturer'],
-            'name': ['наименование', 'название', 'name', 'описание', 'description'],
-            'applicability': ['применимость', 'автомобиль', 'vehicle', 'applicability'],
-            'barcode': ['штрих-код', 'barcode', 'штрихкод', 'ean', 'eac13'],
-            'multiplicity': ['кратность шт', 'кратность', 'multiplicity'],
-            'length': ['длина (см)', 'длина', 'length', 'длинна'],
-            'width': ['ширина (см)', 'ширина', 'width'],
-            'height': ['высота (см)', 'высота', 'height'],
-            'weight': ['вес (кг)', 'вес, кг', 'вес', 'weight'],
-            'image_url': ['ссылка', 'url', 'изображение', 'image', 'картинка'],
-            'dimensions_str': ['весогабариты', 'размеры', 'dimensions', 'size'],
-            'price': ['цена', 'price', 'рекомендованная цена', 'retail price'],
+            'oe_number': ['oe номер', 'oe', 'оe', 'номер', 'code', 'OE', 'oe_number', 'oe number'],
+            'artikul': ['артикул', 'article', 'sku', 'artikul', 'код товара', 'код', 'код артикула'],
+            'brand': ['бренд', 'brand', 'производитель', 'manufacturer', 'марка'],
+            'name': ['наименование', 'название', 'name', 'описание', 'description', 'товар', 'наименование товара'],
+            'applicability': ['применимость', 'автомобиль', 'vehicle', 'applicability', 'применяемость'],
+            'barcode': ['штрих-код', 'barcode', 'штрихкод', 'ean', 'eac13', 'штрих код'],
+            'multiplicity': ['кратность шт', 'кратность', 'multiplicity', 'кратность упаковки'],
+            'length': ['длина (см)', 'длина', 'length', 'длинна', 'длина, см', 'length_cm'],
+            'width': ['ширина (см)', 'ширина', 'width', 'ширина, см', 'width_cm'],
+            'height': ['высота (см)', 'высота', 'height', 'высота, см', 'height_cm'],
+            'weight': ['вес (кг)', 'вес, кг', 'вес', 'weight', 'масса', 'weight_kg', 'вес кг'],
+            'image_url': ['ссылка', 'url', 'изображение', 'image', 'картинка', 'фото', 'ссылка на изображение'],
+            'dimensions_str': ['весогабариты', 'размеры', 'dimensions', 'size', 'габариты', 'длинна/ширина/высота', 'длина/ширина/высота'],
+            'price': ['цена', 'price', 'рекомендованная цена', 'retail price', 'цена продажи', 'стоимость'],
             'currency': ['валюта', 'currency']
         }
         
-        actual_lower = {col.lower(): col for col in actual_columns}
+        actual_lower = {col.lower().strip(): col for col in actual_columns}
         mapping = {}
+        used_actual = set()  # ✅ Отслеживаем уже замапленные колонки
         
         for expected in expected_columns:
             variants = column_variants.get(expected, [expected])
+            
+            best_match = None
+            best_score = -1
+            
             for variant in variants:
-                variant_lower = variant.lower()
+                variant_lower = variant.lower().strip()
+                
                 for actual_l, actual_orig in actual_lower.items():
-                    if variant_lower in actual_l and actual_orig not in mapping:
-                        mapping[actual_orig] = expected
-                        break
+                    # ✅ Пропускаем уже замапленные колонки
+                    if actual_orig in used_actual:
+                        continue
+                    
+                    score = 0
+                    if variant_lower == actual_l:
+                        score = 100  # Точное совпадение - максимальный приоритет
+                    elif variant_lower in actual_l:
+                        score = 50 + len(variant_lower)  # Чем длиннее совпадение, тем лучше
+                    elif actual_l in variant_lower:
+                        score = 30 + len(actual_l)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_match = actual_orig
+            
+            if best_match and best_score > 0:
+                mapping[best_match] = expected
+                used_actual.add(best_match)
         
+        logger.info(f"Маппинг колонок: {mapping}")
         return mapping
     
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
-        """Упрощённая обработка файлов"""
+        """
+        ✅ ИСПРАВЛЕНИЕ v100.16: Полная защита от дубликатов колонок
+        """
         logger.info(f"Обработка файла: {file_type} ({file_path})")
         
         try:
@@ -5732,17 +5760,23 @@ class HighVolumeAutoPartsCatalog:
                 logger.warning(f"Пустой файл: {file_path}")
                 return pl.DataFrame()
             
+            logger.info(f"Исходные колонки файла {file_type}: {df.columns}")
+            
         except Exception as e:
             logger.exception(f"Ошибка чтения файла {file_path}: {e}")
             return pl.DataFrame()
         
         schemas = {
-            'oe': ['oe_number', 'artikul', 'brand', 'name', 'applicability'],
+            'oe': ['oe_number', 'artikul', 'brand', 'name', 'applicability',
+                   'length', 'width', 'height', 'weight', 'dimensions_str', 'price', 'currency'],
             'cross': ['oe_number', 'artikul', 'brand'],
             'barcode': ['artikul', 'brand', 'barcode', 'multiplicity'],
             'dimensions': ['artikul', 'brand', 'length', 'width', 'height', 'weight', 'dimensions_str'],
             'images': ['artikul', 'brand', 'image_url'],
-            'prices': ['artikul', 'brand', 'price', 'currency']
+            'prices': ['artikul', 'brand', 'price', 'currency'],
+            'universal': ['artikul', 'brand', 'name', 'oe_number', 'applicability',
+                         'length', 'width', 'height', 'weight', 'dimensions_str',
+                         'price', 'currency', 'barcode', 'multiplicity', 'image_url']
         }
         
         expected_cols = schemas.get(file_type, [])
@@ -5753,14 +5787,56 @@ class HighVolumeAutoPartsCatalog:
                 f"Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
             return pl.DataFrame()
         
-        df = df.rename(column_mapping)
+        logger.info(f"Маппинг колонок для {file_type}: {column_mapping}")
         
-        # Очистка ключевых колонок
+        # ✅ ИСПРАВЛЕНИЕ v100.16: Безопасное переименование с защитой от дубликатов
+        try:
+            df = df.rename(column_mapping)
+        except Exception as e:
+            logger.error(f"Ошибка при rename: {e}")
+            # Fallback: переименовываем по одной колонке
+            for old_name, new_name in column_mapping.items():
+                try:
+                    if new_name not in df.columns:
+                        df = df.rename({old_name: new_name})
+                    else:
+                        logger.warning(f"Колонка {new_name} уже существует, пропускаем {old_name}")
+                except Exception as e2:
+                    logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
+        
+        # ✅ ИСПРАВЛЕНИЕ v100.16: Удаляем дубликаты колонок после rename
+        if len(df.columns) != len(set(df.columns)):
+            logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
+            seen = set()
+            cols_to_keep = []
+            for col in df.columns:
+                if col not in seen:
+                    seen.add(col)
+                    cols_to_keep.append(col)
+                else:
+                    logger.warning(f"Удаляем дубликат колонки: {col}")
+            df = df.select(cols_to_keep)
+        
+        # Нормализация ключевых колонок
         for col in ['artikul', 'brand', 'oe_number']:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # Удаление дубликатов
+        # Нормализация числовых колонок (габариты, цена)
+        numeric_cols = ['length', 'width', 'height', 'weight', 'price']
+        for col in numeric_cols:
+            if col in df.columns:
+                try:
+                    df = df.with_columns(
+                        pl.col(col).cast(pl.Utf8)
+                        .str.replace_all(',', '.')
+                        .cast(pl.Float64)
+                        .alias(col)
+                    )
+                except Exception as e:
+                    logger.warning(f"Не удалось преобразовать {col} в число: {e}")
+        
+        # Удаление дубликатов по ключевым колонкам
         key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
         if key_cols:
             df = df.unique(subset=key_cols, keep='first')
@@ -5771,6 +5847,7 @@ class HighVolumeAutoPartsCatalog:
                 df = df.with_columns(self.normalize_key(
                     pl.col(col)).alias(f"{col}_norm"))
         
+        logger.info(f"Файл {file_type} обработан. Итоговые колонки: {df.columns}")
         return df
     
     # ========================================================================
@@ -5849,7 +5926,9 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """Упрощённая обработка и загрузка данных"""
+        """
+        ✅ ИСПРАВЛЕНО v100.16: Габариты тянутся из OE файла
+        """
         st.info("🔄 Начало загрузки и обновления данных в базе...")
         
         steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
@@ -5917,11 +5996,13 @@ class HighVolumeAutoPartsCatalog:
         progress_bar.progress(step_counter / (num_steps + 1),
                               text=f"({step_counter}/{num_steps}) Сборка и обновление данных по артикулам...")
         
-        # Собираем parts из разных файлов
-        parts_df = None
-        file_priority = ['oe', 'barcode', 'images', 'dimensions']
+        # ✅ ИСПРАВЛЕНИЕ v100.16: Приоритет файлов для габаритов
+        # OE идёт первым, чтобы габариты из OE подтянулись первыми
+        file_priority = ['oe', 'dimensions', 'barcode', 'images']
         key_files = {ftype: df for ftype,
                      df in dataframes.items() if ftype in file_priority}
+        
+        parts_df = None
         
         if key_files:
             all_parts = pl.concat([
@@ -5937,8 +6018,8 @@ class HighVolumeAutoPartsCatalog:
                 if df.is_empty() or 'artikul_norm' not in df.columns:
                     continue
                 
-                # ✅ Для dimensions файла принудительно добавляем габариты
-                if ftype == 'dimensions':
+                # ✅ ИСПРАВЛЕНИЕ v100.16: Для OE и dimensions файлов принудительно добавляем габариты
+                if ftype in ['oe', 'dimensions']:
                     dims_to_add = ['length', 'width', 'height', 'weight', 'dimensions_str']
                     join_cols = [col for col in dims_to_add if col in df.columns]
                 else:
@@ -5953,6 +6034,8 @@ class HighVolumeAutoPartsCatalog:
                     col for col in join_cols if col not in existing_cols]
                 if not join_cols:
                     continue
+                
+                logger.info(f"🔗 Join {ftype}: колонки {join_cols}")
                 
                 df_subset = df.select(['artikul_norm', 'brand_norm'] + join_cols).unique(
                     subset=['artikul_norm', 'brand_norm'], keep='first')
@@ -6056,7 +6139,7 @@ class HighVolumeAutoPartsCatalog:
     
     def build_export_query(self, selected_columns=None, include_prices=True, apply_markup=True):
         """
-        ✅ УПРОЩЕНО v100.15: 
+        ✅ УПРОЩЕНО v100.15:
         - Используется $${description_text}$$ синтаксис DuckDB
         - Колонки габаритов: "Длинна", "Ширина", "Высота", "Вес", "Длинна/Ширина/Высота"
         """
@@ -6138,12 +6221,12 @@ class HighVolumeAutoPartsCatalog:
             ) AS tmp
         ),
         PartDetails AS (
-            SELECT 
-                cr.artikul_norm, 
+            SELECT
+                cr.artikul_norm,
                 cr.brand_norm,
                 STRING_AGG(
                     DISTINCT regexp_replace(
-                        regexp_replace(o.oe_number, '''', ''), 
+                        regexp_replace(o.oe_number, '''', ''),
                         '[^0-9A-Za-zА-Яа-яЁё`\\-\\s]', '', 'g'
                     ), ', '
                 ) AS oe_list,
@@ -6155,12 +6238,12 @@ class HighVolumeAutoPartsCatalog:
             GROUP BY cr.artikul_norm, cr.brand_norm
         ),
         AllAnalogs AS (
-            SELECT 
-                cr1.artikul_norm, 
+            SELECT
+                cr1.artikul_norm,
                 cr1.brand_norm,
                 STRING_AGG(
                     DISTINCT regexp_replace(
-                        regexp_replace(p2.artikul, '''', ''), 
+                        regexp_replace(p2.artikul, '''', ''),
                         '[^0-9A-Za-zА-Яа-яЁё`\\-\\s]', '', 'g'
                     ), ', '
                 ) AS analog_list
@@ -6177,34 +6260,34 @@ class HighVolumeAutoPartsCatalog:
             WHERE cr.oe_number_norm IS NOT NULL
         ),
         Level1Analogs AS (
-            SELECT DISTINCT 
-                i.artikul_norm AS source_artikul_norm, 
+            SELECT DISTINCT
+                i.artikul_norm AS source_artikul_norm,
                 i.brand_norm AS source_brand_norm,
-                cr2.artikul_norm AS related_artikul_norm, 
+                cr2.artikul_norm AS related_artikul_norm,
                 cr2.brand_norm AS related_brand_norm
             FROM InitialOENumbers i
             JOIN cross_references cr2 ON i.oe_number_norm = cr2.oe_number_norm
             WHERE NOT (i.artikul_norm = cr2.artikul_norm AND i.brand_norm = cr2.brand_norm)
         ),
         Level1OENumbers AS (
-            SELECT DISTINCT 
-                l1.source_artikul_norm, 
-                l1.source_brand_norm, 
+            SELECT DISTINCT
+                l1.source_artikul_norm,
+                l1.source_brand_norm,
                 cr3.oe_number_norm
             FROM Level1Analogs l1
             JOIN cross_references cr3 ON l1.related_artikul_norm = cr3.artikul_norm AND l1.related_brand_norm = cr3.brand_norm
             WHERE NOT EXISTS (
                 SELECT 1 FROM InitialOENumbers i
-                WHERE i.artikul_norm = l1.source_artikul_norm 
-                  AND i.brand_norm = l1.source_brand_norm 
+                WHERE i.artikul_norm = l1.source_artikul_norm
+                  AND i.brand_norm = l1.source_brand_norm
                   AND i.oe_number_norm = cr3.oe_number_norm
             )
         ),
         Level2Analogs AS (
-            SELECT DISTINCT 
-                loe.source_artikul_norm, 
+            SELECT DISTINCT
+                loe.source_artikul_norm,
                 loe.source_brand_norm,
-                cr4.artikul_norm AS related_artikul_norm, 
+                cr4.artikul_norm AS related_artikul_norm,
                 cr4.brand_norm AS related_brand_norm
             FROM Level1OENumbers loe
             JOIN cross_references cr4 ON loe.oe_number_norm = cr4.oe_number_norm
@@ -6218,7 +6301,7 @@ class HighVolumeAutoPartsCatalog:
             FROM Level2Analogs
         ),
         AggregatedAnalogData AS (
-            SELECT 
+            SELECT
                 arp.source_artikul_norm AS artikul_norm,
                 arp.source_brand_norm AS brand_norm,
                 MAX(CASE WHEN p2.length IS NOT NULL THEN p2.length ELSE NULL END) AS length,
@@ -6226,28 +6309,28 @@ class HighVolumeAutoPartsCatalog:
                 MAX(CASE WHEN p2.height IS NOT NULL THEN p2.height ELSE NULL END) AS height,
                 MAX(CASE WHEN p2.weight IS NOT NULL THEN p2.weight ELSE NULL END) AS weight,
                 ANY_VALUE(
-                    CASE 
+                    CASE
                         WHEN p2.dimensions_str IS NOT NULL AND p2.dimensions_str != '' AND UPPER(TRIM(p2.dimensions_str)) != 'XX'
                         THEN p2.dimensions_str
                         ELSE NULL
                     END
                 ) AS dimensions_str,
                 ANY_VALUE(
-                    CASE 
-                        WHEN pd2.representative_name IS NOT NULL AND pd2.representative_name != '' 
-                        THEN pd2.representative_name 
+                    CASE
+                        WHEN pd2.representative_name IS NOT NULL AND pd2.representative_name != ''
+                        THEN pd2.representative_name
                         ELSE NULL
                     END
                 ) AS representative_name,
                 ANY_VALUE(
-                    CASE 
+                    CASE
                         WHEN pd2.representative_applicability IS NOT NULL AND pd2.representative_applicability != ''
                         THEN pd2.representative_applicability
                         ELSE NULL
                     END
                 ) AS representative_applicability,
                 ANY_VALUE(
-                    CASE 
+                    CASE
                         WHEN pd2.representative_category IS NOT NULL AND pd2.representative_category != ''
                         THEN pd2.representative_category
                         ELSE NULL
@@ -6259,7 +6342,7 @@ class HighVolumeAutoPartsCatalog:
             GROUP BY arp.source_artikul_norm, arp.source_brand_norm
         ),
         RankedData AS (
-            SELECT 
+            SELECT
                 p.artikul_norm,
                 p.brand_norm,
                 p.artikul,
@@ -6286,7 +6369,7 @@ class HighVolumeAutoPartsCatalog:
                 p_analog.representative_applicability AS analog_representative_applicability,
                 p_analog.representative_category AS analog_representative_category,
                 ROW_NUMBER() OVER (
-                    PARTITION BY p.artikul_norm, p.brand_norm 
+                    PARTITION BY p.artikul_norm, p.brand_norm
                     ORDER BY pd.representative_name DESC NULLS LAST, pd.oe_list DESC NULLS LAST
                 ) AS rn
             FROM parts p
@@ -6853,6 +6936,7 @@ class HighVolumeAutoPartsCatalog:
                     st.success(f"Удалено {deleted} записей")
                     
                     st.rerun()  # ✅ ИСПРАВЛЕНО: st.experimental_rerun() → st.rerun()
+                    
 # ============================================================================
 # БЛОК 12: ВАЛИДАТОР ВЕСОГАБАРИТОВ
 # ============================================================================
