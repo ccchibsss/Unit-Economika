@@ -5406,15 +5406,16 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.20)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.21)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.20:
-# 1. ПОЛНОЕ ИСПРАВЛЕНИЕ ПРОБЛЕМЫ С ДАТАМИ В ГАБАРИТАХ
-# 2. Принудительная конвертация всех числовых колонок через Decimal
-# 3. Защита от любых типов данных (datetime, timedelta, строки)
-# 4. Автоматическое определение Excel serial number для дат
-# 5. Приоритет габаритов: данные > OE > аналоги
-# 6. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
+# ✅ ИСПРАВЛЕНИЯ v100.21:
+# 1. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
+# 2. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
+# 3. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
+# 4. Правильный порядок колонок при вставке в таблицу oe
+# 5. ПОЛНОЕ ИСПРАВЛЕНИЕ ПРОБЛЕМЫ С ДАТАМИ В ГАБАРИТАХ
+# 6. Приоритет габаритов: данные > OE > аналоги
+# 7. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
 # ============================================================================
 
 @st.cache_resource
@@ -6020,7 +6021,8 @@ class HighVolumeAutoPartsCatalog:
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
         """
-        ✅ ИСПРАВЛЕНО v100.20: Габариты тянутся из OE файла + защита от дат
+        ✅ ИСПРАВЛЕНО v100.21: Габариты тянутся из OE файла + защита от дат
+        ✅ ИСПРАВЛЕНИЕ: Исправлена ошибка "table oe has 10 columns but 5 values were supplied"
         """
         st.info("🔄 Начало загрузки и обновления данных в базе...")
         
@@ -6040,19 +6042,41 @@ class HighVolumeAutoPartsCatalog:
             
             df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
             
-            # ✅ v100.20: Сохраняем габариты из OE
+            # ✅ ИСПРАВЛЕНИЕ v100.21: Сохраняем ВСЕ колонки, включая габариты
             oe_columns = ['oe_number_norm', 'oe_number', 'name', 'applicability']
+            
+            # Добавляем габариты, если они есть в данных
             if 'length' in df.columns:
                 oe_columns.append('length')
+            else:
+                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('length'))
+                oe_columns.append('length')
+            
             if 'width' in df.columns:
                 oe_columns.append('width')
+            else:
+                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('width'))
+                oe_columns.append('width')
+            
             if 'height' in df.columns:
                 oe_columns.append('height')
+            else:
+                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('height'))
+                oe_columns.append('height')
+            
             if 'weight' in df.columns:
                 oe_columns.append('weight')
+            else:
+                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('weight'))
+                oe_columns.append('weight')
+            
             if 'dimensions_str' in df.columns:
                 oe_columns.append('dimensions_str')
+            else:
+                df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias('dimensions_str'))
+                oe_columns.append('dimensions_str')
             
+            # ✅ Теперь выбираем ВСЕ колонки, которые есть в таблице oe
             oe_df = df.select(oe_columns).unique(subset=['oe_number_norm'], keep='first')
             
             if 'name' in oe_df.columns:
@@ -6060,6 +6084,13 @@ class HighVolumeAutoPartsCatalog:
                     self.determine_category_vectorized(pl.col('name')))
             else:
                 oe_df = oe_df.with_columns(category=pl.lit('Разное'))
+            
+            # ✅ Убеждаемся, что порядок колонок соответствует таблице
+            # Таблица oe: oe_number_norm, oe_number, name, applicability, category, length, width, height, weight, dimensions_str
+            oe_df = oe_df.select([
+                'oe_number_norm', 'oe_number', 'name', 'applicability', 'category',
+                'length', 'width', 'height', 'weight', 'dimensions_str'
+            ])
             
             self.upsert_data('oe', oe_df, ['oe_number_norm'])
             
