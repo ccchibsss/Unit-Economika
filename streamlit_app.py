@@ -6158,11 +6158,17 @@ class HighVolumeAutoPartsCatalog:
         """Обработка и загрузка данных с улучшенным прогресс-баром"""
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
-                steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
-                num_steps = len(steps)
-                if 'prices' in dataframes:
-                    num_steps += 1
+                # ✅ ИСПРАВЛЕНИЕ: Правильный расчет количества шагов
+                num_steps = 0
+                if 'oe' in dataframes: num_steps += 1
+                if 'cross' in dataframes: num_steps += 1
+                if 'prices' in dataframes: num_steps += 1
+                num_steps += 1  # ШАГ 4: Сборка данных по артикулам (выполняется всегда)
                 
+                # Защита от деления на ноль
+                if num_steps == 0:
+                    num_steps = 1
+
                 progress_bar = st.progress(0)
                 step_counter = 0
                 total_records = 0
@@ -6170,7 +6176,7 @@ class HighVolumeAutoPartsCatalog:
                 # ШАГ 1: Обработка OE данных
                 if 'oe' in dataframes:
                     step_counter += 1
-                    progress_bar.progress(step_counter / num_steps)
+                    progress_bar.progress(min(step_counter / num_steps, 1.0))
                     status.update(label=f"📋 ({step_counter}/{num_steps}) Обработка OE данных...")
                     df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
                     status.write(f"📋 Найдено {len(df):,} записей в OE файле")
@@ -6210,7 +6216,7 @@ class HighVolumeAutoPartsCatalog:
                 # ШАГ 2: Обработка кроссов
                 if 'cross' in dataframes:
                     step_counter += 1
-                    progress_bar.progress(step_counter / num_steps)
+                    progress_bar.progress(min(step_counter / num_steps, 1.0))
                     status.update(label=f"🔗 ({step_counter}/{num_steps}) Обработка кросс-ссылок...")
                     df = dataframes['cross'].filter(
                         (pl.col('oe_number_norm') != "") & (pl.col('artikul_norm') != ""))
@@ -6225,7 +6231,7 @@ class HighVolumeAutoPartsCatalog:
                 # ШАГ 3: Обработка цен
                 if 'prices' in dataframes:
                     step_counter += 1
-                    progress_bar.progress(step_counter / num_steps)
+                    progress_bar.progress(min(step_counter / num_steps, 1.0))
                     status.update(label=f"💰 ({step_counter}/{num_steps}) Обработка цен...")
                     price_df = dataframes['prices']
                     if not price_df.is_empty():
@@ -6236,7 +6242,7 @@ class HighVolumeAutoPartsCatalog:
                 
                 # ШАГ 4: Сборка и обновление данных по артикулам
                 step_counter += 1
-                progress_bar.progress(step_counter / num_steps)
+                progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"📦 ({step_counter}/{num_steps}) Сборка данных по артикулам...")
                 
                 parts_df = None
