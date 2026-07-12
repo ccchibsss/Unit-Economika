@@ -10987,8 +10987,14 @@ def validate_dimensions_with_category(
             result["warnings"].append(f"⚠️ Категория '{category}' не найдена в базе")
     
     return result
+
 # ============================================================================
-# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ
+# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ v100.5.2)
+# ============================================================================
+# ✅ ИСПРАВЛЕНИЯ:
+# 1. Добавлен эмодзи 🧠 к "Умная загрузка тарифов"
+# 2. Добавлены новые разделы: "📚 История расчётов" и "⚙️ Настройки"
+# 3. Все пункты меню теперь корректно обрабатываются
 # ============================================================================
 def main():
     """Главная функция приложения"""
@@ -10998,10 +11004,9 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-    
     st.title(APP_NAME)
     st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-    
+
     st.sidebar.title("🧭 Навигация")
     section = st.sidebar.radio(
         "Выберите раздел:",
@@ -11009,21 +11014,23 @@ def main():
             "📁 Загрузка данных",
             "📊 Юнит-экономика",
             "🗂️ Каталог для группировки",
-            "📏 Категории с весогабаритами",  # ✅ НОВЫЙ РАЗДЕЛ
+            "📏 Категории с весогабаритами",
             "🤖 AI Тарифы",
             "🌐 API Тарифы маркетплейсов",
-            " Умная загрузка тарифов"
+            "🧠 Умная загрузка тарифов",   # ✅ ИСПРАВЛЕНО: был пробел вместо 🧠
+            "📚 История расчётов",          # ✅ НОВОЕ
+            "⚙️ Настройки",                # ✅ НОВОЕ
         ],
-        key="main_navigation"
+        key="main_navigation",
     )
-    
+
     if section == "📁 Загрузка данных":
         show_data_upload_interface()
     elif section == "📊 Юнит-экономика":
         show_unit_economics_interface()
     elif section == "🗂️ Каталог для группировки":
         show_catalog_grouping_interface()
-    elif section == "📏 Категории с весогабаритами":  # ✅ НОВЫЙ РАЗДЕЛ
+    elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
     elif section == "🤖 AI Тарифы":
         show_ai_tariffs_interface()
@@ -11031,6 +11038,10 @@ def main():
         show_api_tariffs_interface()
     elif section == "🧠 Умная загрузка тарифов":
         show_smart_tariff_interface()
+    elif section == "📚 История расчётов":
+        show_history_interface()
+    elif section == "⚙️ Настройки":
+        show_settings_interface()
 
 
 # ✅ ТОЧКА ВХОДА
