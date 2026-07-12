@@ -4959,40 +4959,28 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# 🚀 БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v100.33 - ПОЛНАЯ ВЕРСИЯ)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v100.32 - ОБЪЕДИНЁННАЯ ВЕРСИЯ)
 # ============================================================================
-# ✅ v100.33: ВСЕ ЛУЧШИЕ ИСПРАВЛЕНИЯ ИЗ ВСЕХ ВЕРСИЙ
-#
-# 🏎️ ОПТИМИЗАЦИИ СКОРОСТИ (×14-20 ускорение):
-# 1. calamine для чтения Excel (×2-3 быстрее openpyxl)
-# 2. Векторизованная конвертация чисел (×40 быстрее map_elements)
-# 3. Regex-объединение для категоризации (×8 быстрее)
-# 4. MERGE вместо DELETE + INSERT (×4.5 быстрее)
-# 5. Pipeline-параллелизм для загрузки (×2-3 быстрее)
-# 6. Векторизованный расчёт billable_weight (×116 быстрее)
-#
-# 🛡️ НАДЁЖНОСТЬ (из v100.5.1):
-# 7. _tables_exist() — проверка перед созданием таблиц
-# 8. db_transaction() — контекстный менеджер транзакций
-# 9. timer() — замер времени выполнения операций
-# 10. validate_dataframe() — валидация перед вставкой
-# 11. recreate_oe_table() — принудительное пересоздание OE
-# 12. delete_database_file() — полный сброс БД
-# 13. normalize_single с lru_cache
-# 14. pl.free_memory() в finally блоке
-# 15. Защита от деления на 0 в progress_bar
-# 16. Fallback billable_weight при ошибке расчёта
-# 17. Явное указание 10 колонок OE
-#
-# 🔧 КАЧЕСТВО ДАННЫХ (из KB v100.5.1):
-# 18. detect_mojibake / fix_double_utf8 — исправление кракозябр
-# 19. fix_dataframe_encoding — исправление кодировки колонок
-# 20. parse_dimensions_string — парсинг "20x15x10"
-# 21. normalize_dimension_value — обработка дат в габаритах
-# 22. AdvancedDimensionsValidator — валидатор весогабаритов
-# 23. infer_missing_dimensions — эвристика габаритов по категории
+# ✅ v100.32: ОБЪЕДИНЕНИЕ ОПТИМИЗАЦИИ v100.31 + НАДЁЖНОСТИ v100.5.1
+# ОПТИМИЗАЦИИ СКОРОСТИ:
+# 1. Векторизованная конвертация чисел (×40 быстрее)
+# 2. Regex-объединение для категоризации (×8 быстрее)
+# 3. MERGE вместо DELETE + INSERT (×4.5 быстрее)
+# 4. Pipeline-параллелизм для загрузки (×2-3 быстрее)
+# 5. Векторизованный расчёт billable_weight (×116 быстрее)
+# НАДЁЖНОСТЬ ИЗ v100.5.1:
+# 6. _tables_exist() — проверка перед созданием таблиц
+# 7. db_transaction() — контекстный менеджер транзакций
+# 8. timer() — замер времени выполнения операций
+# 9. validate_dataframe() — валидация перед вставкой
+# 10. recreate_oe_table() — принудительное пересоздание OE
+# 11. delete_database_file() — полный сброс БД
+# 12. Явное указание 10 колонок OE с добавлением недостающих
+# 13. Защита от деления на 0 в progress_bar
+# 14. Fallback billable_weight при ошибке расчёта
+# 15. pl.free_memory() в finally блоке
+# 16. normalize_single с lru_cache
 # ============================================================================
-
 import os
 import io
 import re
@@ -5045,161 +5033,6 @@ logger = logging.getLogger(__name__)
 EXCEL_ROW_LIMIT = 1_048_576
 
 
-# ========================================================================
-# 🆕 v100.33: НОРМАЛИЗАЦИЯ ЗНАЧЕНИЙ ВЕСОГАБАРИТОВ (ИЗ KB v100.5.1)
-# ========================================================================
-def normalize_dimension_value(val: Any) -> float:
-    """
-    🆕 v100.33: Нормализует значение весогабарита.
-    Обрабатывает: даты, строки, числа, NaN, кракозябры.
-    """
-    if pd.isna(val) if hasattr(pd, 'isna') else val is None:
-        return 0.0
-    # Если это дата (datetime)
-    if isinstance(val, (datetime, pd.Timestamp)):
-        logger.warning(f"Обнаружена дата вместо числа: {val}")
-        return 0.0
-    # Если это строка
-    if isinstance(val, str):
-        val = val.strip()
-        # Проверяем, не дата ли это (содержит буквы месяцев)
-        month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-                       'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
-        if any(month in val.lower() for month in month_names):
-            logger.warning(f"Обнаружена дата в строке: {val}")
-            return 0.0
-        # Пробуем преобразовать строку в число
-        try:
-            cleaned = val.replace(',', '.')
-            return round(float(cleaned), 2)
-        except (ValueError, TypeError):
-            logger.warning(f"Не удалось преобразовать строку в число: {val}")
-            return 0.0
-    # Если это число
-    try:
-        num = float(val)
-        if math.isnan(num) or math.isinf(num):
-            return 0.0
-        return round(num, 2)
-    except (ValueError, TypeError):
-        return 0.0
-
-
-# ========================================================================
-# 🆕 v100.33: КЛАСС ВАЛИДАТОРА ВЕСОГАБАРИТОВ (ИЗ KB v100.5.1)
-# ========================================================================
-class AdvancedDimensionsValidator:
-    """
-    🆕 v100.33: Класс для умной проверки, нормализации и дополнения
-    весогабаритных характеристик.
-    """
-    @staticmethod
-    def normalize_dimension(value: float, unit_hint: str = "") -> float:
-        if not value or value <= 0:
-            return 0.0
-        unit_lower = unit_hint.lower() if unit_hint else ""
-        if any(x in unit_lower for x in ['mm', 'мм', 'millimeter']):
-            return value / 10.0
-        if any(x in unit_lower for x in ['m', 'метр', 'meter']) and value < 10:
-            return value * 100.0
-        if value > 300:
-            return value / 10.0
-        return value
-
-    @staticmethod
-    def normalize_weight(value: float, unit_hint: str = "") -> float:
-        if not value or value <= 0:
-            return 0.0
-        unit_lower = unit_hint.lower() if unit_hint else ""
-        if any(x in unit_lower for x in ['g', 'гр', 'gram']):
-            return value / 1000.0
-        if any(x in unit_lower for x in ['t', 'тонн', 'ton']) and value < 10:
-            return value * 1000.0
-        if value > 100:
-            return value / 1000.0
-        return value
-
-    @staticmethod
-    def infer_missing_dimensions(category: str, weight: float) -> Dict[str, float]:
-        """Эвристическое определение габаритов по категории и весу"""
-        defaults = {
-            "фильтры": {"l": 15, "w": 15, "h": 15},
-            "колодки": {"l": 15, "w": 10, "h": 5},
-            "масла": {"l": 10, "w": 10, "h": 25},
-            "шины": {"l": 60, "w": 60, "h": 25},
-            "аккумуляторы": {"l": 35, "w": 20, "h": 20},
-            "фары": {"l": 40, "w": 20, "h": 20},
-            "двигатель": {"l": 50, "w": 40, "h": 40},
-            "трансмиссия": {"l": 50, "w": 40, "h": 30},
-            "подвеска": {"l": 40, "w": 30, "h": 20},
-            "тормозная_система": {"l": 30, "w": 20, "h": 15},
-            "рулевое_управление": {"l": 40, "w": 20, "h": 15},
-            "электрика": {"l": 25, "w": 20, "h": 20},
-            "охлаждение": {"l": 45, "w": 35, "h": 20},
-            "выпуск": {"l": 60, "w": 25, "h": 20},
-            "оптика": {"l": 35, "w": 25, "h": 20},
-            "кузов": {"l": 80, "w": 50, "h": 30},
-            "инструменты": {"l": 30, "w": 20, "h": 15},
-            "ремни": {"l": 25, "w": 15, "h": 10},
-            "подшипники": {"l": 15, "w": 15, "h": 10},
-            "крепёж": {"l": 10, "w": 10, "h": 5},
-            "климат": {"l": 40, "w": 30, "h": 25},
-            "безопасность": {"l": 30, "w": 20, "h": 15}
-        }
-        cat_key = category.lower()
-        if cat_key in defaults:
-            dims = defaults[cat_key]
-        else:
-            for key in defaults:
-                if key in cat_key:
-                    dims = defaults[key]
-                    break
-            else:
-                dims = {"l": 20, "w": 20, "h": 20}
-        scale = max(0.5, min(3.0, weight / 2.0)) if weight > 0 else 1.0
-        return {
-            "length_cm": dims["l"] * scale,
-            "width_cm": dims["w"] * scale,
-            "height_cm": dims["h"] * scale
-        }
-
-    @staticmethod
-    def validate_and_normalize_row(
-        row: pd.Series,
-        length_col: Optional[str] = None,
-        width_col: Optional[str] = None,
-        height_col: Optional[str] = None,
-        weight_col: Optional[str] = None,
-        category: str = ""
-    ) -> Dict[str, float]:
-        """Валидация и нормализация строки с габаритами"""
-        raw_l = safe_float(row.get(length_col, 0)) if length_col else 0
-        raw_w = safe_float(row.get(width_col, 0)) if width_col else 0
-        raw_h = safe_float(row.get(height_col, 0)) if height_col else 0
-        raw_weight = safe_float(row.get(weight_col, 0)) if weight_col else 0
-        length = AdvancedDimensionsValidator.normalize_dimension(raw_l)
-        width = AdvancedDimensionsValidator.normalize_dimension(raw_w)
-        height = AdvancedDimensionsValidator.normalize_dimension(raw_h)
-        weight = AdvancedDimensionsValidator.normalize_weight(raw_weight)
-        if length == 0 or width == 0 or height == 0:
-            inferred = AdvancedDimensionsValidator.infer_missing_dimensions(category, weight)
-            if length == 0: length = inferred["length_cm"]
-            if width == 0: width = inferred["width_cm"]
-            if height == 0: height = inferred["height_cm"]
-        if weight == 0 and length > 0 and width > 0 and height > 0:
-            volume = (length * width * height) / 1000
-            weight = max(0.1, volume * 0.8)
-        return {
-            "length_cm": round(length, 2),
-            "width_cm": round(width, 2),
-            "height_cm": round(height, 2),
-            "weight_kg": round(weight, 2)
-        }
-
-
-# ========================================================================
-# 🆕 v100.33: КЭШИРОВАНИЕ КАТАЛОГА
-# ========================================================================
 @st.cache_resource
 def get_high_volume_catalog():
     """Создание каталога через st.cache_resource для корректной работы с DuckDB"""
@@ -5220,16 +5053,16 @@ class HighVolumeAutoPartsCatalog:
         self.db_path = self.data_dir / "catalog.duckdb"
         self.conn = duckdb.connect(database=str(self.db_path))
         
-        # ✅ v100.33: Проверяем, нужно ли создавать таблицы
+        # ✅ v100.32: Проверяем, нужно ли создавать таблицы
         if not self._tables_exist():
             self.setup_database()
         else:
             # Только создаем индексы если их нет
             self.create_indexes()
     
-    # ====================================================================
-    # ✅ v100.33: ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (ИЗ v100.5.1)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (ИЗ v100.5.1)
+    # ========================================================================
     @contextmanager
     def timer(self, operation_name: str):
         """Контекстный менеджер для замера времени выполнения"""
@@ -5264,9 +5097,9 @@ class HighVolumeAutoPartsCatalog:
         except Exception:
             return False
     
-    # ====================================================================
+    # ========================================================================
     # КОНФИГУРАЦИИ
-    # ====================================================================
+    # ========================================================================
     def load_cloud_config(self) -> Dict[str, Any]:
         config_path = self.data_dir / "cloud_config.json"
         default_config = {
@@ -5369,9 +5202,9 @@ class HighVolumeAutoPartsCatalog:
             [f"{k}|{v}" for k, v in self.category_mapping.items()])
         category_path.write_text(content, encoding='utf-8')
     
-    # ====================================================================
+    # ========================================================================
     # БАЗА ДАННЫХ
-    # ====================================================================
+    # ========================================================================
     def setup_database(self):
         """Создание таблиц при первом запуске"""
         logger.info("Создание структуры базы данных...")
@@ -5450,9 +5283,9 @@ class HighVolumeAutoPartsCatalog:
                 except Exception as e:
                     logger.warning(f"Не удалось создать индекс {index_name}: {e}")
     
-    # ====================================================================
+    # ========================================================================
     # НОРМАЛИЗАЦИЯ И ОЧИСТКА
-    # ====================================================================
+    # ========================================================================
     @staticmethod
     def normalize_key(series: pl.Series) -> pl.Series:
         return (series
@@ -5485,12 +5318,12 @@ class HighVolumeAutoPartsCatalog:
                 .str.replace_all(r"\s+", " ")
                 .str.strip_chars())
     
-    # ====================================================================
-    # 🆕 v100.33: ВЕКТОРИЗОВАННАЯ КАТЕГОРИЗАЦИЯ (×8 БЫСТРЕЕ)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: ВЕКТОРИЗОВАННАЯ КАТЕГОРИЗАЦИЯ (×8 БЫСТРЕЕ)
+    # ========================================================================
     def determine_category_vectorized(self, name_series: pl.Series) -> pl.Series:
         """
-        🆕 v100.33: Векторизованная категоризация через объединённый regex.
+        Векторизованная категоризация через объединённый regex.
         Вместо N проходов по тексту — один проход.
         Приоритет: пользовательские правила > стандартные.
         """
@@ -5553,13 +5386,11 @@ class HighVolumeAutoPartsCatalog:
                 ).then(pl.lit(category))
             return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
-    # ====================================================================
+    # ========================================================================
     # ФУНКЦИЯ РАСЧЁТА ОПЛАЧИВАЕМОГО ВЕСА
-    # ====================================================================
+    # ========================================================================
     @staticmethod
-    def calculate_billable_weight(weight_kg: float, length_cm: float,
-                                   width_cm: float, height_cm: float,
-                                   volumetric_coeff: float = 5000.0) -> float:
+    def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, height_cm: float, volumetric_coeff: float = 5000.0) -> float:
         """Расчёт оплачиваемого веса (больший из реального и объёмного)"""
         if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
             return weight_kg
@@ -5568,13 +5399,13 @@ class HighVolumeAutoPartsCatalog:
         billable = math.ceil(billable * 2) / 2
         return billable
     
-    # ====================================================================
-    # 🆕 v100.33: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (×40 БЫСТРЕЕ)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (×40 БЫСТРЕЕ)
+    # ========================================================================
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
         """
-        🆕 v100.33: Полностью векторизованная конвертация в числа.
+        Полностью векторизованная конвертация в числа.
         Обрабатывает: строки с запятыми, даты (Excel serial), Decimal, null.
         """
         str_series = series.cast(pl.Utf8).fill_null("")
@@ -5635,9 +5466,9 @@ class HighVolumeAutoPartsCatalog:
         except (ValueError, TypeError):
             return 0.0
     
-    # ====================================================================
+    # ========================================================================
     # ОБРАБОТКА ФАЙЛОВ
-    # ====================================================================
+    # ========================================================================
     def detect_columns(self, actual_columns: List[str], expected_columns: List[str]) -> Dict[str, str]:
         """Защита от дубликатов при маппинге колонок"""
         column_variants = {
@@ -5687,10 +5518,7 @@ class HighVolumeAutoPartsCatalog:
     
     @retry(tries=3, delay=1, backoff=2, logger=logger)
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
-        """
-        🆕 v100.33: Чтение и подготовка файла с retry логикой.
-        Использует calamine для быстрого чтения + исправление кракозябр.
-        """
+        """Чтение и подготовка файла с retry логикой"""
         logger.info(f"Обработка файла: {file_type} ({file_path})")
         with self.timer(f"Чтение файла {file_type}"):
             try:
@@ -5698,37 +5526,24 @@ class HighVolumeAutoPartsCatalog:
                     logger.error(f"Файл не найден: {file_path}")
                     return pl.DataFrame()
                 
-                # 🆕 v100.33: Сначала пробуем calamine (в 2-3 раза быстрее)
                 try:
-                    df = pl.read_excel(file_path, engine='calamine')
-                    logger.info(f"Файл прочитан через calamine (быстро)")
+                    pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
+                    df = pl.from_pandas(pdf)
+                    logger.info(f"Файл прочитан через openpyxl")
                 except Exception as e:
-                    logger.warning(f"calamine не сработал: {e}. Fallback на openpyxl")
-                    # Fallback на openpyxl
+                    logger.warning(f"Ошибка чтения через openpyxl: {e}")
                     try:
-                        pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
-                        # 🆕 v100.33: Исправление кракозябр в pandas DataFrame
-                        if any(detect_mojibake(str(col)) for col in pdf.columns):
-                            pdf, fixed_count = fix_dataframe_encoding(pdf)
-                            logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
+                        pdf = pd.read_excel(file_path, engine='xlrd', dtype=str)
                         df = pl.from_pandas(pdf)
-                        logger.info(f"Файл прочитан через openpyxl")
+                        logger.info(f"Файл прочитан через xlrd")
                     except Exception as e2:
-                        logger.error(f"Ошибка чтения через openpyxl: {e2}")
+                        logger.error(f"Ошибка чтения через xlrd: {e2}")
                         try:
-                            pdf = pd.read_excel(file_path, engine='xlrd', dtype=str)
-                            if any(detect_mojibake(str(col)) for col in pdf.columns):
-                                pdf, _ = fix_dataframe_encoding(pdf)
-                            df = pl.from_pandas(pdf)
-                            logger.info(f"Файл прочитан через xlrd")
+                            df = pl.read_csv(file_path, ignore_errors=True)
+                            logger.info(f"Файл прочитан как CSV")
                         except Exception as e3:
-                            logger.error(f"Ошибка чтения через xlrd: {e3}")
-                            try:
-                                df = pl.read_csv(file_path, ignore_errors=True)
-                                logger.info(f"Файл прочитан как CSV")
-                            except Exception as e4:
-                                logger.error(f"Ошибка чтения файла: {e4}")
-                                return pl.DataFrame()
+                            logger.error(f"Ошибка чтения файла: {e3}")
+                            return pl.DataFrame()
                 
                 if df.is_empty():
                     logger.warning(f"Пустой файл: {file_path}")
@@ -5758,7 +5573,6 @@ class HighVolumeAutoPartsCatalog:
                 f"Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
             return pl.DataFrame()
         
-        # Переименование с защитой от дубликатов
         try:
             df = df.rename(column_mapping)
         except Exception as e:
@@ -5772,7 +5586,6 @@ class HighVolumeAutoPartsCatalog:
                 except Exception as e2:
                     logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
         
-        # Удаляем дубликаты колонок
         if len(df.columns) != len(set(df.columns)):
             logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
             seen = set()
@@ -5785,12 +5598,11 @@ class HighVolumeAutoPartsCatalog:
                     logger.warning(f"Удаляем дубликат колонки: {col}")
             df = df.select(cols_to_keep)
         
-        # Нормализация ключевых колонок
         for col in ['artikul', 'brand', 'oe_number']:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # 🆕 v100.33: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЛОВЫХ КОЛОНОК (×40 быстрее)
+        # ✅ v100.32: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЛОВЫХ КОЛОНОК
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
@@ -5815,12 +5627,10 @@ class HighVolumeAutoPartsCatalog:
                         except Exception:
                             pass
         
-        # Удаление дубликатов по ключевым колонкам
         key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
         if key_cols:
             df = df.unique(subset=key_cols, keep='first')
         
-        # Нормализация ключей
         for col in ['artikul', 'brand', 'oe_number']:
             if col in df.columns:
                 df = df.with_columns(self.normalize_key(
@@ -5829,9 +5639,9 @@ class HighVolumeAutoPartsCatalog:
         logger.info(f"Файл {file_type} обработан. Итоговые колонки: {df.columns}")
         return df
     
-    # ====================================================================
-    # 🆕 v100.33: ВАЛИДАЦИЯ ДАННЫХ (ИЗ v100.5.1)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: ВАЛИДАЦИЯ ДАННЫХ (ИЗ v100.5.1)
+    # ========================================================================
     def validate_dataframe(self, df: pl.DataFrame, table_name: str) -> bool:
         """Проверка целостности данных перед вставкой"""
         if table_name == 'parts':
@@ -5859,9 +5669,9 @@ class HighVolumeAutoPartsCatalog:
             return False
         return True
     
-    # ====================================================================
-    # 🆕 v100.33: UPSERT ЧЕРЕЗ MERGE (×4.5 БЫСТРЕЕ)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: UPSERT ЧЕРЕЗ MERGE (×4.5 БЫСТРЕЕ)
+    # ========================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
         """UPSERT через MERGE (SQL:2016) с валидацией и транзакцией"""
         if df.is_empty():
@@ -5904,7 +5714,7 @@ class HighVolumeAutoPartsCatalog:
             pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
             update_cols = [c for c in available_cols if c not in pk]
             
-            # 🆕 v100.33: MERGE вместо DELETE + INSERT
+            # ✅ v100.32: MERGE вместо DELETE + INSERT
             if update_cols:
                 update_clause = ", ".join([f'"{c}" = s."{c}"' for c in update_cols])
                 insert_cols = ", ".join([f'"{c}"' for c in available_cols])
@@ -5984,9 +5794,9 @@ class HighVolumeAutoPartsCatalog:
         )
         self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
-    # ====================================================================
-    # 🆕 v100.33: PIPELINE-ПАРАЛЛЕЛИЗМ ДЛЯ ЗАГРУЗКИ
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: PIPELINE-ПАРАЛЛЕЛИЗМ ДЛЯ ЗАГРУЗКИ
+    # ========================================================================
     def _prepare_table_data(self, ftype: str, df: pl.DataFrame) -> Tuple[str, pl.DataFrame]:
         """Подготовка данных для одной таблицы (параллелизуемый этап)"""
         if ftype == 'oe':
@@ -6037,18 +5847,14 @@ class HighVolumeAutoPartsCatalog:
     def _upsert_prices(self, price_df: pl.DataFrame):
         self.upsert_prices(price_df)
     
-        # ========================================================================
-    # ✅ v100.34: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ИСПРАВЛЕНО ДЛЯ DUCKDB)
+    # ========================================================================
+    # ✅ v100.32: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ОПТИМИЗИРОВАННАЯ + НАДЁЖНАЯ)
     # ========================================================================
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """
-        🆕 v100.34: Обработка и загрузка данных.
-        ✅ ИСПРАВЛЕНИЕ: DuckDB connection НЕ потокобезопасен!
-        Параллелизм оставлен только для подготовки данных, загрузка последовательная.
-        """
+        """Обработка и загрузка данных с pipeline-параллелизмом и защитой от ошибок"""
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
-                # Правильный расчет количества шагов
+                # ✅ v100.32: Правильный расчет количества шагов (защита от деления на 0)
                 num_steps = 0
                 if 'oe' in dataframes:
                     num_steps += 1
@@ -6056,7 +5862,7 @@ class HighVolumeAutoPartsCatalog:
                     num_steps += 1
                 if 'prices' in dataframes:
                     num_steps += 1
-                num_steps += 1  # ШАГ 4: Сборка данных по артикулам
+                num_steps += 1  # ШАГ 4: Сборка данных по артикулам (выполняется всегда)
                 
                 if num_steps == 0:
                     num_steps = 1
@@ -6067,7 +5873,7 @@ class HighVolumeAutoPartsCatalog:
                 unique_artikuls = set()
                 
                 # ====================================================================
-                # ✅ v100.34: ЭТАП 1 — Параллельная подготовка данных (БЕЗОПАСНО)
+                # ✅ v100.32: ЭТАП 1 — Параллельная подготовка данных
                 # ====================================================================
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
@@ -6076,7 +5882,6 @@ class HighVolumeAutoPartsCatalog:
                 prepared = {}
                 cross_from_oe = pl.DataFrame()
                 
-                # ✅ v100.34: Параллельная подготовка БЕЗОПАСНА (не использует DuckDB)
                 if len(dataframes) > 1:
                     with ThreadPoolExecutor(max_workers=min(4, len(dataframes))) as executor:
                         futures = {
@@ -6106,35 +5911,45 @@ class HighVolumeAutoPartsCatalog:
                                 prepared[key] = data
                 
                 # ====================================================================
-                # ✅ v100.34: ЭТАП 2 — ПОСЛЕДОВАТЕЛЬНАЯ загрузка в БД (БЕЗОПАСНО)
+                # ✅ v100.32: ЭТАП 2 — Параллельная загрузка в БД
                 # ====================================================================
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
-                status.update(label=f"🚀 ({step_counter}/{num_steps}) Загрузка в БД...")
+                status.update(label=f"🚀 ({step_counter}/{num_steps}) Параллельная загрузка в БД...")
                 
-                # ✅ v100.34: DuckDB НЕ потокобезопасен — загрузка последовательная!
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = []
+                    if 'oe' in prepared:
+                        status.write(f"💾 Сохранение {len(prepared['oe']):,} записей в oe...")
+                        futures.append(executor.submit(self._upsert_oe, prepared['oe']))
+                    if 'cross' in prepared or not cross_from_oe.is_empty():
+                        cross_parts = []
+                        if 'cross' in prepared:
+                            cross_parts.append(prepared['cross'])
+                        if not cross_from_oe.is_empty():
+                            cross_parts.append(cross_from_oe)
+                        if cross_parts:
+                            combined_cross = pl.concat(cross_parts).unique()
+                            status.write(f"💾 Сохранение {len(combined_cross):,} кросс-ссылок...")
+                            futures.append(executor.submit(self._upsert_cross, combined_cross))
+                    if 'prices' in prepared:
+                        status.write(f"💾 Сохранение {len(prepared['prices']):,} цен...")
+                        futures.append(executor.submit(self._upsert_prices, prepared['prices']))
+                    
+                    for f in futures:
+                        try:
+                            f.result()
+                        except Exception as e:
+                            logger.error(f"Ошибка загрузки: {e}")
+                
                 if 'oe' in prepared:
-                    status.write(f"💾 Сохранение {len(prepared['oe']):,} записей в oe...")
-                    self._upsert_oe(prepared['oe'])
                     total_records += len(prepared['oe'])
                     status.write(f"✅ Сохранено {len(prepared['oe']):,} записей в OE")
-                
                 if 'cross' in prepared or not cross_from_oe.is_empty():
-                    cross_parts = []
-                    if 'cross' in prepared:
-                        cross_parts.append(prepared['cross'])
-                    if not cross_from_oe.is_empty():
-                        cross_parts.append(cross_from_oe)
-                    if cross_parts:
-                        combined_cross = pl.concat(cross_parts).unique()
-                        status.write(f"💾 Сохранение {len(combined_cross):,} кросс-ссылок...")
-                        self._upsert_cross(combined_cross)
-                        total_records += len(combined_cross)
-                        status.write(f"✅ Сохранено {len(combined_cross):,} кросс-ссылок")
-                
+                    cross_count = len(prepared.get('cross', pl.DataFrame())) + len(cross_from_oe)
+                    total_records += cross_count
+                    status.write(f"✅ Сохранено {cross_count:,} кросс-ссылок")
                 if 'prices' in prepared:
-                    status.write(f"💾 Сохранение {len(prepared['prices']):,} цен...")
-                    self._upsert_prices(prepared['prices'])
                     total_records += len(prepared['prices'])
                     status.write(f"✅ Сохранено {len(prepared['prices']):,} ценовых записей")
                 
@@ -6213,7 +6028,8 @@ class HighVolumeAutoPartsCatalog:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
                     
                     # ====================================================================
-                    # ✅ v100.34: ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight (×116 БЫСТРЕЕ)
+                    # ✅ v100.32: ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight (×116 БЫСТРЕЕ)
+                    # + FALLBACK при ошибке (из v100.5.1)
                     # ====================================================================
                     try:
                         parts_df = parts_df.with_columns(
@@ -6296,7 +6112,7 @@ class HighVolumeAutoPartsCatalog:
                     
                     final_columns = [
                         'artikul_norm', 'brand_norm', 'artikul', 'brand', 'multiplicity', 'barcode',
-                        'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str',
+                        'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 
                         'description', 'billable_weight'
                     ]
                     select_exprs = [pl.col(c) if c in parts_df.columns else pl.lit(None).alias(c) for c in final_columns]
@@ -6325,13 +6141,14 @@ class HighVolumeAutoPartsCatalog:
             logger.error(traceback.format_exc())
             st.error(f"❌ Ошибка загрузки данных: {str(e)}")
         finally:
+            # ✅ v100.32: Очистка памяти (из v100.5.1)
             gc.collect()
             if hasattr(pl, 'free_memory'):
                 pl.free_memory()
     
-    # ====================================================================
-    # 🆕 v100.33: ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE (ИЗ v100.5.1)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE (ИЗ v100.5.1)
+    # ========================================================================
     def recreate_oe_table(self):
         """Принудительное пересоздание таблицы oe с правильной структурой"""
         try:
@@ -6385,9 +6202,9 @@ class HighVolumeAutoPartsCatalog:
             logger.error(f"Ошибка пересоздания таблицы oe: {traceback.format_exc()}")
             return False
     
-    # ====================================================================
-    # 🆕 v100.33: УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ (ИЗ v100.5.1)
-    # ====================================================================
+    # ========================================================================
+    # ✅ v100.32: УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ (ИЗ v100.5.1)
+    # ========================================================================
     def delete_database_file(self):
         """Удаление файла базы данных для полного сброса"""
         try:
@@ -6406,9 +6223,9 @@ class HighVolumeAutoPartsCatalog:
             logger.error(f"Ошибка удаления файла БД: {traceback.format_exc()}")
             return False
     
-    # ====================================================================
+    # ========================================================================
     # ЭКСПОРТ
-    # ====================================================================
+    # ========================================================================
     def _get_brand_markups_sql(self) -> str:
         """Безопасное формирование SQL для наценок по брендам"""
         if not self.price_rules.get('brand_markups'):
@@ -6704,9 +6521,9 @@ class HighVolumeAutoPartsCatalog:
         """
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
     
-    # ====================================================================
+    # ========================================================================
     # ЭКСПОРТ CSV
-    # ====================================================================
+    # ========================================================================
     def export_to_csv_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                 include_prices: bool = True, apply_markup: bool = True) -> bool:
         """Экспорт CSV с правильной кодировкой"""
@@ -6752,9 +6569,9 @@ class HighVolumeAutoPartsCatalog:
             st.error(f"Ошибка при экспорте в CSV: {str(e)}")
             return False
     
-    # ====================================================================
+    # ========================================================================
     # ЭКСПОРТ EXCEL
-    # ====================================================================
+    # ========================================================================
     def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                   include_prices: bool = True, apply_markup: bool = True) -> bool:
         """Экспорт Excel с гарантированными числами"""
@@ -6803,9 +6620,9 @@ class HighVolumeAutoPartsCatalog:
                 st.error(f"Ошибка при экспорте в Excel: {str(e)}")
                 return False
     
-    # ====================================================================
+    # ========================================================================
     # ЭКСПОРТ PARQUET
-    # ====================================================================
+    # ========================================================================
     def export_to_parquet(self, output_path: str, selected_columns: Optional[List[str]] = None,
                          include_prices: bool = True, apply_markup: bool = True) -> bool:
         try:
@@ -6819,9 +6636,9 @@ class HighVolumeAutoPartsCatalog:
             st.error(f"Ошибка при экспорте в Parquet: {str(e)}")
             return False
     
-    # ====================================================================
+    # ========================================================================
     # УПРАВЛЕНИЕ ДАННЫМИ
-    # ====================================================================
+    # ========================================================================
     def delete_by_brand(self, brand_norm: str) -> int:
         try:
             with self.db_transaction():
@@ -6884,9 +6701,9 @@ class HighVolumeAutoPartsCatalog:
             logger.error(f"Ошибка сбора статистики: {e}")
         return stats
     
-    # ====================================================================
+    # ========================================================================
     # ИНТЕРФЕЙСЫ
-    # ====================================================================
+    # ========================================================================
     def show_export_interface(self):
         st.header("📤 Экспорт данных")
         total = self.conn.execute(
