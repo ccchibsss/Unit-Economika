@@ -6155,8 +6155,8 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
 
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-    """Обработка и загрузка данных с улучшенным прогресс-баром"""
-    try:
+        """Обработка и загрузка данных с улучшенным прогресс-баром"""
+        try:
         with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
             # ✅ ИСПРАВЛЕНИЕ: Правильный расчет количества шагов
             num_steps = 0
