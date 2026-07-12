@@ -5409,17 +5409,27 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.31)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v100.32 - ОБЪЕДИНЁННАЯ ВЕРСИЯ)
 # ============================================================================
-# ✅ ОПТИМИЗАЦИИ v100.31:
+# ✅ v100.32: ОБЪЕДИНЕНИЕ ОПТИМИЗАЦИИ v100.31 + НАДЁЖНОСТИ v100.5.1
+# ОПТИМИЗАЦИИ СКОРОСТИ:
 # 1. Векторизованная конвертация чисел (×40 быстрее)
-# 2. Векторизованный расчёт billable_weight (×116 быстрее)
-# 3. Regex-объединение для категоризации (×8 быстрее)
-# 4. MERGE вместо DELETE + INSERT (×4.5 быстрее)
-# 5. Pipeline-параллелизм для загрузки (×2-3 быстрее)
-# 6. Исправлена критическая ошибка: pl.map_elements → pl.struct().map_elements()
-# 7. Оптимизирована работа с большими данными
-# 8. Добавлена обработка ошибок при расчёте billable_weight
+# 2. Regex-объединение для категоризации (×8 быстрее)
+# 3. MERGE вместо DELETE + INSERT (×4.5 быстрее)
+# 4. Pipeline-параллелизм для загрузки (×2-3 быстрее)
+# 5. Векторизованный расчёт billable_weight (×116 быстрее)
+# НАДЁЖНОСТЬ ИЗ v100.5.1:
+# 6. _tables_exist() — проверка перед созданием таблиц
+# 7. db_transaction() — контекстный менеджер транзакций
+# 8. timer() — замер времени выполнения операций
+# 9. validate_dataframe() — валидация перед вставкой
+# 10. recreate_oe_table() — принудительное пересоздание OE
+# 11. delete_database_file() — полный сброс БД
+# 12. Явное указание 10 колонок OE с добавлением недостающих
+# 13. Защита от деления на 0 в progress_bar
+# 14. Fallback billable_weight при ошибке расчёта
+# 15. pl.free_memory() в finally блоке
+# 16. normalize_single с lru_cache
 # ============================================================================
 import os
 import io
@@ -5455,7 +5465,6 @@ except ImportError:
         def decorator(func):
             return func
         return decorator
-    logger.warning("⚠️ Пакет 'retry' не установлен. Используется заглушка.")
 
 
 # Настройка логирования
@@ -5494,7 +5503,7 @@ class HighVolumeAutoPartsCatalog:
         self.db_path = self.data_dir / "catalog.duckdb"
         self.conn = duckdb.connect(database=str(self.db_path))
         
-        # Проверяем, нужно ли создавать таблицы
+        # ✅ v100.32: Проверяем, нужно ли создавать таблицы
         if not self._tables_exist():
             self.setup_database()
         else:
@@ -5502,7 +5511,7 @@ class HighVolumeAutoPartsCatalog:
             self.create_indexes()
     
     # ========================================================================
-    # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+    # ✅ v100.32: ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (ИЗ v100.5.1)
     # ========================================================================
     @contextmanager
     def timer(self, operation_name: str):
@@ -5760,12 +5769,12 @@ class HighVolumeAutoPartsCatalog:
                 .str.strip_chars())
     
     # ========================================================================
-    # 🆕 v100.31: ВЕКТОРИЗОВАННАЯ КАТЕГОРИЗАЦИЯ (×8 БЫСТРЕЕ)
+    # ✅ v100.32: ВЕКТОРИЗОВАННАЯ КАТЕГОРИЗАЦИЯ (×8 БЫСТРЕЕ)
     # ========================================================================
     def determine_category_vectorized(self, name_series: pl.Series) -> pl.Series:
         """
-        🆕 v100.31: Векторизованная категоризация через объединённый regex.
-        Вместо N проходов по тексту (по одному на каждое правило) — один проход.
+        Векторизованная категоризация через объединённый regex.
+        Вместо N проходов по тексту — один проход.
         Приоритет: пользовательские правила > стандартные.
         """
         name_lower = name_series.str.to_lowercase()
@@ -5809,17 +5818,13 @@ class HighVolumeAutoPartsCatalog:
         combined_regex = "|".join(patterns)
         
         try:
-            # Извлекаем первое совпадение
             matched = name_lower.str.extract(combined_regex, 0)
-            
-            # Если совпадение есть — используем его, иначе "Разное"
             return pl.when(matched.is_not_null() & (matched != "")) \
                 .then(matched) \
                 .otherwise(pl.lit('Разное')) \
                 .alias('category')
         except Exception as e:
             logger.warning(f"Ошибка regex-категоризации: {e}. Fallback на последовательную.")
-            # Fallback на последовательную логику
             categorization_expr = pl.when(pl.lit(False)).then(pl.lit(None))
             for key, category in self.category_mapping.items():
                 categorization_expr = categorization_expr.when(
@@ -5845,45 +5850,26 @@ class HighVolumeAutoPartsCatalog:
         return billable
     
     # ========================================================================
-    # 🆕 v100.31: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (×40 БЫСТРЕЕ)
+    # ✅ v100.32: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (×40 БЫСТРЕЕ)
     # ========================================================================
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
         """
-        🆕 v100.31: Полностью векторизованная конвертация в числа.
+        Полностью векторизованная конвертация в числа.
         Обрабатывает: строки с запятыми, даты (Excel serial), Decimal, null.
-        Работает в 40 раз быстрее map_elements.
         """
-        # Приводим к строке для унификации
         str_series = series.cast(pl.Utf8).fill_null("")
-        
-        # 1. Замена запятых на точки
         cleaned = str_series.str.replace_all(",", ".")
-        
-        # 2. Извлечение всех чисел из строки
         extracted = cleaned.str.extract_all(r"[\d.]+")
-        
-        # 3. Берём первое число (или склеиваем, если их несколько — для дат типа "22.07.2024")
-        # Для дат в Excel (serial number) — это будет одно число
         first_num = extracted.list.first()
-        
-        # 4. Пробуем кастовать в Float64, невалидные → null
         numeric = first_num.cast(pl.Float64, strict=False)
-        
-        # 5. Обработка NaN/Inf
         numeric = numeric.fill_nan(0.0).fill_null(0.0)
-        
-        # 6. Защита от бесконечностей
         numeric = numeric.filter(numeric.is_finite()).fill_null(0.0)
-        
         return numeric.round(2)
     
     @staticmethod
     def safe_convert_to_float(value: Any) -> float:
-        """
-        Универсальная конвертация любого значения в число (fallback для одиночных значений).
-        Исправляет проблему с датами в габаритах (22.июл → 22.0).
-        """
+        """Универсальная конвертация любого значения в число (fallback)"""
         if value is None or value == "":
             return 0.0
         if isinstance(value, (int, float)):
@@ -5990,7 +5976,6 @@ class HighVolumeAutoPartsCatalog:
                     logger.error(f"Файл не найден: {file_path}")
                     return pl.DataFrame()
                 
-                # Используем pd.read_excel вместо pl.read_excel
                 try:
                     pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
                     df = pl.from_pandas(pdf)
@@ -6038,7 +6023,6 @@ class HighVolumeAutoPartsCatalog:
                 f"Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
             return pl.DataFrame()
         
-        # Переименование с защитой от дубликатов
         try:
             df = df.rename(column_mapping)
         except Exception as e:
@@ -6052,7 +6036,6 @@ class HighVolumeAutoPartsCatalog:
                 except Exception as e2:
                     logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
         
-        # Удаляем дубликаты колонок
         if len(df.columns) != len(set(df.columns)):
             logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
             seen = set()
@@ -6065,19 +6048,15 @@ class HighVolumeAutoPartsCatalog:
                     logger.warning(f"Удаляем дубликат колонки: {col}")
             df = df.select(cols_to_keep)
         
-        # Нормализация ключевых колонок
         for col in ['artikul', 'brand', 'oe_number']:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # ====================================================================
-        # 🆕 v100.31: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЛОВЫХ КОЛОНОК
-        # ====================================================================
+        # ✅ v100.32: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЛОВЫХ КОЛОНОК
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
                 try:
-                    # Используем векторизованную операцию (×40 быстрее map_elements)
                     df = df.with_columns(
                         self.vectorized_convert_to_float(pl.col(col)).alias(col)
                     )
@@ -6098,12 +6077,10 @@ class HighVolumeAutoPartsCatalog:
                         except Exception:
                             pass
         
-        # Удаление дубликатов по ключевым колонкам
         key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
         if key_cols:
             df = df.unique(subset=key_cols, keep='first')
         
-        # Нормализация ключей
         for col in ['artikul', 'brand', 'oe_number']:
             if col in df.columns:
                 df = df.with_columns(self.normalize_key(
@@ -6113,7 +6090,7 @@ class HighVolumeAutoPartsCatalog:
         return df
     
     # ========================================================================
-    # ВАЛИДАЦИЯ ДАННЫХ
+    # ✅ v100.32: ВАЛИДАЦИЯ ДАННЫХ (ИЗ v100.5.1)
     # ========================================================================
     def validate_dataframe(self, df: pl.DataFrame, table_name: str) -> bool:
         """Проверка целостности данных перед вставкой"""
@@ -6143,25 +6120,20 @@ class HighVolumeAutoPartsCatalog:
         return True
     
     # ========================================================================
-    # 🆕 v100.31: UPSERT ЧЕРЕЗ MERGE (×4.5 БЫСТРЕЕ)
+    # ✅ v100.32: UPSERT ЧЕРЕЗ MERGE (×4.5 БЫСТРЕЕ)
     # ========================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
-        """
-        🆕 v100.31: UPSERT через MERGE (SQL:2016) вместо DELETE + INSERT.
-        Одна операция вместо двух — меньше транзакций, быстрее на больших объёмах.
-        """
+        """UPSERT через MERGE (SQL:2016) с валидацией и транзакцией"""
         if df.is_empty():
             logger.info(f"DataFrame для таблицы {table_name} пустой, пропускаем upsert")
             return
         
-        # Валидация данных
         if not self.validate_dataframe(df, table_name):
             logger.error(f"❌ Данные не прошли валидацию для таблицы {table_name}")
             return
         
         df = df.unique(keep='first')
         
-        # Получаем список колонок целевой таблицы
         try:
             target_cols_result = self.conn.execute(
                 f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'"
@@ -6171,18 +6143,15 @@ class HighVolumeAutoPartsCatalog:
             logger.error(f"Ошибка получения структуры таблицы {table_name}: {e}")
             return
         
-        # Выбираем только колонки, которые есть в целевой таблице
         available_cols = [col for col in target_cols if col in df.columns]
         if not available_cols:
             logger.error(f"Нет совпадающих колонок для таблицы {table_name}")
             return
         
-        # Оставляем только нужные колонки
         df = df.select(available_cols)
         
         temp_view_name = f"temp_{table_name}_{int(time.time())}"
         try:
-            # Регистрация временного представления
             logger.info(f"Регистрация временного представления {temp_view_name}")
             try:
                 arrow_table = df.to_arrow()
@@ -6192,15 +6161,10 @@ class HighVolumeAutoPartsCatalog:
                 pdf = df.to_pandas()
                 self.conn.register(temp_view_name, pdf)
             
-            # Формируем условия для PK
             pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
-            
-            # Колонки для обновления (все кроме PK)
             update_cols = [c for c in available_cols if c not in pk]
             
-            # ====================================================================
-            # 🆕 v100.31: Используем MERGE вместо DELETE + INSERT
-            # ====================================================================
+            # ✅ v100.32: MERGE вместо DELETE + INSERT
             if update_cols:
                 update_clause = ", ".join([f'"{c}" = s."{c}"' for c in update_cols])
                 insert_cols = ", ".join([f'"{c}"' for c in available_cols])
@@ -6217,7 +6181,6 @@ class HighVolumeAutoPartsCatalog:
                         VALUES ({insert_vals})
                 """
             else:
-                # Если нет колонок для обновления — только INSERT
                 insert_cols = ", ".join([f'"{c}"' for c in available_cols])
                 merge_sql = f"""
                     INSERT INTO {table_name} ({insert_cols})
@@ -6236,9 +6199,7 @@ class HighVolumeAutoPartsCatalog:
             logger.error(f"Ошибка при MERGE в таблицу {table_name}: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             
-            # ====================================================================
-            # Fallback: старый метод DELETE + INSERT (если MERGE не поддерживается)
-            # ====================================================================
+            # Fallback: старый метод DELETE + INSERT
             logger.warning(f"⚠️ Fallback на DELETE + INSERT для {table_name}")
             try:
                 with self.db_transaction():
@@ -6284,7 +6245,7 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
     # ========================================================================
-    # 🆕 v100.31: PIPELINE-ПАРАЛЛЕЛИЗМ ДЛЯ ЗАГРУЗКИ (×2-3 БЫСТРЕЕ)
+    # ✅ v100.32: PIPELINE-ПАРАЛЛЕЛИЗМ ДЛЯ ЗАГРУЗКИ
     # ========================================================================
     def _prepare_table_data(self, ftype: str, df: pl.DataFrame) -> Tuple[str, pl.DataFrame]:
         """Подготовка данных для одной таблицы (параллелизуемый этап)"""
@@ -6337,25 +6298,32 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_prices(price_df)
     
     # ========================================================================
-    # ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ v100.31)
+    # ✅ v100.32: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ (ОПТИМИЗИРОВАННАЯ + НАДЁЖНАЯ)
     # ========================================================================
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
-        """
-        🆕 v100.31: Обработка и загрузка данных с pipeline-параллелизмом.
-        Этап 1: Параллельная подготовка всех DataFrame
-        Этап 2: Параллельная загрузка в БД
-        Этап 3: Финальная сборка parts (зависит от предыдущих)
-        """
+        """Обработка и загрузка данных с pipeline-параллелизмом и защитой от ошибок"""
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
-                num_steps = 4
+                # ✅ v100.32: Правильный расчет количества шагов (защита от деления на 0)
+                num_steps = 0
+                if 'oe' in dataframes:
+                    num_steps += 1
+                if 'cross' in dataframes:
+                    num_steps += 1
+                if 'prices' in dataframes:
+                    num_steps += 1
+                num_steps += 1  # ШАГ 4: Сборка данных по артикулам (выполняется всегда)
+                
+                if num_steps == 0:
+                    num_steps = 1
+                
                 progress_bar = st.progress(0)
                 step_counter = 0
                 total_records = 0
                 unique_artikuls = set()
                 
                 # ====================================================================
-                # 🆕 v100.31: ЭТАП 1 — Параллельная подготовка данных
+                # ✅ v100.32: ЭТАП 1 — Параллельная подготовка данных
                 # ====================================================================
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
@@ -6365,7 +6333,6 @@ class HighVolumeAutoPartsCatalog:
                 cross_from_oe = pl.DataFrame()
                 
                 if len(dataframes) > 1:
-                    # Параллельная подготовка
                     with ThreadPoolExecutor(max_workers=min(4, len(dataframes))) as executor:
                         futures = {
                             executor.submit(self._prepare_table_data, ftype, df): ftype
@@ -6384,7 +6351,6 @@ class HighVolumeAutoPartsCatalog:
                             except Exception as e:
                                 logger.error(f"Ошибка подготовки {ftype}: {e}")
                 else:
-                    # Один файл — последовательно
                     for ftype, df in dataframes.items():
                         result = self._prepare_table_data(ftype, df)
                         for item in result:
@@ -6395,7 +6361,7 @@ class HighVolumeAutoPartsCatalog:
                                 prepared[key] = data
                 
                 # ====================================================================
-                # 🆕 v100.31: ЭТАП 2 — Параллельная загрузка в БД
+                # ✅ v100.32: ЭТАП 2 — Параллельная загрузка в БД
                 # ====================================================================
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
@@ -6407,7 +6373,6 @@ class HighVolumeAutoPartsCatalog:
                         status.write(f"💾 Сохранение {len(prepared['oe']):,} записей в oe...")
                         futures.append(executor.submit(self._upsert_oe, prepared['oe']))
                     if 'cross' in prepared or not cross_from_oe.is_empty():
-                        # Объединяем cross из разных источников
                         cross_parts = []
                         if 'cross' in prepared:
                             cross_parts.append(prepared['cross'])
@@ -6421,14 +6386,12 @@ class HighVolumeAutoPartsCatalog:
                         status.write(f"💾 Сохранение {len(prepared['prices']):,} цен...")
                         futures.append(executor.submit(self._upsert_prices, prepared['prices']))
                     
-                    # Ждём завершения всех загрузок
                     for f in futures:
                         try:
                             f.result()
                         except Exception as e:
                             logger.error(f"Ошибка загрузки: {e}")
                 
-                # Подсчёт записей
                 if 'oe' in prepared:
                     total_records += len(prepared['oe'])
                     status.write(f"✅ Сохранено {len(prepared['oe']):,} записей в OE")
@@ -6498,7 +6461,6 @@ class HighVolumeAutoPartsCatalog:
                         parts_df = parts_df.join(
                             df_subset, on=['artikul_norm', 'brand_norm'], how='left', coalesce=True)
                     
-                    # Заполняем недостающие колонки
                     if 'multiplicity' not in parts_df.columns:
                         parts_df = parts_df.with_columns(multiplicity=pl.lit(1).cast(pl.Int32))
                     else:
@@ -6516,16 +6478,15 @@ class HighVolumeAutoPartsCatalog:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
                     
                     # ====================================================================
-                    # 🆕 v100.31: ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight (×116 БЫСТРЕЕ)
+                    # ✅ v100.32: ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight (×116 БЫСТРЕЕ)
+                    # + FALLBACK при ошибке (из v100.5.1)
                     # ====================================================================
                     try:
-                        # Объёмный вес = (L*W*H) / 5000
                         parts_df = parts_df.with_columns(
                             ((pl.col('length') * pl.col('width') * pl.col('height')) / 5000.0)
                             .alias('volumetric_weight')
                         )
                         
-                        # billable_weight = max(weight, volumetric_weight), округлённый до 0.5
                         parts_df = parts_df.with_columns(
                             pl.when(pl.col('length') <= 0)
                             .then(pl.col('weight'))
@@ -6559,7 +6520,6 @@ class HighVolumeAutoPartsCatalog:
                                 pl.col('weight').alias('billable_weight')
                             )
                     
-                    # Формирование строки габаритов
                     parts_df = parts_df.with_columns([
                         pl.col('length').cast(pl.Utf8).fill_null('').alias('_length_str'),
                         pl.col('width').cast(pl.Utf8).fill_null('').alias('_width_str'),
@@ -6581,7 +6541,6 @@ class HighVolumeAutoPartsCatalog:
                     )
                     parts_df = parts_df.drop(['_length_str', '_width_str', '_height_str'])
                     
-                    # Формирование описания
                     if 'artikul' not in parts_df.columns:
                         parts_df = parts_df.with_columns(artikul=pl.lit(''))
                     if 'brand' not in parts_df.columns:
@@ -6601,7 +6560,6 @@ class HighVolumeAutoPartsCatalog:
                     )
                     parts_df = parts_df.drop(['_artikul_str', '_brand_str', '_multiplicity_str'])
                     
-                    # Финальный выбор колонок
                     final_columns = [
                         'artikul_norm', 'brand_norm', 'artikul', 'brand', 'multiplicity', 'barcode',
                         'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 
@@ -6617,12 +6575,10 @@ class HighVolumeAutoPartsCatalog:
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
                 
-                # Корректный подсчёт уникальных артикулов
                 unique_count = len(unique_artikuls)
                 if unique_count > 0:
                     status.write(f"📊 Уникальных артикулов в каталоге: {unique_count:,}")
                 
-                # Завершение
                 progress_bar.progress(1.0)
                 status.update(
                     label=f"✅ Загрузка завершена! Загружено {total_records:,} записей, уникальных артикулов: {unique_count:,}",
@@ -6635,12 +6591,13 @@ class HighVolumeAutoPartsCatalog:
             logger.error(traceback.format_exc())
             st.error(f"❌ Ошибка загрузки данных: {str(e)}")
         finally:
+            # ✅ v100.32: Очистка памяти (из v100.5.1)
             gc.collect()
             if hasattr(pl, 'free_memory'):
                 pl.free_memory()
     
     # ========================================================================
-    # ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE
+    # ✅ v100.32: ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE (ИЗ v100.5.1)
     # ========================================================================
     def recreate_oe_table(self):
         """Принудительное пересоздание таблицы oe с правильной структурой"""
@@ -6696,7 +6653,7 @@ class HighVolumeAutoPartsCatalog:
             return False
     
     # ========================================================================
-    # УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ
+    # ✅ v100.32: УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ (ИЗ v100.5.1)
     # ========================================================================
     def delete_database_file(self):
         """Удаление файла базы данных для полного сброса"""
@@ -6993,7 +6950,7 @@ class HighVolumeAutoPartsCatalog:
                 FROM parts p
                 LEFT JOIN PartDetails pd ON p.artikul_norm = pd.artikul_norm AND p.brand_norm = pd.brand_norm
                 LEFT JOIN AllAnalogs aa ON p.artikul_norm = aa.artikul_norm AND p.brand_norm = aa.brand_norm
-                LEFT JOIN AggregatedAnalogData p_analog ON p.artikul_norm = p_analog.artikul_norm AND p_analog.brand_norm = p_analog.brand_norm
+                LEFT JOIN AggregatedAnalogData p_analog ON p.artikul_norm = p_analog.artikul_norm AND p.brand_norm = p_analog.brand_norm
             )
         """
         
