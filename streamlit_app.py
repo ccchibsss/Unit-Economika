@@ -6373,9 +6373,7 @@ class HighVolumeAutoPartsCatalog:
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
     
     def export_to_csv_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None, include_prices: bool = True, apply_markup: bool = True) -> bool:
-    """
-    ✅ ИСПРАВЛЕНО: габариты в CSV теперь числовые, пустые значения — пустые строки
-    """
+    """ИСПРАВЛЕНО: габариты в CSV теперь числовые, пустые значения — пустые строки"""
     total = self.conn.execute(
         "SELECT count(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
     if total == 0:
@@ -6424,9 +6422,7 @@ class HighVolumeAutoPartsCatalog:
         return False
     
     def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None, include_prices: bool = True, apply_markup: bool = True) -> bool:
-    """
-    ✅ ИСПРАВЛЕНО: колонки Длина/Ширина/Высота/Вес теперь числовые в Excel
-    """
+    """ИСПРАВЛЕНО: колонки Длина/Ширина/Высота/Вес теперь числовые в Excel"""
     total = self.conn.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
     if total == 0:
