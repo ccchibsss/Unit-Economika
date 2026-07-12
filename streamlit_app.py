@@ -5406,24 +5406,27 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.6)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.24)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.6:
-# 1. УСИЛЕННАЯ ЗАЩИТА ОТ ДАТ В ГАБАРИТАХ (исправление "22.июл", "08.фев")
-# 2. Чтение Excel с параметрами: parse_dates=False, infer_schema_length=0
-# 3. Удаление всех нечисловых символов из строк с датами
-# 4. Fallback через openpyxl с dtype=str
-# 5. ИСПРАВЛЕНА ОШИБКА "Values list 'l1' does not have a column named 'oe_number_norm'"
-# 6. Добавлены related_oe_number_norm в Level1Analogs
-# 7. Исправлен JOIN в Level1OENumbers
-# 8. ДОБАВЛЕН МЕТОД recreate_oe_table() - принудительное пересоздание таблицы oe
-# 9. ДОБАВЛЕН МЕТОД delete_database_file() - удаление файла БД
-# 10. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
-# 11. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
-# 12. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
-# 13. Правильный порядок колонок при вставке в таблицу oe
-# 14. Приоритет габаритов: данные > OE > аналоги
-# 15. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
+# ✅ ИСПРАВЛЕНИЯ v100.24:
+# 1. ДОБАВЛЕН ПОДРОБНЫЙ СТАТУС-БАР ЗАГРУЗКИ через st.status()
+# 2. Отображение количества обрабатываемых записей
+# 3. Пошаговый прогресс с детализацией
+# 4. УСИЛЕННАЯ ЗАЩИТА ОТ ДАТ В ГАБАРИТАХ (исправление "22.июл", "08.фев")
+# 5. Чтение Excel с параметрами: parse_dates=False, infer_schema_length=0
+# 6. Удаление всех нечисловых символов из строк с датами
+# 7. Fallback через openpyxl с dtype=str
+# 8. ИСПРАВЛЕНА ОШИБКА "Values list 'l1' does not have a column named 'oe_number_norm'"
+# 9. Добавлены related_oe_number_norm в Level1Analogs
+# 10. Исправлен JOIN в Level1OENumbers
+# 11. ДОБАВЛЕН МЕТОД recreate_oe_table() - принудительное пересоздание таблицы oe
+# 12. ДОБАВЛЕН МЕТОД delete_database_file() - удаление файла БД
+# 13. ИСПРАВЛЕНА ОШИБКА "table oe has 10 columns but 5 values were supplied"
+# 14. Добавлены ВСЕ колонки в oe_df (включая length, width, height, weight, dimensions_str)
+# 15. Гарантированное создание колонок с габаритами, даже если их нет в исходных данных
+# 16. Правильный порядок колонок при вставке в таблицу oe
+# 17. Приоритет габаритов: данные > OE > аналоги
+# 18. Гарантированное заполнение всех 4 колонок (Длинна, Ширина, Высота, Вес)
 # ============================================================================
 
 @st.cache_resource
@@ -5985,7 +5988,7 @@ class HighVolumeAutoPartsCatalog:
         return df
     
     # ========================================================================
-    # ✅ ЗАГРУЗКА И ОБНОВЛЕНИЕ В БАЗЕ
+    # ✅ ЗАГРУЗКА И ОБНОВЛЕНИЕ В БАЗЕ (С СТАТУС-БАРОМ v100.24)
     # ========================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
         """
@@ -6053,252 +6056,274 @@ class HighVolumeAutoPartsCatalog:
     
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
         """
-        ✅ ИСПРАВЛЕНО v100.22: Габариты тянутся из OE файла + защита от дат
+        ✅ ИСПРАВЛЕНО v100.24: Добавлен подробный статус-бар загрузки через st.status()
         ✅ ИСПРАВЛЕНИЕ: Исправлена ошибка "table oe has 10 columns but 5 values were supplied"
         """
-        st.info("🔄 Начало загрузки и обновления данных в базе...")
-        
-        steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
-        num_steps = len(steps)
-        
-        progress_bar = st.progress(0, text="Подготовка к обновлению базы данных...")
-        step_counter = 0
-        
-        # ================================================================
-        # ШАГ 1: Обработка OE данных
-        # ================================================================
-        if 'oe' in dataframes:
-            step_counter += 1
-            progress_bar.progress(step_counter / (num_steps + 1),
-                                  text=f"({step_counter}/{num_steps}) Обработка OE данных...")
+        with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
             
-            df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
+            steps = [s for s in ['oe', 'cross', 'parts'] if s in dataframes]
+            num_steps = len(steps)
+            if 'prices' in dataframes:
+                num_steps += 1
             
-            # ✅ ИСПРАВЛЕНИЕ v100.22: ЯВНО УКАЗЫВАЕМ ВСЕ 10 КОЛОНОК
+            step_counter = 0
+            total_records = 0
             
-            # Проверяем и добавляем length
-            if 'length' not in df.columns:
-                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('length'))
-            
-            # Проверяем и добавляем width
-            if 'width' not in df.columns:
-                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('width'))
-            
-            # Проверяем и добавляем height
-            if 'height' not in df.columns:
-                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('height'))
-            
-            # Проверяем и добавляем weight
-            if 'weight' not in df.columns:
-                df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('weight'))
-            
-            # Проверяем и добавляем dimensions_str
-            if 'dimensions_str' not in df.columns:
-                df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias('dimensions_str'))
-            
-            # ✅ ТЕПЕРЬ ВЫБИРАЕМ ВСЕ 10 КОЛОНОК В ПРАВИЛЬНОМ ПОРЯДКЕ
-            # Сначала берем существующие колонки
-            oe_df = df.select([
-                'oe_number_norm',
-                'oe_number',
-                'name',
-                'applicability',
-                'length',
-                'width',
-                'height',
-                'weight',
-                'dimensions_str'
-            ]).unique(subset=['oe_number_norm'], keep='first')
-            
-            # Добавляем категорию
-            if 'name' in oe_df.columns:
-                oe_df = oe_df.with_columns(
-                    self.determine_category_vectorized(pl.col('name')).alias('category')
-                )
-            else:
-                oe_df = oe_df.with_columns(pl.lit('Разное').alias('category'))
-            
-            # ✅ УБЕЖДАЕМСЯ, ЧТО ПОРЯДОК КОЛОНОК СООТВЕТСТВУЕТ ТАБЛИЦЕ
-            # Таблица oe: oe_number_norm, oe_number, name, applicability, category, length, width, height, weight, dimensions_str
-            oe_df = oe_df.select([
-                'oe_number_norm',
-                'oe_number',
-                'name',
-                'applicability',
-                'category',
-                'length',
-                'width',
-                'height',
-                'weight',
-                'dimensions_str'
-            ])
-            
-            # ✅ ПРОВЕРЯЕМ КОЛОНКИ ПЕРЕД ВСТАВКОЙ
-            logger.info(f"Колонки oe_df перед upsert: {oe_df.columns}")
-            logger.info(f"Количество колонок в oe_df: {len(oe_df.columns)}")
-            
-            self.upsert_data('oe', oe_df, ['oe_number_norm'])
-            
-            cross_df_from_oe = df.filter(pl.col('artikul_norm') != "").select(
-                ['oe_number_norm', 'artikul_norm', 'brand_norm']).unique()
-            self.upsert_data('cross_references', cross_df_from_oe, [
-                'oe_number_norm', 'artikul_norm', 'brand_norm'])
-        
-        # ================================================================
-        # ШАГ 2: Обработка кроссов
-        # ================================================================
-        if 'cross' in dataframes:
-            step_counter += 1
-            progress_bar.progress(step_counter / (num_steps + 1),
-                                  text=f"({step_counter}/{num_steps}) Обработка кроссов...")
-            
-            df = dataframes['cross'].filter(
-                (pl.col('oe_number_norm') != "") & (pl.col('artikul_norm') != ""))
-            cross_df_from_cross = df.select(
-                ['oe_number_norm', 'artikul_norm', 'brand_norm']).unique()
-            self.upsert_data('cross_references', cross_df_from_cross, [
-                'oe_number_norm', 'artikul_norm', 'brand_norm'])
-        
-        # ================================================================
-        # ШАГ 3: Обработка цен
-        # ================================================================
-        if 'prices' in dataframes:
-            price_df = dataframes['prices']
-            if not price_df.is_empty():
-                st.info("💰 Обработка цен...")
-                self.upsert_prices(price_df)
-                st.success(f"✅ Успешно обновлено {len(price_df)} ценовых записей")
-        
-        # ================================================================
-        # ШАГ 4: Сборка и обновление данных по артикулам
-        # ================================================================
-        step_counter += 1
-        progress_bar.progress(step_counter / (num_steps + 1),
-                              text=f"({step_counter}/{num_steps}) Сборка и обновление данных по артикулам...")
-        
-        parts_df = None
-        file_priority = ['oe', 'dimensions', 'barcode', 'images']
-        key_files = {ftype: df for ftype, df in dataframes.items() if ftype in file_priority}
-        
-        if key_files:
-            parts_to_concat = [
-                df.select(['artikul', 'artikul_norm', 'brand', 'brand_norm'])
-                for df in key_files.values()
-                if 'artikul_norm' in df.columns and 'brand_norm' in df.columns and not df.is_empty()
-            ]
-            
-            if parts_to_concat:
-                all_parts = pl.concat(parts_to_concat).filter(
-                    pl.col('artikul_norm') != ""
-                ).unique(subset=['artikul_norm', 'brand_norm'], keep='first')
-                parts_df = all_parts
-            else:
-                parts_df = pl.DataFrame()
-        
-        if parts_df is not None and not parts_df.is_empty():
-            for ftype in file_priority:
-                if ftype not in key_files:
-                    continue
+            # ================================================================
+            # ШАГ 1: Обработка OE данных
+            # ================================================================
+            if 'oe' in dataframes:
+                step_counter += 1
+                status.update(label=f"📋 ({step_counter}/{num_steps}) Обработка OE данных...")
                 
-                df = key_files[ftype]
-                if df.is_empty() or 'artikul_norm' not in df.columns:
-                    continue
+                df = dataframes['oe'].filter(pl.col('oe_number_norm') != "")
+                status.write(f"📋 Найдено {len(df):,} записей в OE файле")
                 
-                # ✅ v100.20: Для OE и dimensions файлов принудительно добавляем габариты
-                if ftype in ['oe', 'dimensions']:
-                    dims_to_add = ['length', 'width', 'height', 'weight', 'dimensions_str']
-                    join_cols = [col for col in dims_to_add if col in df.columns]
-                else:
-                    join_cols = [col for col in df.columns if col not in [
-                        'artikul', 'artikul_norm', 'brand', 'brand_norm']]
+                # ✅ ИСПРАВЛЕНИЕ v100.22: ЯВНО УКАЗЫВАЕМ ВСЕ 10 КОЛОНОК
                 
-                if not join_cols:
-                    continue
+                # Проверяем и добавляем length
+                if 'length' not in df.columns:
+                    df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('length'))
                 
-                existing_cols = set(parts_df.columns)
-                join_cols = [col for col in join_cols if col not in existing_cols]
-                if not join_cols:
-                    continue
+                # Проверяем и добавляем width
+                if 'width' not in df.columns:
+                    df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('width'))
                 
-                df_subset = df.select(['artikul_norm', 'brand_norm'] + join_cols).unique(
-                    subset=['artikul_norm', 'brand_norm'], keep='first')
-                parts_df = parts_df.join(
-                    df_subset, on=['artikul_norm', 'brand_norm'], how='left', coalesce=True)
-            
-            # Заполняем недостающие колонки
-            if 'multiplicity' not in parts_df.columns:
-                parts_df = parts_df.with_columns(multiplicity=pl.lit(1).cast(pl.Int32))
-            else:
-                parts_df = parts_df.with_columns(pl.col('multiplicity').fill_null(1).cast(pl.Int32))
-            
-            for col in ['length', 'width', 'height', 'weight']:
-                if col not in parts_df.columns:
-                    parts_df = parts_df.with_columns(pl.lit(0.0).cast(pl.Float64).alias(col))
-                else:
-                    parts_df = parts_df.with_columns(
-                        pl.col(col).fill_null(0).cast(pl.Float64).alias(col)
+                # Проверяем и добавляем height
+                if 'height' not in df.columns:
+                    df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('height'))
+                
+                # Проверяем и добавляем weight
+                if 'weight' not in df.columns:
+                    df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias('weight'))
+                
+                # Проверяем и добавляем dimensions_str
+                if 'dimensions_str' not in df.columns:
+                    df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias('dimensions_str'))
+                
+                # ✅ ТЕПЕРЬ ВЫБИРАЕМ ВСЕ 10 КОЛОНОК В ПРАВИЛЬНОМ ПОРЯДКЕ
+                # Сначала берем существующие колонки
+                oe_df = df.select([
+                    'oe_number_norm',
+                    'oe_number',
+                    'name',
+                    'applicability',
+                    'length',
+                    'width',
+                    'height',
+                    'weight',
+                    'dimensions_str'
+                ]).unique(subset=['oe_number_norm'], keep='first')
+                
+                # Добавляем категорию
+                if 'name' in oe_df.columns:
+                    oe_df = oe_df.with_columns(
+                        self.determine_category_vectorized(pl.col('name')).alias('category')
                     )
+                else:
+                    oe_df = oe_df.with_columns(pl.lit('Разное').alias('category'))
+                
+                # ✅ УБЕЖДАЕМСЯ, ЧТО ПОРЯДОК КОЛОНОК СООТВЕТСТВУЕТ ТАБЛИЦЕ
+                # Таблица oe: oe_number_norm, oe_number, name, applicability, category, length, width, height, weight, dimensions_str
+                oe_df = oe_df.select([
+                    'oe_number_norm',
+                    'oe_number',
+                    'name',
+                    'applicability',
+                    'category',
+                    'length',
+                    'width',
+                    'height',
+                    'weight',
+                    'dimensions_str'
+                ])
+                
+                # ✅ ПРОВЕРЯЕМ КОЛОНКИ ПЕРЕД ВСТАВКОЙ
+                logger.info(f"Колонки oe_df перед upsert: {oe_df.columns}")
+                logger.info(f"Количество колонок в oe_df: {len(oe_df.columns)}")
+                
+                status.write(f"💾 Сохранение {len(oe_df):,} записей в таблицу oe...")
+                self.upsert_data('oe', oe_df, ['oe_number_norm'])
+                total_records += len(oe_df)
+                status.write(f"✅ Сохранено {len(oe_df):,} записей в OE")
+                
+                cross_df_from_oe = df.filter(pl.col('artikul_norm') != "").select(
+                    ['oe_number_norm', 'artikul_norm', 'brand_norm']).unique()
+                
+                status.write(f"🔗 Сохранение {len(cross_df_from_oe):,} кросс-ссылок из OE...")
+                self.upsert_data('cross_references', cross_df_from_oe, [
+                    'oe_number_norm', 'artikul_norm', 'brand_norm'])
             
-            if 'dimensions_str' not in parts_df.columns:
-                parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
+            # ================================================================
+            # ШАГ 2: Обработка кроссов
+            # ================================================================
+            if 'cross' in dataframes:
+                step_counter += 1
+                status.update(label=f"🔗 ({step_counter}/{num_steps}) Обработка кросс-ссылок...")
+                
+                df = dataframes['cross'].filter(
+                    (pl.col('oe_number_norm') != "") & (pl.col('artikul_norm') != ""))
+                cross_df_from_cross = df.select(
+                    ['oe_number_norm', 'artikul_norm', 'brand_norm']).unique()
+                
+                status.write(f"💾 Сохранение {len(cross_df_from_cross):,} кросс-ссылок...")
+                self.upsert_data('cross_references', cross_df_from_cross, [
+                    'oe_number_norm', 'artikul_norm', 'brand_norm'])
+                total_records += len(cross_df_from_cross)
+                status.write(f"✅ Сохранено {len(cross_df_from_cross):,} кросс-ссылок")
             
-            # Формируем dimensions_str из length, width, height
-            parts_df = parts_df.with_columns([
-                pl.col('length').cast(pl.Utf8).fill_null('').alias('_length_str'),
-                pl.col('width').cast(pl.Utf8).fill_null('').alias('_width_str'),
-                pl.col('height').cast(pl.Utf8).fill_null('').alias('_height_str'),
-            ])
+            # ================================================================
+            # ШАГ 3: Обработка цен
+            # ================================================================
+            if 'prices' in dataframes:
+                step_counter += 1
+                status.update(label=f"💰 ({step_counter}/{num_steps}) Обработка цен...")
+                
+                price_df = dataframes['prices']
+                if not price_df.is_empty():
+                    status.write(f"💾 Сохранение {len(price_df):,} ценовых записей...")
+                    self.upsert_prices(price_df)
+                    total_records += len(price_df)
+                    status.write(f"✅ Сохранено {len(price_df):,} ценовых записей")
             
-            parts_df = parts_df.with_columns(
-                dimensions_str=pl.when(
-                    (pl.col('dimensions_str').is_not_null()) &
-                    (pl.col('dimensions_str').cast(pl.Utf8) != '')
-                ).then(
-                    pl.col('dimensions_str').cast(pl.Utf8)
-                ).otherwise(
-                    pl.concat_str([
-                        pl.col('_length_str'), pl.lit('x'),
-                        pl.col('_width_str'), pl.lit('x'),
-                        pl.col('_height_str')
+            # ================================================================
+            # ШАГ 4: Сборка и обновление данных по артикулам
+            # ================================================================
+            step_counter += 1
+            status.update(label=f"📦 ({step_counter}/{num_steps}) Сборка данных по артикулам...")
+            
+            parts_df = None
+            file_priority = ['oe', 'dimensions', 'barcode', 'images']
+            key_files = {ftype: df for ftype, df in dataframes.items() if ftype in file_priority}
+            
+            if key_files:
+                status.write("🔄 Объединение данных из разных файлов...")
+                parts_to_concat = [
+                    df.select(['artikul', 'artikul_norm', 'brand', 'brand_norm'])
+                    for df in key_files.values()
+                    if 'artikul_norm' in df.columns and 'brand_norm' in df.columns and not df.is_empty()
+                ]
+                
+                if parts_to_concat:
+                    all_parts = pl.concat(parts_to_concat).filter(
+                        pl.col('artikul_norm') != ""
+                    ).unique(subset=['artikul_norm', 'brand_norm'], keep='first')
+                    parts_df = all_parts
+                    status.write(f"📊 Найдено {len(parts_df):,} уникальных артикулов")
+                else:
+                    parts_df = pl.DataFrame()
+            
+            if parts_df is not None and not parts_df.is_empty():
+                status.write("🔄 Обогащение данных артикулов...")
+                
+                for ftype in file_priority:
+                    if ftype not in key_files:
+                        continue
+                    
+                    df = key_files[ftype]
+                    if df.is_empty() or 'artikul_norm' not in df.columns:
+                        continue
+                    
+                    # ✅ v100.20: Для OE и dimensions файлов принудительно добавляем габариты
+                    if ftype in ['oe', 'dimensions']:
+                        dims_to_add = ['length', 'width', 'height', 'weight', 'dimensions_str']
+                        join_cols = [col for col in dims_to_add if col in df.columns]
+                    else:
+                        join_cols = [col for col in df.columns if col not in [
+                            'artikul', 'artikul_norm', 'brand', 'brand_norm']]
+                    
+                    if not join_cols:
+                        continue
+                    
+                    existing_cols = set(parts_df.columns)
+                    join_cols = [col for col in join_cols if col not in existing_cols]
+                    if not join_cols:
+                        continue
+                    
+                    df_subset = df.select(['artikul_norm', 'brand_norm'] + join_cols).unique(
+                        subset=['artikul_norm', 'brand_norm'], keep='first')
+                    parts_df = parts_df.join(
+                        df_subset, on=['artikul_norm', 'brand_norm'], how='left', coalesce=True)
+                
+                # Заполняем недостающие колонки
+                if 'multiplicity' not in parts_df.columns:
+                    parts_df = parts_df.with_columns(multiplicity=pl.lit(1).cast(pl.Int32))
+                else:
+                    parts_df = parts_df.with_columns(pl.col('multiplicity').fill_null(1).cast(pl.Int32))
+                
+                for col in ['length', 'width', 'height', 'weight']:
+                    if col not in parts_df.columns:
+                        parts_df = parts_df.with_columns(pl.lit(0.0).cast(pl.Float64).alias(col))
+                    else:
+                        parts_df = parts_df.with_columns(
+                            pl.col(col).fill_null(0).cast(pl.Float64).alias(col)
+                        )
+                
+                if 'dimensions_str' not in parts_df.columns:
+                    parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
+                
+                # Формируем dimensions_str из length, width, height
+                parts_df = parts_df.with_columns([
+                    pl.col('length').cast(pl.Utf8).fill_null('').alias('_length_str'),
+                    pl.col('width').cast(pl.Utf8).fill_null('').alias('_width_str'),
+                    pl.col('height').cast(pl.Utf8).fill_null('').alias('_height_str'),
+                ])
+                
+                parts_df = parts_df.with_columns(
+                    dimensions_str=pl.when(
+                        (pl.col('dimensions_str').is_not_null()) &
+                        (pl.col('dimensions_str').cast(pl.Utf8) != '')
+                    ).then(
+                        pl.col('dimensions_str').cast(pl.Utf8)
+                    ).otherwise(
+                        pl.concat_str([
+                            pl.col('_length_str'), pl.lit('x'),
+                            pl.col('_width_str'), pl.lit('x'),
+                            pl.col('_height_str')
+                        ], separator='')
+                    )
+                )
+                
+                parts_df = parts_df.drop(['_length_str', '_width_str', '_height_str'])
+                
+                if 'artikul' not in parts_df.columns:
+                    parts_df = parts_df.with_columns(artikul=pl.lit(''))
+                if 'brand' not in parts_df.columns:
+                    parts_df = parts_df.with_columns(brand=pl.lit(''))
+                
+                parts_df = parts_df.with_columns([
+                    pl.col('artikul').cast(pl.Utf8).fill_null('').alias('_artikul_str'),
+                    pl.col('brand').cast(pl.Utf8).fill_null('').alias('_brand_str'),
+                    pl.col('multiplicity').cast(pl.Utf8).alias('_multiplicity_str'),
+                ])
+                
+                parts_df = parts_df.with_columns(
+                    description=pl.concat_str([
+                        pl.lit('Артикул: '), pl.col('_artikul_str'),
+                        pl.lit(', Бренд: '), pl.col('_brand_str'),
+                        pl.lit(', Кратность: '), pl.col('_multiplicity_str'), pl.lit(' шт.')
                     ], separator='')
                 )
-            )
+                
+                parts_df = parts_df.drop(['_artikul_str', '_brand_str', '_multiplicity_str'])
+                
+                final_columns = [
+                    'artikul_norm', 'brand_norm', 'artikul', 'brand', 'multiplicity', 'barcode',
+                    'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 'description'
+                ]
+                select_exprs = [pl.col(c) if c in parts_df.columns else pl.lit(None).alias(c) for c in final_columns]
+                parts_df = parts_df.select(select_exprs)
+                
+                status.write(f"💾 Сохранение {len(parts_df):,} записей в таблицу parts...")
+                self.upsert_data('parts', parts_df, ['artikul_norm', 'brand_norm'])
+                total_records += len(parts_df)
+                status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
             
-            parts_df = parts_df.drop(['_length_str', '_width_str', '_height_str'])
-            
-            if 'artikul' not in parts_df.columns:
-                parts_df = parts_df.with_columns(artikul=pl.lit(''))
-            if 'brand' not in parts_df.columns:
-                parts_df = parts_df.with_columns(brand=pl.lit(''))
-            
-            parts_df = parts_df.with_columns([
-                pl.col('artikul').cast(pl.Utf8).fill_null('').alias('_artikul_str'),
-                pl.col('brand').cast(pl.Utf8).fill_null('').alias('_brand_str'),
-                pl.col('multiplicity').cast(pl.Utf8).alias('_multiplicity_str'),
-            ])
-            
-            parts_df = parts_df.with_columns(
-                description=pl.concat_str([
-                    pl.lit('Артикул: '), pl.col('_artikul_str'),
-                    pl.lit(', Бренд: '), pl.col('_brand_str'),
-                    pl.lit(', Кратность: '), pl.col('_multiplicity_str'), pl.lit(' шт.')
-                ], separator='')
-            )
-            
-            parts_df = parts_df.drop(['_artikul_str', '_brand_str', '_multiplicity_str'])
-            
-            final_columns = [
-                'artikul_norm', 'brand_norm', 'artikul', 'brand', 'multiplicity', 'barcode',
-                'length', 'width', 'height', 'weight', 'image_url', 'dimensions_str', 'description'
-            ]
-            select_exprs = [pl.col(c) if c in parts_df.columns else pl.lit(None).alias(c) for c in final_columns]
-            parts_df = parts_df.select(select_exprs)
-            
-            self.upsert_data('parts', parts_df, ['artikul_norm', 'brand_norm'])
-        
-        progress_bar.progress(1.0, text="Обновление базы данных завершено!")
-        time.sleep(1)
-        progress_bar.empty()
+            # ================================================================
+            # ЗАВЕРШЕНИЕ
+            # ================================================================
+            status.update(label=f"✅ Загрузка завершена! Загружено {total_records:,} записей", state="complete")
+            logger.info(f"✅ Загрузка завершена. Всего записей: {total_records}")
     
     # ========================================================================
     # ✅ НОВЫЙ МЕТОД v100.22: ПРИНУДИТЕЛЬНОЕ ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE
