@@ -5723,94 +5723,126 @@ class HighVolumeAutoPartsCatalog:
             return False
         return True
 
-    # ====================================================================
-    # 🆕 v100.36: UPSERT ЧЕРЕЗ DELETE + INSERT (БЕЗ MERGE!)
-    # ====================================================================
-    def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
-        """
-        🆕 v100.36: UPSERT через DELETE + INSERT в транзакции.
-        """
-        if df.is_empty():
-            logger.info(f"DataFrame для таблицы {table_name} пустой, пропускаем upsert")
-            return
-        if not self.validate_dataframe(df, table_name):
-            logger.error(f"❌ Данные не прошли валидацию для таблицы {table_name}")
-            return
-
-        df = df.unique(keep='first')
-
+# ====================================================================
+# 🆕 v100.38: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
+# ====================================================================
+def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
+    """
+    🆕 v100.38: UPSERT через DELETE + INSERT ЧАНКАМИ.
+    
+    DuckDB 1.5.4 падает с Segmentation Fault при вставке >50K строк за раз.
+    Решение: разбиваем DataFrame на чанки по CHUNK_SIZE строк и обрабатываем каждый отдельно.
+    """
+    if df.is_empty():
+        logger.info(f"DataFrame для таблицы {table_name} пустой, пропускаем upsert")
+        return
+    
+    if not self.validate_dataframe(df, table_name):
+        logger.error(f"❌ Данные не прошли валидацию для таблицы {table_name}")
+        return
+    
+    df = df.unique(keep='first')
+    total_rows = len(df)
+    
+    # 🆕 ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
+    CHUNK_SIZE = 10_000 if table_name == 'parts' else 50_000
+    
+    try:
+        target_cols_result = self.conn.execute(
+            f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'"
+        ).fetchall()
+        target_cols = [col[0] for col in target_cols_result]
+    except Exception as e:
+        logger.error(f"Ошибка получения структуры таблицы {table_name}: {e}")
+        return
+    
+    available_cols = [col for col in target_cols if col in df.columns]
+    if not available_cols:
+        logger.error(f"Нет совпадающих колонок для таблицы {table_name}")
+        return
+    
+    df = df.select(available_cols)
+    cols_str = ", ".join([f'"{c}"' for c in available_cols])
+    pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
+    
+    # 🆕 ИСПРАВЛЕНИЕ: Разбиваем на чанки
+    num_chunks = (total_rows + CHUNK_SIZE - 1) // CHUNK_SIZE
+    logger.info(f"📦 UPSERT {table_name}: {total_rows:,} строк → {num_chunks} чанков по {CHUNK_SIZE:,}")
+    
+    total_upserted = 0
+    
+    for chunk_idx in range(num_chunks):
+        start_idx = chunk_idx * CHUNK_SIZE
+        end_idx = min((chunk_idx + 1) * CHUNK_SIZE, total_rows)
+        
+        # Берём срез DataFrame
+        chunk_df = df.slice(start_idx, end_idx - start_idx)
+        
+        # Уникальное имя временного представления для каждого чанка
+        temp_view_name = f"temp_{table_name}_{int(time.time())}_{chunk_idx}_{os.getpid()}"
+        
         try:
-            target_cols_result = self.conn.execute(
-                f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'"
-            ).fetchall()
-            target_cols = [col[0] for col in target_cols_result]
-        except Exception as e:
-            logger.error(f"Ошибка получения структуры таблицы {table_name}: {e}")
-            return
-
-        available_cols = [col for col in target_cols if col in df.columns]
-        if not available_cols:
-            logger.error(f"Нет совпадающих колонок для таблицы {table_name}")
-            return
-
-        df = df.select(available_cols)
-        temp_view_name = f"temp_{table_name}_{int(time.time())}_{os.getpid()}"
-
-        try:
-            logger.info(f"Регистрация временного представления {temp_view_name}")
-            # 🆕 v100.36: Используем Pandas вместо Arrow (стабильнее для DuckDB)
+            # 1. Регистрируем временное представление
             try:
-                pdf = df.to_pandas()
+                pdf = chunk_df.to_pandas()
                 self.conn.register(temp_view_name, pdf)
             except Exception as e:
-                logger.warning(f"Не удалось конвертировать в Pandas: {e}")
+                logger.warning(f"Не удалось конвертировать в Pandas: {e}. Fallback на Arrow.")
                 try:
-                    arrow_table = df.to_arrow()
+                    arrow_table = chunk_df.to_arrow()
                     self.conn.register(temp_view_name, arrow_table)
                 except Exception as e2:
                     logger.error(f"Не удалось зарегистрировать временное представление: {e2}")
-                    return
-
-            # 🆕 v100.36: DELETE + INSERT в транзакции (стабильный способ)
+                    continue
+            
+            # 2. DELETE + INSERT в транзакции
             with self.db_transaction():
-                pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
-                
-                # 1. Удаляем существующие записи
+                # DELETE существующих записей
                 delete_sql = f"""
                     DELETE FROM {table_name} t
                     USING {temp_view_name} s
                     WHERE {pk_conditions}
                 """
-                logger.info(f"Выполнение DELETE для таблицы {table_name}")
                 self.conn.execute(delete_sql)
-
-                # 2. Вставляем новые записи
-                cols_str = ", ".join([f'"{c}"' for c in available_cols])
+                
+                # INSERT новых записей
                 insert_sql = f"""
                     INSERT INTO {table_name} ({cols_str})
                     SELECT {cols_str} FROM {temp_view_name}
                 """
-                logger.info(f"Выполнение INSERT для таблицы {table_name}")
                 self.conn.execute(insert_sql)
-
-            logger.info(f"✅ Успешно upsert {len(df)} записей в таблицу {table_name}")
+            
+            chunk_size = end_idx - start_idx
+            total_upserted += chunk_size
+            
+            logger.info(f"✅ Чанк {chunk_idx + 1}/{num_chunks}: +{chunk_size:,} строк (всего: {total_upserted:,}/{total_rows:,})")
+            
         except Exception as e:
-            logger.error(f"Ошибка при UPSERT в таблицу {table_name}: {e}")
+            logger.error(f"Ошибка при UPSERT чанка {chunk_idx + 1}/{num_chunks} в таблицу {table_name}: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            st.error(f"Ошибка при записи в таблицу {table_name}. Детали в логе.")
+            st.error(f"Ошибка при записи чанка {chunk_idx + 1} в таблицу {table_name}. Детали в логе.")
+            # Продолжаем обрабатывать следующие чанки — не прерываем весь процесс
+            continue
         finally:
+            # 3. Всегда отменяем регистрацию
             try:
-                logger.info(f"Отмена регистрации временного представления {temp_view_name}")
                 self.conn.unregister(temp_view_name)
             except Exception as e:
                 logger.warning(f"Не удалось отменить регистрацию {temp_view_name}: {e}")
             
-            # 🆕 v100.36: Принудительная очистка памяти для предотвращения segfault
+            # 4. 🆕 ИСПРАВЛЕНИЕ: Принудительная очистка памяти после КАЖДОГО чанка
             try:
+                del chunk_df
+                if 'pdf' in locals():
+                    del pdf
+                if 'arrow_table' in locals():
+                    del arrow_table
                 gc.collect()
             except Exception:
                 pass
-
+    
+    logger.info(f"✅ Успешно upsert {total_upserted:,} из {total_rows:,} записей в таблицу {table_name}")
+    
     def upsert_prices(self, price_df: pl.DataFrame):
         if price_df.is_empty():
             return
