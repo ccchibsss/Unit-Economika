@@ -4959,9 +4959,9 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v100.40 — ПОЛНАЯ СТАБИЛИЗАЦИЯ)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v100.41 — ФИНАЛЬНАЯ СТАБИЛИЗАЦИЯ)
 # ============================================================================
-# 🐛 ИСПРАВЛЕНИЯ v100.40:
+# 🐛 ИСПРАВЛЕНИЯ v100.41:
 # 1. Chunked UPSERT (защита от Segmentation Fault в DuckDB 1.5.4)
 # 2. map_batches для vectorized_convert_to_float (исправлен 'Expr' error)
 # 3. Защита от pl.Date/pl.Datetime от calamine
@@ -4969,6 +4969,8 @@ class MarketplaceUnitEconomics:
 # 5. export_to_excel_optimized: сброс datetime64 + number_format='0.00'
 # 6. del parts_df + gc.collect() после upsert parts
 # 7. Полный description_text без сокращений
+# 8. Исправлено расширение файла при экспорте (Excel → .xlsx)
+# 9. merge_all_data_parallel восстановлен
 # ============================================================================
 import os
 import io
@@ -5427,11 +5429,11 @@ class HighVolumeAutoPartsCatalog:
         return billable
 
     # ====================================================================
-    # 🆕 v100.40: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (ЗАЩИТА ОТ ДАТ)
+    # 🆕 v100.41: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (ЗАЩИТА ОТ ДАТ)
     # ====================================================================
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
-        """🆕 v100.40: Конвертация Series с защитой от pl.Date/pl.Datetime"""
+        """🆕 v100.41: Конвертация Series с защитой от pl.Date/pl.Datetime"""
         # 🆕 ИСПРАВЛЕНИЕ: Если calamine распарсил колонку как Дату, конвертируем в сериальный номер Excel
         if series.dtype in [pl.Date, pl.Datetime]:
             try:
@@ -5635,7 +5637,7 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # 🆕 v100.40: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
+        # 🆕 v100.41: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
@@ -5700,11 +5702,11 @@ class HighVolumeAutoPartsCatalog:
         return True
 
     # ====================================================================
-    # 🆕 v100.39: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
+    # 🆕 v100.41: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
     # ====================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
         """
-        🆕 v100.39: UPSERT через DELETE + INSERT ЧАНКАМИ.
+        🆕 v100.41: UPSERT через DELETE + INSERT ЧАНКАМИ.
         DuckDB 1.5.4 падает с Segmentation Fault при вставке >50K строк за раз.
         """
         if df.is_empty():
@@ -5717,6 +5719,7 @@ class HighVolumeAutoPartsCatalog:
         df = df.unique(keep='first')
         total_rows = len(df)
         
+        # 🆕 ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
         CHUNK_SIZE = 10_000 if table_name == 'parts' else 50_000
         
         try:
@@ -6079,7 +6082,7 @@ class HighVolumeAutoPartsCatalog:
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
                     
-                    # 🆕 v100.39: Освобождаем память после тяжёлой таблицы
+                    # 🆕 v100.41: Освобождаем память после тяжёлой таблицы
                     del parts_df
                     gc.collect()
                     if hasattr(pl, 'free_memory'):
@@ -6213,7 +6216,7 @@ class HighVolumeAutoPartsCatalog:
                 select_parts.append('pr.price AS "Цена"')
             select_parts.append("COALESCE(pr.currency, 'RUB') AS \"Валюта\"")
 
-        # 🆕 v100.40: УБРАН CAST AS VARCHAR для габаритов — возвращаем DOUBLE!
+        # 🆕 v100.41: УБРАН CAST AS VARCHAR — возвращаем DOUBLE!
         columns_map = [
             ("Артикул бренда", 'r.artikul AS "Артикул бренда"'),
             ("Бренд", 'r.brand AS "Бренд"'),
@@ -6513,7 +6516,7 @@ ORDER BY r.brand, r.artikul
             return False
 
     # ====================================================================
-    # 🆕 v100.40: ЭКСПОРТ EXCEL (ИСПРАВЛЕНО ОТОБРАЖЕНИЕ ДАТ)
+    # 🆕 v100.41: ЭКСПОРТ EXCEL (ИСПРАВЛЕНО ОТОБРАЖЕНИЕ ДАТ)
     # ====================================================================
     def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                   include_prices: bool = True, apply_markup: bool = True) -> bool:
@@ -6665,6 +6668,12 @@ ORDER BY r.brand, r.artikul
             st.warning("Нет данных для экспорта")
             return
         format_choice = st.radio("Формат", ["CSV", "Excel", "Parquet"])
+        # 🆕 v100.41: Маппинг формата к расширению файла
+        format_extensions = {
+            "CSV": "csv",
+            "Excel": "xlsx",
+            "Parquet": "parquet"
+        }
         selected_columns = st.multiselect("Колонки", [
             "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
             "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
@@ -6673,7 +6682,8 @@ ORDER BY r.brand, r.artikul
         include_prices = st.checkbox("Включить цены", value=True)
         apply_markup = st.checkbox("Применить наценку", value=True, disabled=not include_prices)
         if st.button("🚀 Экспортировать"):
-            output_path = self.data_dir / f"export.{format_choice.lower()}"
+            ext = format_extensions.get(format_choice, format_choice.lower())
+            output_path = self.data_dir / f"export.{ext}"
             with st.spinner("Генерация файла..."):
                 if format_choice == "CSV":
                     self.export_to_csv_optimized(str(output_path), selected_columns if selected_columns else None, include_prices, apply_markup)
