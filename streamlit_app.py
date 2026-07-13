@@ -9163,15 +9163,15 @@ def show_catalog_calculation_parallel():
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 
 # ============================================================================
-# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ v100.5.7)
+# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ v100.5.8)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.5.7:
+# ✅ ИСПРАВЛЕНИЯ v100.5.8:
 # 1. Исправлен пустой label в st.radio() - добавлен текст "🧭 Выберите подраздел:"
 # 2. Исправлен конфликт с главным меню (убраны все st.sidebar)
 # 3. Исправлена ошибка чтения Excel через calamine (убраны неподдерживаемые параметры)
 # 4. Все подразделы теперь видны и доступны
+# 5. 🆕 v100.5.8: Исправлено расширение файла при экспорте (Excel → .xlsx)
 # ============================================================================
-
 def show_catalog_grouping_interface():
     """
     🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
@@ -9179,30 +9179,31 @@ def show_catalog_grouping_interface():
     """
     st.header("🗂️ Шаг 3: Каталог для группировки")
     st.info("""
-📋 **О РАЗДЕЛЕ:**
-Этот раздел предназначен для работы с большими каталогами товаров.
-**Возможности:**
-- ✅ Загрузка каталогов до 10 миллионов записей
-- ✅ Автоматическая группировка по категориям
-- ✅ Интеллектуальный парсинг размеров "20x15x10"
-- ✅ Поиск и фильтрация товаров
-- ✅ Экспорт в Excel, CSV, Parquet
-- ✅ Статистика и аналитика
-""")
-
+    📋 **О РАЗДЕЛЕ:**
+    Этот раздел предназначен для работы с большими каталогами товаров.
+    
+    **Возможности:**
+    - ✅ Загрузка каталогов до 10 миллионов записей
+    - ✅ Автоматическая группировка по категориям
+    - ✅ Интеллектуальный парсинг размеров "20x15x10"
+    - ✅ Поиск и фильтрация товаров
+    - ✅ Экспорт в Excel, CSV, Parquet
+    - ✅ Статистика и аналитика
+    """)
+    
     if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
         st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
         return
-
+    
     if 'high_volume_catalog' not in st.session_state:
         st.session_state.high_volume_catalog = get_high_volume_catalog()
-
+    
     catalog = st.session_state.high_volume_catalog
-
+    
     if not catalog.conn:
         st.error("❌ Ошибка подключения к базе данных")
         return
-
+    
     # ✅ ИСПРАВЛЕНИЕ: добавляем текст в label, чтобы не было предупреждения
     st.markdown("### 🧭 Выберите подраздел:")
     option = st.radio(
@@ -9218,8 +9219,9 @@ def show_catalog_grouping_interface():
         key="catalog_menu_main",
         label_visibility="collapsed"  # Скрываем label, но он не пустой
     )
+    
     st.markdown("---")
-
+    
     # Отображаем выбранный подраздел
     if option == "📥 Загрузка данных":
         show_catalog_upload(catalog)
@@ -9237,31 +9239,30 @@ def show_catalog_upload(catalog):
     """Загрузка данных в каталог"""
     st.subheader("📥 Загрузка данных")
     st.info("""
-📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
-- **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
-- **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
-- **Штрих-коды:** `artikul`, `brand`, `barcode`, `multiplicity`
-- **Габариты:** `artikul`, `brand`, `length`, `width`, `height`, `weight`, `dimensions_str`
-- **Изображения:** `artikul`, `brand`, `image_url`
-- **Цены:** `artikul`, `brand`, `price`, `currency`
-""")
-
+    📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
+    - **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
+    - **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
+    - **Штрих-коды:** `artikul`, `brand`, `barcode`, `multiplicity`
+    - **Габариты:** `artikul`, `brand`, `length`, `width`, `height`, `weight`, `dimensions_str`
+    - **Изображения:** `artikul`, `brand`, `image_url`
+    - **Цены:** `artikul`, `brand`, `price`, `currency`
+    """)
+    
     col1, col2 = st.columns(2)
     with col1:
         oe_file = st.file_uploader("📋 Основные данные (OE)", type=['xlsx'], key="hv_oe")
         cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
         barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
-
     with col2:
         dims_file = st.file_uploader("📏 Габариты", type=['xlsx'], key="hv_dims")
         images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
         prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
-
+    
     uploaded_files = {
         'oe': oe_file, 'cross': cross_file, 'barcode': barcode_file,
         'dimensions': dims_file, 'images': images_file, 'prices': prices_file
     }
-
+    
     if st.button("🚀 Обработать и загрузить", key="hv_load"):
         saved_paths = {}
         for key, file in uploaded_files.items():
@@ -9270,14 +9271,14 @@ def show_catalog_upload(catalog):
                 with open(path, "wb") as f:
                     f.write(file.getbuffer())
                 saved_paths[key] = str(path)
-
+        
         if saved_paths:
             with st.spinner("Обработка файлов..."):
                 dataframes = catalog.merge_all_data_parallel(saved_paths)
-
+            
             with st.spinner("Загрузка данных в базу..."):
                 catalog.process_and_load_data(dataframes)
-
+            
             st.success("✅ Данные успешно загружены!")
         else:
             st.warning("⚠️ Загрузите хотя бы один файл")
@@ -9286,28 +9287,25 @@ def show_catalog_upload(catalog):
 def show_catalog_search(catalog):
     """🔍 Поиск и фильтрация в каталоге"""
     st.subheader("🔍 Поиск и фильтрация")
-
+    
     col1, col2 = st.columns(2)
     with col1:
         search_artikul = st.text_input("🔢 Артикул", key="search_artikul")
         search_brand = st.text_input("🏷️ Бренд", key="search_brand")
-
     with col2:
         search_oe = st.text_input("🔗 OE номер", key="search_oe")
         search_category = st.text_input("📂 Категория", key="search_category")
-
+    
     if st.button("🔍 Найти", key="catalog_search"):
         query_parts = []
         params = []
-
+        
         if search_artikul:
             query_parts.append("artikul LIKE ?")
             params.append(f"%{search_artikul}%")
-
         if search_brand:
             query_parts.append("brand LIKE ?")
             params.append(f"%{search_brand}%")
-
         if search_oe:
             query_parts.append("""
                 artikul_norm IN (
@@ -9316,15 +9314,14 @@ def show_catalog_search(catalog):
                 )
             """)
             params.append(f"%{search_oe}%")
-
         if search_category:
             query_parts.append("category LIKE ?")
             params.append(f"%{search_category}%")
-
+        
         if query_parts:
             where_clause = " AND ".join(query_parts)
             query = f"SELECT * FROM parts WHERE {where_clause} LIMIT 100"
-
+            
             try:
                 df = catalog.conn.execute(query, params).df()
                 st_dataframe_compat(df)
@@ -9337,9 +9334,8 @@ def show_catalog_search(catalog):
 def show_catalog_statistics(catalog):
     """📊 Статистика каталога"""
     st.subheader("📊 Статистика каталога")
-
     stats = catalog.get_statistics()
-
+    
     if stats:
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -9348,11 +9344,11 @@ def show_catalog_statistics(catalog):
             st.metric("🏷️ Брендов", f"{stats.get('brands', 0):,}")
         with col3:
             st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
-
+        
         if 'category_stats' in stats and not stats['category_stats'].empty:
             st.subheader("📊 Распределение по категориям")
             st_dataframe_compat(stats['category_stats'])
-
+        
         if 'top_brands' in stats and not stats['top_brands'].empty:
             st.subheader("🏆 Топ 10 брендов")
             st_dataframe_compat(stats['top_brands'])
@@ -9363,38 +9359,42 @@ def show_catalog_statistics(catalog):
 def show_catalog_export(catalog):
     """📤 Экспорт каталога"""
     st.subheader("📤 Экспорт каталога")
-
     total = catalog.conn.execute(
         "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
     ).fetchone()[0]
-
+    
     st.info(f"📊 Всего записей: {total:,}")
-
+    
     if total == 0:
         st.warning("⚠️ Нет данных для экспорта")
         return
-
+    
     col1, col2 = st.columns(2)
-
     with col1:
         format_choice = st.radio("📁 Формат файла", ["CSV", "Excel", "Parquet"])
-        
         selected_columns = st.multiselect("📋 Выберите колонки для экспорта", [
             "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
             "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
             "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
         ])
-
+    
     with col2:
         include_prices = st.checkbox("💰 Включить цены", value=True)
         apply_markup = st.checkbox("📈 Применить наценку", value=True, disabled=not include_prices)
-
-        st.markdown("---")
-        st.caption("💡 Если не выбраны колонки - экспортируются все")
-
+    
+    st.markdown("---")
+    st.caption("💡 Если не выбраны колонки - экспортируются все")
+    
     if st.button("🚀 Экспортировать", type="primary", key="catalog_export_btn"):
-        output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_choice.lower()}"
-
+        # 🆕 ИСПРАВЛЕНИЕ v100.5.8: Маппинг формата к расширению файла
+        format_extensions = {
+            "CSV": "csv",
+            "Excel": "xlsx",      # ← Правильное расширение для Excel
+            "Parquet": "parquet"
+        }
+        ext = format_extensions.get(format_choice, format_choice.lower())
+        output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+        
         with st.spinner(f"Генерация файла {format_choice}..."):
             if format_choice == "CSV":
                 success = catalog.export_to_csv_optimized(
@@ -9420,18 +9420,18 @@ def show_catalog_export(catalog):
             else:
                 st.warning("Неподдерживаемый формат")
                 return
-
+        
         if success and output_path.exists():
             with open(output_path, "rb") as f:
                 file_data = f.read()
-
+            
             mime_map = {
                 "CSV": "text/csv; charset=utf-8",
                 "Excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "Parquet": "application/octet-stream"
             }
             mime_type = mime_map.get(format_choice, "application/octet-stream")
-
+            
             st.download_button(
                 label=f"⬇️ Скачать {format_choice} файл",
                 data=file_data,
@@ -9448,7 +9448,7 @@ def show_catalog_management(catalog):
     """🔧 Управление каталогом"""
     st.subheader("🔧 Управление каталогом")
     st.warning("⚠️ Операции необратимы!")
-
+    
     management_option = st.radio(
         "Выберите действие:",
         [
@@ -9461,7 +9461,7 @@ def show_catalog_management(catalog):
         ],
         key="catalog_management_option"
     )
-
+    
     if management_option == "🏭 Удалить по бренду":
         catalog._show_delete_by_brand()
     elif management_option == "📦 Удалить по артикулу":
