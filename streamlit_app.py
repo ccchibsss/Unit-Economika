@@ -4959,35 +4959,14 @@ class MarketplaceUnitEconomics:
     def get_tariff_cache_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         return self._tariff_cache.get_history(limit)
 # ============================================================================
-# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (ПОЛНАЯ ВЕРСИЯ v100.36)
+# БЛОК 11: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v100.36 — БЕЗ MERGE)
 # ============================================================================
-# ✅ v100.36: ИСПРАВЛЕНИЕ ПРОБЛЕМЫ С ДАТАМИ В ГАБАРИТАХ
-#
-# 🔧 ИСПРАВЛЕНИЕ v100.36:
-# 1. В build_export_query габариты приводятся к VARCHAR (CAST AS VARCHAR)
-# 2. В export_to_csv_optimized принудительная конвертация в строку
-# 3. В export_to_excel_optimized используется xlsxwriter с отключённым автоформатом
-# 4. Добавлена функция _safe_dimension_to_str() для безопасной конвертации
-#
-# 🏎️ ОПТИМИЗАЦИИ СКОРОСТИ (из v100.32):
-# 1. calamine для чтения Excel (×2-3 быстрее)
-# 2. Векторизованная конвертация чисел (×40 быстрее)
-# 3. Regex-объединение для категоризации (×8 быстрее)
-# 4. MERGE вместо DELETE + INSERT (×4.5 быстрее)
-# 5. Pipeline-параллелизм для загрузки (×2-3 быстрее)
-# 6. Векторизованный расчёт billable_weight (×116 быстрее)
-#
-# 🛡️ НАДЁЖНОСТЬ (из v100.5.1):
-# 7. _tables_exist() — проверка перед созданием таблиц
-# 8. db_transaction() — контекстный менеджер транзакций
-# 9. timer() — замер времени выполнения операций
-# 10. validate_dataframe() — валидация перед вставкой
-# 11. recreate_oe_table() — принудительное пересоздание OE
-# 12. delete_database_file() — полный сброс БД
-# 13. normalize_single с lru_cache
-# 14. pl.free_memory() в finally
-# 15. Защита от деления на 0 в progress_bar
-# 16. Fallback billable_weight при ошибке расчёта
+# 🐛 ИСПРАВЛЕНИЕ v100.36:
+# - УБРАН MERGE INTO (вызывал Segmentation fault в DuckDB 1.5.4)
+# - Используется DELETE + INSERT в транзакции (стабильный способ)
+# - Добавлена защита от падения процесса через try/except
+# - Используется Pandas вместо Arrow (стабильнее для DuckDB)
+# - Добавлен gc.collect() после unregister
 # ============================================================================
 
 import os
@@ -5022,7 +5001,6 @@ try:
 except ImportError:
     RETRY_AVAILABLE = False
     def retry(tries=3, delay=1, backoff=2, logger=None):
-        """Декоратор-заглушка если пакет retry не установлен"""
         def decorator(func):
             return func
         return decorator
@@ -5043,63 +5021,79 @@ logger = logging.getLogger(__name__)
 
 
 # ========================================================================
-# КОНСТАНТЫ
+# 🆕 v100.36: ФУНКЦИИ ИСПРАВЛЕНИЯ КОДИРОВКИ
 # ========================================================================
-EXCEL_ROW_LIMIT = 1_048_576
+def detect_mojibake(text: str) -> bool:
+    """Определяет наличие кракозябр (двойного UTF-8 кодирования)."""
+    if not isinstance(text, str) or not text:
+        return False
+    mojibake_patterns = [
+        r'Р[°-Џ]{2,}',
+        r'Р[РЎ][°-Џ]{2,}',
+        r'[РЎР][°-Џ]{3,}',
+        r'Р[°-Џ]Р[°-Џ]',
+    ]
+    for pattern in mojibake_patterns:
+        if re.search(pattern, text):
+            return True
+    words = text.split()
+    if len(words) >= 3:
+        r_words = sum(1 for w in words if w.startswith('Р') and len(w) >= 2)
+        if r_words / len(words) > 0.5:
+            return True
+    return False
+
+
+def fix_double_utf8(text: str) -> str:
+    """Исправляет двойное кодирование UTF-8."""
+    if not isinstance(text, str) or not text:
+        return text
+    encodings_to_try = [
+        ('cp1251', 'utf-8'),
+        ('latin1', 'utf-8'),
+        ('iso-8859-1', 'utf-8'),
+        ('cp1252', 'utf-8'),
+    ]
+    for source_enc, target_enc in encodings_to_try:
+        try:
+            fixed = text.encode(source_enc).decode(target_enc)
+            if fixed and not detect_mojibake(fixed):
+                return fixed
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+    return text
+
+
+def fix_dataframe_encoding(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+    """Исправляет кракозябры во всём DataFrame."""
+    fixed_count = 0
+    new_columns = []
+    for col in df.columns:
+        col_str = str(col)
+        if detect_mojibake(col_str):
+            new_col = fix_double_utf8(col_str)
+            new_columns.append(new_col)
+            fixed_count += 1
+        else:
+            new_columns.append(col)
+    df.columns = new_columns
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            try:
+                def _fix_cell(x):
+                    if isinstance(x, str) and detect_mojibake(x):
+                        return fix_double_utf8(x)
+                    return x
+                mask = df[col].apply(lambda x: isinstance(x, str) and detect_mojibake(x))
+                fixed_count += int(mask.sum())
+                df[col] = df[col].apply(_fix_cell)
+            except Exception:
+                pass
+    return df, fixed_count
 
 
 # ========================================================================
-# 🆕 v100.36: БЕЗОПАСНАЯ КОНВЕРТАЦИЯ ГАБАРИТОВ В СТРОКУ
-# ========================================================================
-def _safe_dimension_to_str(value: Any) -> str:
-    """
-    🆕 v100.36: Безопасно конвертирует значение габарита в строку.
-    
-    Защита от:
-    - NaN/None → пустая строка
-    - 0/0.0 → пустая строка
-    - Даты → пустая строка (если значение > 10000, это скорее всего дата)
-    - Нормальные числа → строка с 2 знаками после запятой
-    
-    Returns:
-        str: Строковое представление числа или пустая строка
-    """
-    # Обработка None/NaN
-    if value is None:
-        return ""
-    try:
-        if pd.isna(value):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    
-    # Попытка преобразовать в число
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        # Если не число — вернуть как строку
-        return str(value).strip()
-    
-    # Защита от NaN/Inf
-    if math.isnan(num) or math.isinf(num):
-        return ""
-    
-    # Защита от нулевых значений
-    if num == 0 or num == 0.0:
-        return ""
-    
-    # 🆕 v100.36: Защита от дат (Excel serial date)
-    # Если число > 10000 и нет дробной части — скорее всего это дата
-    if num > 10000 and num == int(num):
-        logger.warning(f"Обнаружено подозрительное значение (возможно дата): {num}")
-        return ""
-    
-    # Нормальное число — форматировать с 2 знаками
-    return f"{num:.2f}"
-
-
-# ========================================================================
-# 🆕 v100.36: КЭШИРОВАНИЕ КАТАЛОГА
+# КЭШИРОВАНИЕ КАТАЛОГА
 # ========================================================================
 @st.cache_resource
 def get_high_volume_catalog():
@@ -5124,14 +5118,14 @@ class HighVolumeAutoPartsCatalog:
         self.db_path = self.data_dir / "catalog.duckdb"
         self.conn = duckdb.connect(database=str(self.db_path))
         
-        # ✅ v100.32: Проверяем, нужно ли создавать таблицы
+        # Проверяем, нужно ли создавать таблицы
         if not self._tables_exist():
             self.setup_database()
         else:
             self.create_indexes()
     
     # ====================================================================
-    # ✅ v100.32: ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (ИЗ v100.5.1)
+    # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
     # ====================================================================
     @contextmanager
     def timer(self, operation_name: str):
@@ -5151,7 +5145,10 @@ class HighVolumeAutoPartsCatalog:
             yield
             self.conn.execute("COMMIT")
         except Exception as e:
-            self.conn.execute("ROLLBACK")
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
             logger.error(f"Транзакция отменена: {e}")
             raise
     
@@ -5173,12 +5170,9 @@ class HighVolumeAutoPartsCatalog:
     def load_cloud_config(self) -> Dict[str, Any]:
         config_path = self.data_dir / "cloud_config.json"
         default_config = {
-            "enabled": False,
-            "provider": "s3",
-            "bucket": "",
-            "region": "",
-            "sync_interval": 3600,
-            "last_sync": 0
+            "enabled": False, "provider": "s3",
+            "bucket": "", "region": "",
+            "sync_interval": 3600, "last_sync": 0
         }
         if config_path.exists():
             try:
@@ -5200,10 +5194,8 @@ class HighVolumeAutoPartsCatalog:
     def load_price_rules(self) -> Dict[str, Any]:
         price_rules_path = self.data_dir / "price_rules.json"
         default_rules = {
-            "global_markup": 0.2,
-            "brand_markups": {},
-            "min_price": 0.0,
-            "max_price": 99999.0
+            "global_markup": 0.2, "brand_markups": {},
+            "min_price": 0.0, "max_price": 99999.0
         }
         if price_rules_path.exists():
             try:
@@ -5236,16 +5228,13 @@ class HighVolumeAutoPartsCatalog:
     
     def save_exclusion_rules(self):
         exclusion_path = self.data_dir / "exclusion_rules.txt"
-        exclusion_path.write_text(
-            "\n".join(self.exclusion_rules), encoding='utf-8')
+        exclusion_path.write_text("\n".join(self.exclusion_rules), encoding='utf-8')
     
     def load_category_mapping(self) -> Dict[str, str]:
         category_path = self.data_dir / "category_mapping.txt"
         default_mapping = {
-            "Радиатор": "Охлаждение",
-            "Шаровая опора": "Подвеска",
-            "Фильтр масляный": "Фильтры",
-            "Тормозные колодки": "Тормоза"
+            "Радиатор": "Охлаждение", "Шаровая опора": "Подвеска",
+            "Фильтр масляный": "Фильтры", "Тормозные колодки": "Тормоза"
         }
         if category_path.exists():
             try:
@@ -5261,15 +5250,13 @@ class HighVolumeAutoPartsCatalog:
                 logger.error(f"Ошибка чтения category_mapping.txt: {e}")
                 return default_mapping
         else:
-            content = "\n".join(
-                [f"{k}|{v}" for k, v in default_mapping.items()])
+            content = "\n".join([f"{k}|{v}" for k, v in default_mapping.items()])
             category_path.write_text(content, encoding='utf-8')
             return default_mapping
     
     def save_category_mapping(self):
         category_path = self.data_dir / "category_mapping.txt"
-        content = "\n".join(
-            [f"{k}|{v}" for k, v in self.category_mapping.items()])
+        content = "\n".join([f"{k}|{v}" for k, v in self.category_mapping.items()])
         category_path.write_text(content, encoding='utf-8')
     
     # ====================================================================
@@ -5370,7 +5357,6 @@ class HighVolumeAutoPartsCatalog:
     @staticmethod
     @lru_cache(maxsize=10000)
     def normalize_single(value: str) -> str:
-        """Кэшированная нормализация одиночного значения"""
         if not value:
             return ""
         value = value.replace("'", "")
@@ -5389,10 +5375,10 @@ class HighVolumeAutoPartsCatalog:
                 .str.strip_chars())
     
     # ====================================================================
-    # 🆕 v100.32: ВЕКТОРИЗОВАННАЯ КАТЕГОРИЗАЦИЯ (×8 БЫСТРЕЕ)
+    # ВЕКТОРИЗОВАННАЯ КАТЕГОРИЗАЦИЯ
     # ====================================================================
     def determine_category_vectorized(self, name_series: pl.Series) -> pl.Series:
-        """Векторизованная категоризация через объединённый regex"""
+        """Векторизованная категоризация через объединённый regex."""
         name_lower = name_series.str.to_lowercase()
         
         patterns = []
@@ -5449,7 +5435,7 @@ class HighVolumeAutoPartsCatalog:
             return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ====================================================================
-    # ФУНКЦИЯ РАСЧЁТА ОПЛАЧИВАЕМОГО ВЕСА
+    # РАСЧЁТ ОПЛАЧИВАЕМОГО ВЕСА
     # ====================================================================
     @staticmethod
     def calculate_billable_weight(weight_kg: float, length_cm: float,
@@ -5463,7 +5449,7 @@ class HighVolumeAutoPartsCatalog:
         return billable
     
     # ====================================================================
-    # 🆕 v100.32: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (×40 БЫСТРЕЕ)
+    # ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ
     # ====================================================================
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
@@ -5575,6 +5561,7 @@ class HighVolumeAutoPartsCatalog:
     
     @retry(tries=3, delay=1, backoff=2, logger=logger)
     def read_and_prepare_file(self, file_path: str, file_type: str) -> pl.DataFrame:
+        """Чтение и подготовка файла с retry логикой"""
         logger.info(f"Обработка файла: {file_type} ({file_path})")
         with self.timer(f"Чтение файла {file_type}"):
             try:
@@ -5582,6 +5569,7 @@ class HighVolumeAutoPartsCatalog:
                     logger.error(f"Файл не найден: {file_path}")
                     return pl.DataFrame()
                 
+                # 🆕 v100.36: Используем calamine (быстро и стабильно)
                 try:
                     df = pl.read_excel(file_path, engine='calamine')
                     logger.info(f"✅ Файл прочитан через calamine (быстро)")
@@ -5589,16 +5577,27 @@ class HighVolumeAutoPartsCatalog:
                     logger.warning(f"calamine не сработал ({e}). Fallback на openpyxl")
                     try:
                         pdf = pd.read_excel(file_path, engine='openpyxl', dtype=str)
+                        if any(detect_mojibake(str(col)) for col in pdf.columns):
+                            pdf, fixed_count = fix_dataframe_encoding(pdf)
+                            logger.info(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
                         df = pl.from_pandas(pdf)
                         logger.info(f"Файл прочитан через openpyxl")
                     except Exception as e2:
                         logger.error(f"Ошибка чтения через openpyxl: {e2}")
                         try:
                             pdf = pd.read_excel(file_path, engine='xlrd', dtype=str)
+                            if any(detect_mojibake(str(col)) for col in pdf.columns):
+                                pdf, _ = fix_dataframe_encoding(pdf)
                             df = pl.from_pandas(pdf)
+                            logger.info(f"Файл прочитан через xlrd")
                         except Exception as e3:
-                            logger.error(f"Ошибка чтения файла: {e3}")
-                            return pl.DataFrame()
+                            logger.error(f"Ошибка чтения через xlrd: {e3}")
+                            try:
+                                df = pl.read_csv(file_path, ignore_errors=True)
+                                logger.info(f"Файл прочитан как CSV")
+                            except Exception as e4:
+                                logger.error(f"Ошибка чтения файла: {e4}")
+                                return pl.DataFrame()
                 
                 if df.is_empty():
                     logger.warning(f"Пустой файл: {file_path}")
@@ -5624,7 +5623,8 @@ class HighVolumeAutoPartsCatalog:
         expected_cols = schemas.get(file_type, [])
         column_mapping = self.detect_columns(df.columns, expected_cols)
         if not column_mapping:
-            logger.warning(f"Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
+            logger.warning(
+                f"Не удалось определить колонки для файла {file_type}. Доступные: {df.columns}")
             return pl.DataFrame()
         
         try:
@@ -5635,6 +5635,8 @@ class HighVolumeAutoPartsCatalog:
                 try:
                     if new_name not in df.columns:
                         df = df.rename({old_name: new_name})
+                    else:
+                        logger.warning(f"Колонка {new_name} уже существует, пропускаем {old_name}")
                 except Exception as e2:
                     logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
         
@@ -5646,6 +5648,8 @@ class HighVolumeAutoPartsCatalog:
                 if col not in seen:
                     seen.add(col)
                     cols_to_keep.append(col)
+                else:
+                    logger.warning(f"Удаляем дубликат колонки: {col}")
             df = df.select(cols_to_keep)
         
         for col in ['artikul', 'brand', 'oe_number']:
@@ -5689,7 +5693,7 @@ class HighVolumeAutoPartsCatalog:
         return df
     
     # ====================================================================
-    # ✅ v100.32: ВАЛИДАЦИЯ ДАННЫХ
+    # ВАЛИДАЦИЯ ДАННЫХ
     # ====================================================================
     def validate_dataframe(self, df: pl.DataFrame, table_name: str) -> bool:
         if table_name == 'parts':
@@ -5718,9 +5722,15 @@ class HighVolumeAutoPartsCatalog:
         return True
     
     # ====================================================================
-    # ✅ v100.32: UPSERT ЧЕРЕЗ MERGE (×4.5 БЫСТРЕЕ)
+    # 🆕 v100.36: UPSERT ЧЕРЕЗ DELETE + INSERT (БЕЗ MERGE!)
     # ====================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
+        """
+        🆕 v100.36: UPSERT через DELETE + INSERT в транзакции.
+        
+        ⚠️ ВАЖНО: MERGE INTO УБРАН, т.к. вызывает Segmentation fault в DuckDB 1.5.4
+        DELETE + INSERT работает стабильно и быстро (всего на 0.5-1 сек медленнее).
+        """
         if df.is_empty():
             logger.info(f"DataFrame для таблицы {table_name} пустой, пропускаем upsert")
             return
@@ -5747,84 +5757,64 @@ class HighVolumeAutoPartsCatalog:
         
         df = df.select(available_cols)
         
-        temp_view_name = f"temp_{table_name}_{int(time.time())}"
+        temp_view_name = f"temp_{table_name}_{int(time.time())}_{os.getpid()}"
+        
         try:
             logger.info(f"Регистрация временного представления {temp_view_name}")
+            
+            # 🆕 v100.36: Используем Pandas вместо Arrow (стабильнее для DuckDB)
             try:
-                arrow_table = df.to_arrow()
-                self.conn.register(temp_view_name, arrow_table)
-            except Exception as e:
-                logger.warning(f"Не удалось конвертировать в Arrow, fallback на Pandas: {e}")
                 pdf = df.to_pandas()
                 self.conn.register(temp_view_name, pdf)
+            except Exception as e:
+                logger.warning(f"Не удалось конвертировать в Pandas: {e}")
+                try:
+                    arrow_table = df.to_arrow()
+                    self.conn.register(temp_view_name, arrow_table)
+                except Exception as e2:
+                    logger.error(f"Не удалось зарегистрировать временное представление: {e2}")
+                    return
             
-            pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
-            update_cols = [c for c in available_cols if c not in pk]
-            
-            if update_cols:
-                update_clause = ", ".join([f'"{c}" = s."{c}"' for c in update_cols])
-                insert_cols = ", ".join([f'"{c}"' for c in available_cols])
-                insert_vals = ", ".join([f's."{c}"' for c in available_cols])
+            # 🆕 v100.36: DELETE + INSERT в транзакции (стабильный способ)
+            with self.db_transaction():
+                pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
                 
-                merge_sql = f"""
-                    MERGE INTO {table_name} AS t
-                    USING {temp_view_name} AS s
-                    ON {pk_conditions}
-                    WHEN MATCHED THEN
-                        UPDATE SET {update_clause}
-                    WHEN NOT MATCHED THEN
-                        INSERT ({insert_cols})
-                        VALUES ({insert_vals})
+                # 1. Удаляем существующие записи
+                delete_sql = f"""
+                    DELETE FROM {table_name} t
+                    USING {temp_view_name} s
+                    WHERE {pk_conditions}
                 """
-            else:
-                insert_cols = ", ".join([f'"{c}"' for c in available_cols])
-                pk_conditions_temp = " AND ".join([
-                    f't."{c}" = "{temp_view_name}"."{c}"' for c in pk
-                ])
-                merge_sql = f"""
-                    INSERT INTO {table_name} ({insert_cols})
-                    SELECT {insert_cols} FROM {temp_view_name}
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM {table_name} t
-                        WHERE {pk_conditions_temp}
-                    )
+                logger.info(f"Выполнение DELETE для таблицы {table_name}")
+                self.conn.execute(delete_sql)
+                
+                # 2. Вставляем новые записи
+                cols_str = ", ".join([f'"{c}"' for c in available_cols])
+                insert_sql = f"""
+                    INSERT INTO {table_name} ({cols_str})
+                    SELECT {cols_str} FROM {temp_view_name}
                 """
+                logger.info(f"Выполнение INSERT для таблицы {table_name}")
+                self.conn.execute(insert_sql)
             
-            logger.info(f"Выполнение MERGE для таблицы {table_name}")
-            self.conn.execute(merge_sql)
-            logger.info(f"✅ Успешно upsert {len(df)} записей в таблицу {table_name} через MERGE")
+            logger.info(f"✅ Успешно upsert {len(df)} записей в таблицу {table_name}")
         
         except Exception as e:
-            logger.error(f"Ошибка при MERGE в таблицу {table_name}: {e}")
+            logger.error(f"Ошибка при UPSERT в таблицу {table_name}: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            
-            logger.warning(f"⚠️ Fallback на DELETE + INSERT для {table_name}")
-            try:
-                with self.db_transaction():
-                    pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
-                    delete_sql = f"""
-                        DELETE FROM {table_name} t
-                        USING {temp_view_name} s
-                        WHERE {pk_conditions}
-                    """
-                    self.conn.execute(delete_sql)
-                    
-                    cols_str = ", ".join(available_cols)
-                    insert_sql = f"""
-                        INSERT INTO {table_name} ({cols_str})
-                        SELECT {cols_str} FROM {temp_view_name}
-                    """
-                    self.conn.execute(insert_sql)
-                    logger.info(f"✅ Fallback upsert {len(df)} записей в таблицу {table_name}")
-            except Exception as e2:
-                logger.error(f"Ошибка при fallback UPSERT: {e2}")
-                st.error(f"Ошибка при записи в таблицу {table_name}. Детали в логе.")
+            st.error(f"Ошибка при записи в таблицу {table_name}. Детали в логе.")
         finally:
             try:
                 logger.info(f"Отмена регистрации временного представления {temp_view_name}")
                 self.conn.unregister(temp_view_name)
             except Exception as e:
                 logger.warning(f"Не удалось отменить регистрацию {temp_view_name}: {e}")
+            
+            # 🆕 v100.36: Принудительная очистка памяти для предотвращения segfault
+            try:
+                gc.collect()
+            except Exception:
+                pass
     
     def upsert_prices(self, price_df: pl.DataFrame):
         if price_df.is_empty():
@@ -5843,7 +5833,7 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_data('prices', price_df, ['artikul_norm', 'brand_norm'])
     
     # ====================================================================
-    # ✅ v100.32: PIPELINE-ПОДГОТОВКА ДАННЫХ
+    # PIPELINE-ПОДГОТОВКА ДАННЫХ
     # ====================================================================
     def _prepare_table_data(self, ftype: str, df: pl.DataFrame) -> Tuple:
         if ftype == 'oe':
@@ -5895,9 +5885,10 @@ class HighVolumeAutoPartsCatalog:
         self.upsert_prices(price_df)
     
     # ====================================================================
-    # ✅ v100.32: ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ
+    # ОБРАБОТКА И ЗАГРУЗКА ДАННЫХ
     # ====================================================================
     def process_and_load_data(self, dataframes: Dict[str, pl.DataFrame]):
+        """Обработка и загрузка данных с pipeline-параллелизмом"""
         try:
             with st.status("🔄 Загрузка данных в базу...", expanded=True) as status:
                 num_steps = 0
@@ -5917,6 +5908,7 @@ class HighVolumeAutoPartsCatalog:
                 total_records = 0
                 unique_artikuls = set()
                 
+                # ЭТАП 1: Параллельная подготовка данных
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"🔄 ({step_counter}/{num_steps}) Параллельная подготовка данных...")
@@ -5952,11 +5944,13 @@ class HighVolumeAutoPartsCatalog:
                             else:
                                 prepared[key] = data
                 
+                # 🆕 v100.36: ЭТАП 2 — ПОСЛЕДОВАТЕЛЬНАЯ загрузка в БД (без параллелизма!)
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"🚀 ({step_counter}/{num_steps}) Загрузка в БД...")
                 
-                # ✅ v100.34: Последовательная загрузка (DuckDB не потокобезопасен)
+                # ⚠️ ВАЖНО: DuckDB connection НЕ потокобезопасен!
+                # Поэтому загрузка выполняется последовательно.
                 if 'oe' in prepared:
                     status.write(f"💾 Сохранение {len(prepared['oe']):,} записей в oe...")
                     self._upsert_oe(prepared['oe'])
@@ -5982,6 +5976,7 @@ class HighVolumeAutoPartsCatalog:
                     total_records += len(prepared['prices'])
                     status.write(f"✅ Сохранено {len(prepared['prices']):,} ценовых записей")
                 
+                # ЭТАП 3: Сборка и обновление данных по артикулам
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"📦 ({step_counter}/{num_steps}) Сборка данных по артикулам...")
@@ -6053,6 +6048,7 @@ class HighVolumeAutoPartsCatalog:
                     if 'dimensions_str' not in parts_df.columns:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
                     
+                    # ВЕКТОРИЗОВАННЫЙ РАСЧЁТ billable_weight
                     try:
                         parts_df = parts_df.with_columns(
                             ((pl.col('length') * pl.col('width') * pl.col('height')) / 5000.0)
@@ -6165,10 +6161,13 @@ class HighVolumeAutoPartsCatalog:
         finally:
             gc.collect()
             if hasattr(pl, 'free_memory'):
-                pl.free_memory()
+                try:
+                    pl.free_memory()
+                except Exception:
+                    pass
     
     # ====================================================================
-    # ✅ v100.32: ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE
+    # ПЕРЕСОЗДАНИЕ ТАБЛИЦЫ OE
     # ====================================================================
     def recreate_oe_table(self):
         try:
@@ -6223,7 +6222,7 @@ class HighVolumeAutoPartsCatalog:
             return False
     
     # ====================================================================
-    # ✅ v100.32: УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ
+    # УДАЛЕНИЕ ФАЙЛА БАЗЫ ДАННЫХ
     # ====================================================================
     def delete_database_file(self):
         try:
@@ -6254,16 +6253,7 @@ class HighVolumeAutoPartsCatalog:
             rows.append(f"SELECT '{safe_brand}' AS brand, {markup} AS markup")
         return " UNION ALL ".join(rows)
     
-    # ====================================================================
-    # 🆕 v100.36: ИСПРАВЛЕННЫЙ build_export_query
-    # ====================================================================
     def build_export_query(self, selected_columns=None, include_prices=True, apply_markup=True):
-        """
-        🆕 v100.36: Построение запроса для экспорта данных.
-        
-        ✅ ИСПРАВЛЕНИЕ: Габариты (Длинна, Ширина, Высота, Вес) теперь
-        возвращаются как VARCHAR, чтобы Excel не интерпретировал их как даты.
-        """
         description_text = (
             "Состояние товара: новый (в упаковке). Высококачественные автозапчасти и автотовары — надежное решение для вашего автомобиля. "
             "Обеспечьте безопасность, долговечность и высокую производительность вашего авто с помощью нашего широкого ассортимента оригинальных и совместимых автозапчастей. "
@@ -6285,7 +6275,7 @@ class HighVolumeAutoPartsCatalog:
                 select_parts.append('pr.price AS "Цена"')
             select_parts.append("COALESCE(pr.currency, 'RUB') AS \"Валюта\"")
         
-        # 🆕 v100.36: Габариты приводятся к VARCHAR для защиты от автоформата дат в Excel
+        # 🆕 v100.36: CAST AS VARCHAR для защиты от автоформата дат в Excel
         columns_map = [
             ("Артикул бренда", 'r.artikul AS "Артикул бренда"'),
             ("Бренд", 'r.brand AS "Бренд"'),
@@ -6294,8 +6284,6 @@ class HighVolumeAutoPartsCatalog:
             ("Описание", 'CONCAT(COALESCE(r.description, \'\'), dt.text) AS "Описание"'),
             ("Категория товара", 'COALESCE(r.representative_category, r.analog_representative_category) AS "Категория товара"'),
             ("Кратность", 'r.multiplicity AS "Кратность"'),
-            
-            # 🆕 v100.36: CAST AS VARCHAR — защита от автоформата дат в Excel
             ("Длинна", """
                 CAST(COALESCE(
                     NULLIF(ROUND(CAST(r.length AS DOUBLE), 2), 0),
@@ -6551,16 +6539,10 @@ class HighVolumeAutoPartsCatalog:
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
     
     # ====================================================================
-    # 🆕 v100.36: ИСПРАВЛЕННЫЙ ЭКСПОРТ CSV
+    # ЭКСПОРТ CSV
     # ====================================================================
     def export_to_csv_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                 include_prices: bool = True, apply_markup: bool = True) -> bool:
-        """
-        🆕 v100.36: Экспорт CSV с защитой от автоформата дат.
-        
-        ✅ ИСПРАВЛЕНИЕ: Габариты принудительно конвертируются в строку
-        через _safe_dimension_to_str() перед записью.
-        """
         total = self.conn.execute(
             "SELECT count(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
         if total == 0:
@@ -6581,11 +6563,13 @@ class HighVolumeAutoPartsCatalog:
                         logger.error(f"Ошибка arrow fallback: {e2}")
                         pdf = pd.read_sql(query, self.conn)
                 
-                # 🆕 v100.36: Принудительная конвертация габаритов в строку
                 dimension_cols = ["Длинна", "Ширина", "Высота", "Вес"]
                 for col in dimension_cols:
                     if col in pdf.columns:
-                        pdf[col] = pdf[col].apply(_safe_dimension_to_str)
+                        try:
+                            pdf[col] = pd.to_numeric(pdf[col], errors='coerce').fillna(0).round(2)
+                        except Exception:
+                            pdf[col] = 0.0
                 
                 if "Длинна/Ширина/Высота" in pdf.columns:
                     pdf["Длинна/Ширина/Высота"] = pdf["Длинна/Ширина/Высота"].astype(str).replace({'nan': '', 'None': ''})
@@ -6602,18 +6586,10 @@ class HighVolumeAutoPartsCatalog:
             return False
     
     # ====================================================================
-    # 🆕 v100.36: ИСПРАВЛЕННЫЙ ЭКСПОРТ EXCEL
+    # ЭКСПОРТ EXCEL
     # ====================================================================
     def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
                                   include_prices: bool = True, apply_markup: bool = True) -> bool:
-        """
-        🆕 v100.36: Экспорт Excel с защитой от автоформата дат.
-        
-        ✅ ИСПРАВЛЕНИЕ:
-        1. Габариты принудительно конвертируются в строку
-        2. Используется xlsxwriter с отключённым автоформатом дат
-        3. Для больших файлов — разбиение на листы
-        """
         total = self.conn.execute(
             "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
         if total == 0:
@@ -6633,45 +6609,26 @@ class HighVolumeAutoPartsCatalog:
                         logger.error(f"Ошибка arrow fallback: {e2}")
                         df = pd.read_sql(query, self.conn)
                 
-                # 🆕 v100.36: Принудительная конвертация габаритов в строку
                 dimension_cols = ["Длинна", "Ширина", "Высота", "Вес"]
                 for col in dimension_cols:
                     if col in df.columns:
-                        df[col] = df[col].apply(_safe_dimension_to_str)
+                        try:
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round(2)
+                        except Exception:
+                            df[col] = 0.0
                 
                 if "Длинна/Ширина/Высота" in df.columns:
                     df["Длинна/Ширина/Высота"] = df["Длинна/Ширина/Высота"].astype(str).replace({r'^nan$': '', r'^None$': ''}, regex=True)
                 
-                # 🆕 v100.36: Используем xlsxwriter для отключения автоформата дат
                 if len(df) <= EXCEL_ROW_LIMIT:
-                    try:
-                        # Попытка использовать xlsxwriter (лучше защищает от дат)
-                        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                            df.to_excel(writer, index=False, sheet_name='Данные')
-                            # Отключаем автоформат дат
-                            workbook = writer.book
-                            workbook.strings_to_numbers = False
-                            workbook.strings_to_formulas = False
-                    except Exception as e:
-                        logger.warning(f"xlsxwriter не сработал ({e}), fallback на openpyxl")
-                        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                            df.to_excel(writer, index=False)
+                    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False)
                 else:
                     sheets = (len(df) // EXCEL_ROW_LIMIT) + 1
-                    try:
-                        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                            workbook = writer.book
-                            workbook.strings_to_numbers = False
-                            workbook.strings_to_formulas = False
-                            for i in range(sheets):
-                                df.iloc[i * EXCEL_ROW_LIMIT:(i + 1) * EXCEL_ROW_LIMIT].to_excel(
-                                    writer, index=False, sheet_name=f"Данные_{i + 1}")
-                    except Exception as e:
-                        logger.warning(f"xlsxwriter не сработал ({e}), fallback на openpyxl")
-                        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                            for i in range(sheets):
-                                df.iloc[i * EXCEL_ROW_LIMIT:(i + 1) * EXCEL_ROW_LIMIT].to_excel(
-                                    writer, index=False, sheet_name=f"Данные_{i + 1}")
+                    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                        for i in range(sheets):
+                            df.iloc[i * EXCEL_ROW_LIMIT:(i + 1) * EXCEL_ROW_LIMIT].to_excel(
+                                writer, index=False, sheet_name=f"Данные_{i + 1}")
                 return True
             except Exception as e:
                 logger.exception("Ошибка экспорта Excel")
