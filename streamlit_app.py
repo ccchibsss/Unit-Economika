@@ -11828,7 +11828,477 @@ def show_settings_interface():
     # ====================================================================
     with st.expander("📋 Текущие настройки (JSON)", expanded=False):
         st.json(settings)
+# ============================================================================
+# 🆕 БЛОК 26: AI ФОТО-РЕДАКТОР И ИНФОГРАФИКА (MPSTATS Photo Editor)
+# ============================================================================
+# 🆕 v100.7: ИНТЕГРАЦИЯ MPSTATS PHOTO EDITOR API
+# ✅ AI-генерация визуала под карточки WB/Ozon
+# ✅ DeepSeek как оркестратор (составление промптов)
+# ✅ Фотосессии, инфографика, замена фона, апскейл, перекраска
+# ✅ "Товар в действии" с произвольным prompt-edit
+# ✅ Двухшаговые пайплайны (test → generate) в одну команду auto
+# ============================================================================
+import base64
+from io import BytesIO
 
+class MpstatsPhotoEditor:
+    """
+    🎨 Клиент для MPSTATS Photo Editor API.
+    Поддерживает: инфографику, удаление фона, апскейл, перекраску, товар в действии.
+    Использует DeepSeek как AI-оркестратор для улучшения промптов.
+    """
+    
+    # 📌 ЗАМЕНИТЕ на реальный базовый URL API MPSTATS Photo Editor
+    DEFAULT_API_URL = "https://api.mpstats.io/v1/photo-editor"
+    
+    def __init__(self, mpstats_token: str = "", deepseek_api_key: str = ""):
+        self.mpstats_token = mpstats_token
+        self.deepseek_api_key = deepseek_api_key
+        self.base_url = self.DEFAULT_API_URL
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "AutoPartsUnitEconomicsPro/100.7",
+            "Accept": "application/json"
+        })
+        if self.mpstats_token:
+            self.session.headers["X-Mpstats-TOKEN"] = self.mpstats_token
+        self.logger = logging.getLogger("MpstatsPhotoEditor")
+    
+    @staticmethod
+    def image_to_base64(image_bytes: bytes) -> str:
+        """Конвертация байтов изображения в base64 строку"""
+        return base64.b64encode(image_bytes).decode('utf-8')
+    
+    @staticmethod
+    def base64_to_image(base64_str: str) -> bytes:
+        """Декодирование base64 строки обратно в байты"""
+        if "," in base64_str:
+            base64_str = base64_str.split(",")[1]
+        return base64.b64decode(base64_str)
+    
+    def enhance_prompt_with_deepseek(self, raw_prompt: str, task: str, product_info: str = "") -> str:
+        """
+        🤖 DeepSeek улучшает сырой промпт пользователя до профессионального уровня.
+        Возвращает оптимизированный промпт на английском для лучшего качества генерации.
+        """
+        if not self.deepseek_api_key:
+            self.logger.warning("DeepSeek API ключ не задан. Возвращаем исходный промпт.")
+            return raw_prompt
+        
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=self.deepseek_api_key, base_url="https://api.deepseek.com/v1")
+            
+            system_prompt = f"""Ты эксперт по промпт-инжинирингу для AI-генерации изображений товаров на маркетплейсы (Ozon, Wildberries).
+Твоя задача — превратить сырой запрос пользователя в профессиональный, детализированный промпт на АНГЛИЙСКОМ языке для Stable Diffusion / DALL-E.
+
+Задача генерации: {task}
+Информация о товаре: {product_info or 'Не указана'}
+
+Требования к промпту:
+1. Опиши товар максимально точно (материал, цвет, форма, детали)
+2. Укажи стиль: marketplace product photography, studio lighting, 8k, ultra-detailed
+3. Для инфографики добавь: clean background, space for text overlay, professional layout
+4. Для "товар в действии": realistic scene, lifestyle photography, natural lighting
+5. Добавь негативные промпты: blurry, low quality, distorted, watermark
+6. Длина промпта: 50-100 слов
+
+Верни ТОЛЬКО финальный промпт на английском, без пояснений и кавычек."""
+
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Улучши этот промпт: {raw_prompt}"}
+                ],
+                temperature=0.3,
+                max_tokens=300
+            )
+            
+            enhanced = response.choices[0].message.content.strip()
+            self.logger.info(f"✅ DeepSeek улучшил промпт: {len(enhanced)} символов")
+            return enhanced
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка DeepSeek: {e}. Используем исходный промпт.")
+            return raw_prompt
+    
+    @retry_decorator(max_retries=3, delay=2.0, backoff=2.0, exceptions=(requests.exceptions.RequestException,))
+    def process_image(self, 
+                      image_bytes: bytes, 
+                      task: str, 
+                      prompt: str = "", 
+                      hex_color: str = "",
+                      style: str = "marketplace_card",
+                      num_frames: int = 1) -> bytes:
+        """
+        Универсальный метод обработки изображения (auto-пайплайн).
+        task: 'infographic', 'remove_background', 'upscale', 'recolor', 'in_action', 'photoshoot'
+        """
+        if not self.mpstats_token:
+            raise ValueError("Не задан MPSTATS API токен. Укажите его в настройках.")
+        
+        payload = {
+            "task": task,
+            "image_base64": self.image_to_base64(image_bytes),
+            "prompt": prompt,
+            "hex_color": hex_color,
+            "style": style,
+            "num_frames": num_frames,
+            "auto_pipeline": True  # Двухшаговый пайплайн (test → generate) в один вызов
+        }
+        
+        url = f"{self.base_url}/generate"
+        
+        try:
+            response = self.session.post(url, json=payload, timeout=120)
+            response.raise_for_status()
+            
+            result = response.json()
+            if result.get("status") == "success" and "image_base64" in result:
+                return self.base64_to_image(result["image_base64"])
+            else:
+                error_msg = result.get('error', 'Неизвестная ошибка API')
+                raise ValueError(f"MPSTATS API вернул ошибку: {error_msg}")
+                
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                self.logger.warning("Превышен лимит запросов MPSTATS API. Ожидание...")
+                raise
+            raise
+        except Exception as e:
+            self.logger.error(f"Ошибка обработки изображения: {e}")
+            raise
+
+
+def show_photo_editor_interface():
+    """🎨 Интерфейс AI-генерации визуала и инфографики"""
+    st.header("🎨 AI Фото-редактор и Инфографика")
+    st.info("""
+    📸 **Создавайте продающий визуал для карточек Ozon и Wildberries за секунды.**
+    
+    **Возможности AI-агента:**
+    - 🖼️ Генерация инфографики с преимуществами товара
+    - ✂️ Удаление или замена фона (студийный свет / товар в действии)
+    - 🎨 Перекрашивание товара в фирменный HEX-цвет
+    - 🔍 Увеличение разрешения (Upscale) без потери качества
+    - 📸 Фотосессия товара (1-8 кадров в нужном стиле)
+    - 🤖 **DeepSeek автоматически улучшает ваши промпты** для лучшего результата
+    
+    💡 **Рекомендация:** Сначала загрузите фото товара, затем выберите задачу и опишите, что хотите получить.
+    """)
+
+    # ====================================================================
+    # 1. НАСТРОЙКА API КЛЮЧЕЙ
+    # ====================================================================
+    with st.expander("⚙️ Настройка API ключей", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            mpstats_token = st.text_input(
+                "🔑 X-Mpstats-TOKEN",
+                type="password",
+                value=st.session_state.get("mpstats_photo_token", ""),
+                placeholder="Введите токен MPSTATS API",
+                help="Токен сохраняется только в текущей сессии браузера"
+            )
+            if mpstats_token:
+                st.session_state["mpstats_photo_token"] = mpstats_token
+        with col2:
+            deepseek_key = st.text_input(
+                "🤖 DeepSeek API Key (для улучшения промптов)",
+                type="password",
+                value=st.session_state.get("deepseek_api_key", ""),
+                placeholder="sk-...",
+                help="Используется для автоматического улучшения промптов"
+            )
+            if deepseek_key:
+                st.session_state["deepseek_api_key"] = deepseek_key
+        
+        if not st.session_state.get("mpstats_photo_token"):
+            st.warning("⚠️ Для работы необходим токен MPSTATS API")
+        else:
+            st.success("✅ Токены сохранены в сессии")
+        st.divider()
+
+    if not st.session_state.get("mpstats_photo_token"):
+        st.stop()
+
+    # Инициализация клиента
+    photo_client = MpstatsPhotoEditor(
+        mpstats_token=st.session_state.get("mpstats_photo_token", ""),
+        deepseek_api_key=st.session_state.get("deepseek_api_key", "")
+    )
+
+    # ====================================================================
+    # 2. ЗАГРУЗКА ИСХОДНОГО ИЗОБРАЖЕНИЯ
+    # ====================================================================
+    st.subheader("📤 Шаг 1: Загрузите фото товара")
+    uploaded_file = st.file_uploader(
+        "Выберите изображение (JPG, PNG)", 
+        type=['jpg', 'jpeg', 'png'],
+        key="photo_editor_upload",
+        help="Рекомендуемое разрешение: от 1000x1000 px"
+    )
+
+    if uploaded_file is not None:
+        # Отображение оригинала
+        col_orig, col_info = st.columns([1, 2])
+        with col_orig:
+            st.image(uploaded_file, caption="📷 Оригинал", use_container_width=True)
+        
+        with col_info:
+            file_size_kb = uploaded_file.size / 1024
+            st.metric("📊 Размер файла", f"{file_size_kb:.1f} KB")
+            st.metric("📛 Имя файла", uploaded_file.name)
+        
+        st.divider()
+        
+        # ====================================================================
+        # 3. ВЫБОР ЗАДАЧИ И ПАРАМЕТРОВ
+        # ====================================================================
+        st.subheader("🛠️ Шаг 2: Выберите задачу и параметры")
+        
+        task_mode = st.selectbox(
+            "🎯 Выберите задачу:",
+            options=[
+                ("🖼️ Инфографика для карточки (Ozon/WB)", "infographic"),
+                ("📸 Фотосессия товара (1-8 кадров)", "photoshoot"),
+                ("✂️ Удалить фон (прозрачный PNG)", "remove_background"),
+                ("🏞️ Товар в действии (новый фон/сцена)", "in_action"),
+                ("🎨 Перекрасить товар в HEX-цвет", "recolor"),
+                ("🔍 Увеличить разрешение (Upscale 2x/4x)", "upscale"),
+                ("🪄 Произвольный prompt-edit", "custom_edit")
+            ],
+            format_func=lambda x: x[0],
+            key="photo_task_mode"
+        )
+        task_value = task_mode[1]
+
+        # Динамические поля в зависимости от задачи
+        prompt_text = ""
+        hex_color = ""
+        num_frames = 1
+        style = "marketplace_card"
+        use_deepseek = True
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            if task_value in ["infographic", "in_action", "photoshoot", "custom_edit"]:
+                prompt_text = st.text_area(
+                    "📝 Опишите, что хотите получить:",
+                    placeholder=(
+                        "Пример для инфографики: 'Премиальные тормозные колодки. Гарантия 2 года. "
+                        "Выдерживают температуру до 800°C. Быстрая доставка по РФ.'\n\n"
+                        "Пример для 'товар в действии': 'Автомобильный фильтр на фоне чистого "
+                        "современного гаража с мягким студийным освещением'"
+                    ),
+                    height=120,
+                    key="photo_prompt_text"
+                )
+        
+        with col2:
+            if task_value == "infographic":
+                style = st.selectbox(
+                    "🎨 Стиль карточки:",
+                    ["Ozon (синий/белый)", "Wildberries (фиолетовый)", 
+                     "Минимализм (белый)", "Премиум (черный)", "Яркий (красный)"],
+                    key="photo_style"
+                )
+            elif task_value == "recolor":
+                hex_color = st.text_input(
+                    "🎨 Целевой HEX-цвет:",
+                    placeholder="#FF0000",
+                    key="photo_hex_color"
+                )
+            elif task_value == "photoshoot":
+                num_frames = st.slider(
+                    "📸 Количество кадров:",
+                    min_value=1, max_value=8, value=4,
+                    key="photo_num_frames"
+                )
+            
+            use_deepseek = st.checkbox(
+                "🤖 Улучшить промпт через DeepSeek",
+                value=True,
+                key="photo_use_deepseek",
+                help="AI автоматически улучшит ваш промпт для лучшего качества"
+            )
+
+        # ====================================================================
+        # 4. ПРЕДПРОСМОТР УЛУЧШЕННОГО ПРОМПТА (если DeepSeek включен)
+        # ====================================================================
+        if use_deepseek and prompt_text and st.session_state.get("deepseek_api_key"):
+            if st.button("🤖 Предпросмотр: улучшить промпт через DeepSeek", 
+                        key="preview_prompt_btn", use_container_width=True):
+                with st.spinner("🤖 DeepSeek анализирует и улучшает промпт..."):
+                    enhanced = photo_client.enhance_prompt_with_deepseek(
+                        raw_prompt=prompt_text,
+                        task=task_value,
+                        product_info=uploaded_file.name
+                    )
+                    st.session_state["enhanced_prompt_preview"] = enhanced
+                    st.rerun()
+            
+            if "enhanced_prompt_preview" in st.session_state:
+                st.info(f"✨ **Улучшенный промпт:**\n\n{st.session_state['enhanced_prompt_preview']}")
+                if st.button("♻️ Сбросить улучшенный промпт", key="reset_prompt"):
+                    del st.session_state["enhanced_prompt_preview"]
+                    st.rerun()
+
+        st.divider()
+        
+        # ====================================================================
+        # 5. КНОПКА ГЕНЕРАЦИИ
+        # ====================================================================
+        if st.button("🚀 Сгенерировать визуал", type="primary", 
+                    use_container_width=True, key="btn_generate_photo"):
+            
+            # Валидация входных данных
+            if not prompt_text and task_value in ["infographic", "in_action", "photoshoot", "custom_edit"]:
+                st.warning("⚠️ Пожалуйста, заполните описание для этой задачи.")
+                st.stop()
+            if not hex_color and task_value == "recolor":
+                st.warning("⚠️ Укажите HEX-цвет для перекраски.")
+                st.stop()
+
+            with st.spinner("🤖 AI обрабатывает изображение (это может занять 15-60 секунд)..."):
+                try:
+                    image_bytes = uploaded_file.read()
+                    
+                    # 🤖 Шаг 1: Улучшение промпта через DeepSeek (если включено)
+                    final_prompt = prompt_text
+                    if use_deepseek and prompt_text and st.session_state.get("deepseek_api_key"):
+                        final_prompt = photo_client.enhance_prompt_with_deepseek(
+                            raw_prompt=prompt_text,
+                            task=task_value,
+                            product_info=uploaded_file.name
+                        )
+                        st.info(f"✨ **Промпт улучшен DeepSeek:** {final_prompt[:100]}...")
+                    
+                    # 🎨 Шаг 2: Вызов MPSTATS Photo Editor API
+                    result_bytes = photo_client.process_image(
+                        image_bytes=image_bytes,
+                        task=task_value,
+                        prompt=final_prompt,
+                        hex_color=hex_color,
+                        style=style,
+                        num_frames=num_frames
+                    )
+                    
+                    # Сохраняем результат в session_state
+                    st.session_state["generated_photo"] = result_bytes
+                    st.session_state["photo_task"] = task_value
+                    st.session_state["photo_final_prompt"] = final_prompt
+                    st.success("✅ Генерация завершена!")
+                    st.rerun()
+                    
+                except ValueError as e:
+                    st.error(f"❌ Ошибка API: {str(e)}")
+                    st.info("💡 Проверьте правильность токена MPSTATS API в настройках.")
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        st.error("⏳ Превышен лимит запросов MPSTATS API. Подождите минуту и попробуйте снова.")
+                    else:
+                        st.error(f"❌ HTTP ошибка: {e}")
+                except Exception as e:
+                    st.error(f"❌ Непредвиденная ошибка: {str(e)}")
+                    logger.error(f"Photo Editor Error: {traceback.format_exc()}")
+
+        # ====================================================================
+        # 6. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТА
+        # ====================================================================
+        if "generated_photo" in st.session_state:
+            st.divider()
+            st.subheader("✅ Результат генерации")
+            
+            res_col1, res_col2 = st.columns(2)
+            with res_col1:
+                st.image(uploaded_file, caption="📷 До (Оригинал)", use_container_width=True)
+            with res_col2:
+                st.image(
+                    st.session_state["generated_photo"], 
+                    caption=f"✨ После ({st.session_state.get('photo_task', 'AI')})", 
+                    use_container_width=True
+                )
+            
+            # Информация о генерации
+            with st.expander("📋 Детали генерации", expanded=False):
+                st.write(f"**Задача:** {st.session_state.get('photo_task', 'N/A')}")
+                st.write(f"**Финальный промпт:** {st.session_state.get('photo_final_prompt', 'N/A')}")
+                st.write(f"**Размер результата:** {len(st.session_state['generated_photo']) / 1024:.1f} KB")
+            
+            # Кнопки действий
+            action_col1, action_col2, action_col3 = st.columns(3)
+            
+            with action_col1:
+                st.download_button(
+                    label="⬇️ Скачать результат (PNG)",
+                    data=st.session_state["generated_photo"],
+                    file_name=f"mpstats_{st.session_state.get('photo_task', 'edited')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                    key="download_generated_photo"
+                )
+            
+            with action_col2:
+                if st.button("🔄 Сгенерировать ещё раз", use_container_width=True, key="regen_photo"):
+                    if "generated_photo" in st.session_state:
+                        del st.session_state["generated_photo"]
+                    st.rerun()
+            
+            with action_col3:
+                if st.button("🗑️ Очистить результат", use_container_width=True, key="clear_photo"):
+                    for key in ["generated_photo", "photo_task", "photo_final_prompt", "enhanced_prompt_preview"]:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
+            
+            # 💡 Рекомендации по использованию
+            st.divider()
+            st.subheader("💡 Рекомендации по использованию результата")
+            
+            task = st.session_state.get("photo_task", "")
+            if task == "infographic":
+                st.success("""
+                ✅ **Инфографика готова!**
+                - Загрузите в основную карточку товара на Ozon/WB
+                - Убедитесь, что текст читается на мобильных устройствах
+                - Проверьте соответствие требованиям площадки (размер, фон)
+                """)
+            elif task == "remove_background":
+                st.success("""
+                ✅ **Фон удалён!**
+                - Используйте PNG с прозрачностью для карточки товара
+                - Можно наложить на любой цветной фон
+                - Идеально для главного фото карточки
+                """)
+            elif task == "photoshoot":
+                st.success(f"""
+                ✅ **Фотосессия готова!** ({num_frames} кадров)
+                - Используйте разные ракурсы для галереи карточки
+                - Первый кадр — для главной фотографии
+                - Остальные — для детализации товара
+                """)
+            elif task == "in_action":
+                st.success("""
+                ✅ **Товар в действии!**
+                - Lifestyle-фото повышает конверсию на 30-40%
+                - Используйте для 2-3 позиции в галерее карточки
+                - Отлично работает для автотоваров
+                """)
+            elif task == "recolor":
+                st.success("""
+                ✅ **Перекраска выполнена!**
+                - Проверьте точность цвета (особенно для деталей салона)
+                - Используйте для создания вариантов товара
+                """)
+            elif task == "upscale":
+                st.success("""
+                ✅ **Разрешение увеличено!**
+                - Идеально для печати или крупных баннеров
+                - Проверьте, что детали не "замылились"
+                """)
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.13 + АВТО-ПЕРЕКЛЮЧЕНИЕ ПОСЛЕ ОБОГАЩЕНИЯ)
 # ============================================================================
@@ -11862,7 +12332,6 @@ def main():
     # 🧭 НАВИГАЦИЯ
     # ====================================================================
     st.sidebar.title("🧭 Навигация")
-    
     section = st.sidebar.radio(
         "Выберите раздел:",
         [
@@ -11884,28 +12353,20 @@ def main():
     # ====================================================================
     if section == "📁 Загрузка данных":
         show_data_upload_interface()
-    
     elif section == "📊 Юнит-экономика":
         show_unit_economics_interface()
-    
     elif section == "🗂️ Каталог для группировки":
         show_catalog_grouping_interface()
-    
     elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
-    
     elif section == "🤖 AI Тарифы":
         show_ai_tariffs_interface()
-    
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
-    
     elif section == "🧠 Умная загрузка тарифов":
         show_smart_tariff_interface()
-    
     elif section == "📚 История расчётов":
         show_history_interface()
-    
     elif section == "⚙️ Настройки":
         show_settings_interface()
     
