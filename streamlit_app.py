@@ -7307,6 +7307,7 @@ def enrich_dataframe_from_catalog(df: pd.DataFrame, catalog) -> Tuple[pd.DataFra
 # 2. Автоматическое подтягивание габаритов, веса, категории, цены из каталога
 # 3. Кнопка быстрого перехода к расчёту юнит-экономики
 # 4. Детальная статистика обогащения
+# ✅ ИСПРАВЛЕНИЕ v100.14: Исправлена ошибка загрузки Excel файлов
 # ============================================================================
 def show_data_upload_interface():
     """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ С ОБОГАЩЕНИЕМ ИЗ КАТАЛОГА"""
@@ -7343,12 +7344,15 @@ def show_data_upload_interface():
             df = None
             file_name = uploaded_file.name.lower()
             
+            # === ЧТЕНИЕ CSV ===
             if file_name.endswith('.csv'):
                 try:
                     df = smart_read_csv(uploaded_file)
                 except Exception as e:
                     logger.error(f"Ошибка умного чтения CSV: {e}")
                     raise ValueError(f"Не удалось прочитать CSV файл: {e}")
+            
+            # === ЧТЕНИЕ EXCEL ===
             elif file_name.endswith(('.xlsx', '.xls')):
                 excel_engines = ['openpyxl', 'xlrd']
                 for engine in excel_engines:
@@ -7361,6 +7365,7 @@ def show_data_upload_interface():
                     except Exception:
                         continue
                 
+                # Если не удалось прочитать, пробуем дополнительные движки
                 if df is None or df.empty:
                     available_engines = ['openpyxl', 'xlrd', 'odf']
                     for engine in available_engines:
@@ -7371,11 +7376,16 @@ def show_data_upload_interface():
                                 break
                         except Exception:
                             continue
-                else:
-                    raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
+                
+                # ✅ ИСПРАВЛЕНИЕ v100.14: Правильная проверка результата чтения
+                if df is None or df.empty:
+                    raise ValueError(f"Не удалось прочитать Excel файл. Проверьте формат и содержимое.")
+            
+            # === НЕПОДДЕРЖИВАЕМЫЙ ФОРМАТ ===
             else:
                 raise ValueError(f"Неподдерживаемый формат файла: {file_name}")
             
+            # === ПРОВЕРКА ПУСТОГО ФАЙЛА ===
             if df is None or df.empty:
                 st.error("❌ Не удалось прочитать файл. Проверьте формат и кодировку.")
                 return
@@ -7400,18 +7410,15 @@ def show_data_upload_interface():
             # 🆕 v100.7: НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ
             # ====================================================================
             st.subheader("🔧 Нормализация весогабаритов")
-            
             dimension_cols = ['Длина', 'Ширина', 'Высота', 'Вес']
             
             def normalize_dimension_value(val):
                 """Нормализует значение весогабарита"""
                 if pd.isna(val):
                     return 0.0
-                
                 if isinstance(val, (datetime, pd.Timestamp)):
                     logger.warning(f"Обнаружена дата вместо числа: {val}")
                     return 0.0
-                
                 if isinstance(val, str):
                     val = val.strip()
                     month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
@@ -7419,14 +7426,12 @@ def show_data_upload_interface():
                     if any(month in val.lower() for month in month_names):
                         logger.warning(f"Обнаружена дата в строке: {val}")
                         return 0.0
-                    
                     try:
                         cleaned = val.replace(',', '.')
                         return round(float(cleaned), 2)
                     except (ValueError, TypeError):
                         logger.warning(f"Не удалось преобразовать строку в число: {val}")
                         return 0.0
-                
                 try:
                     num = float(val)
                     return round(num, 2)
@@ -7446,11 +7451,10 @@ def show_data_upload_interface():
             if normalized_count > 0:
                 st.success(f"✅ Нормализовано колонок: {normalized_count}")
                 st.info("📋 Все значения округлены до 2 знаков после запятой")
-            
-            st.write("Пример нормализованных данных:")
-            available_cols = [col for col in dimension_cols if col in df.columns]
-            if available_cols:
-                st_dataframe_compat(df[available_cols].head(10))
+                st.write("Пример нормализованных данных:")
+                available_cols = [col for col in dimension_cols if col in df.columns]
+                if available_cols:
+                    st_dataframe_compat(df[available_cols].head(10))
             
             # ====================================================================
             # 📏 Автоматический парсинг размеров
@@ -7499,7 +7503,6 @@ def show_data_upload_interface():
                         df = df.rename(columns=rename_map)
                     
                     st.success(f"✅ Распарсено {len(parsed_data)} записей")
-                    
                     sample_data = []
                     for i in range(min(5, len(parsed_data))):
                         row = parsed_data[i]
@@ -7509,7 +7512,6 @@ def show_data_upload_interface():
                             'Ширина': row['parsed_width'],
                             'Высота': row['parsed_height']
                         })
-                    
                     if sample_data:
                         st_dataframe_compat(pd.DataFrame(sample_data))
             
@@ -7539,14 +7541,14 @@ def show_data_upload_interface():
                 st.divider()
                 st.subheader("🔄 Обогащение из каталога группировки")
                 st.info(f"""
-                📦 **В каталоге найдено {catalog_total:,} уникальных товаров.**
-                Система может автоматически подтянуть из каталога:
-                ✅ Габариты (Длина, Ширина, Высота)
-                ✅ Вес и оплачиваемый вес
-                ✅ Категорию товара
-                ✅ Цену (если её нет в файле)
-                ✅ OE-номера и названия
-                """)
+📦 **В каталоге найдено {catalog_total:,} уникальных товаров.**
+Система может автоматически подтянуть из каталога:
+✅ Габариты (Длина, Ширина, Высота)
+✅ Вес и оплачиваемый вес
+✅ Категорию товара
+✅ Цену (если её нет в файле)
+✅ OE-номера и названия
+""")
                 
                 enrich_col1, enrich_col2 = st.columns([3, 1])
                 with enrich_col1:
@@ -7574,15 +7576,15 @@ def show_data_upload_interface():
                                 df = enriched_df
                                 
                                 st.success(f"""
-                                ✅ **Обогащение завершено!**
-                                - 📦 Сопоставлено по артикулу: **{enrich_stats['matched_by_artikul']:,}**
-                                - 📏 Добавлено длин: **{enrich_stats['added_length']:,}**
-                                - 📏 Добавлено ширин: **{enrich_stats['added_width']:,}**
-                                - 📏 Добавлено высот: **{enrich_stats['added_height']:,}**
-                                - ⚖️ Добавлено весов: **{enrich_stats['added_weight']:,}**
-                                - 📂 Добавлено категорий: **{enrich_stats['added_category']:,}**
-                                - 💰 Добавлено цен: **{enrich_stats['added_price']:,}**
-                                """)
+✅ **Обогащение завершено!**
+- 📦 Сопоставлено по артикулу: **{enrich_stats['matched_by_artikul']:,}**
+- 📏 Добавлено длин: **{enrich_stats['added_length']:,}**
+- 📏 Добавлено ширин: **{enrich_stats['added_width']:,}**
+- 📏 Добавлено высот: **{enrich_stats['added_height']:,}**
+- ⚖️ Добавлено весов: **{enrich_stats['added_weight']:,}**
+- 📂 Добавлено категорий: **{enrich_stats['added_category']:,}**
+- 💰 Добавлено цен: **{enrich_stats['added_price']:,}**
+""")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ Ошибка обогащения: {e}")
@@ -7594,16 +7596,17 @@ def show_data_upload_interface():
             st.divider()
             st.subheader("🚀 Быстрый старт расчёта")
             st.info("""
-            💡 Данные загружены и готовы к расчёту.
-            Перейдите в раздел **«📊 Юнит-экономика»** → **«📦 Весь каталог (из файла)»**
-            для расчёта юнит-экономики по всем товарам.
-            """)
+💡 Данные загружены и готовы к расчёту.
+Перейдите в раздел **«📊 Юнит-экономика»** → **«📦 Весь каталог (из файла)»**
+для расчёта юнит-экономики по всем товарам.
+""")
             
             has_price = any(any(w in str(c).lower() for w in ['цена', 'price']) for c in df.columns)
             has_cost = any(any(w in str(c).lower() for w in ['себестоимость', 'cost', 'закуп']) for c in df.columns)
             has_artikul = any(any(w in str(c).lower() for w in ['артикул', 'article', 'sku']) for c in df.columns)
             
             ready_for_calc = has_price and has_artikul
+            
             if not has_cost:
                 st.warning("⚠️ Не найдена колонка с себестоимостью. Для расчёта юнит-экономики она обязательна.")
             if not has_price:
@@ -7635,7 +7638,6 @@ def show_data_upload_interface():
                     if any(w in str(col).lower() for w in ['цена', 'price', 'стоимость']):
                         price_col = col
                         break
-                
                 if price_col:
                     try:
                         avg_price = safe_float(df[price_col].mean())
@@ -7651,7 +7653,6 @@ def show_data_upload_interface():
                     if any(w in str(col).lower() for w in ['себестоимость', 'cost', 'закупочная']):
                         cost_col = col
                         break
-                
                 if cost_col:
                     try:
                         avg_cost = safe_float(df[cost_col].mean())
@@ -7667,7 +7668,6 @@ def show_data_upload_interface():
                     if any(w in str(col).lower() for w in ['бренд', 'brand', 'производитель']):
                         brand_col = col
                         break
-                
                 if brand_col:
                     try:
                         unique_brands = df[brand_col].nunique()
@@ -7698,7 +7698,6 @@ def show_data_upload_interface():
                             df['Категория'] = df[name_col].apply(lambda x: classifier.predict(str(x))[0])
                             st.session_state.uploaded_data = df
                             st.success("✅ Классификация завершена!")
-                            
                             st.subheader("📊 Распределение по категориям")
                             category_counts = df['Категория'].value_counts()
                             st_dataframe_compat(category_counts, key="category_counts")
