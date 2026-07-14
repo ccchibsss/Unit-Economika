@@ -8262,11 +8262,15 @@ class SuperProExcelExporter:
             last_row = 3 + self._total_rows
             profit_range = f"W4:W{last_row}"
             ws.conditional_format(profit_range, {
-                'type': 'cell', 'criteria': '>', 'value': 0,
+                'type': 'cell',
+                'criteria': '>',
+                'value': 0,
                 'format': self.formats['positive']
             })
             ws.conditional_format(profit_range, {
-                'type': 'cell', 'criteria': '<', 'value': 0,
+                'type': 'cell',
+                'criteria': '<',
+                'value': 0,
                 'format': self.formats['negative']
             })
             margin_range = f"X4:X{last_row}"
@@ -8453,7 +8457,7 @@ class SuperProExcelExporter:
         return ws
     
     def _write_category_analysis(self, workbook, df: pd.DataFrame):
-        """📂 Анализ по категориям"""
+        """📂 Анализ по категориям - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         ws = workbook.add_worksheet("📂 Категории")
         ws.merge_range('A1:H1', "📂 АНАЛИЗ ПО КАТЕГОРИЯМ",
                        self.formats['header_title'])
