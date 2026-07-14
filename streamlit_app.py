@@ -2494,6 +2494,13 @@ class SmartTariffCache:
 # ============================================================================
 # БЛОК 3: ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ (🆕 v100.5 - С МИГРАЦИЕЙ)
 # ============================================================================
+# ✅ ИСПРАВЛЕНИЯ v100.15:
+# 1. _get_db_columns: поддержка DuckDB через несколько fallback-запросов
+#    (DuckDB хранит таблицы в схеме 'main', а не в 'information_schema')
+# 2. _migrate_database: защита от пустого списка колонок + автопересоздание
+# 3. save_calculation: автопересоздание таблицы + ON CONFLICT для DuckDB
+# 4. Подробное логирование для диагностики
+# ============================================================================
 @st.cache_resource
 def get_persistent_history_db(db_path: Optional[Path] = None):
     return PersistentHistoryDB(db_path)
@@ -2501,6 +2508,7 @@ def get_persistent_history_db(db_path: Optional[Path] = None):
 
 class PersistentHistoryDB:
     """Постоянное хранилище истории расчётов"""
+    
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or (HISTORY_DB_DIR / "history_pro.duckdb")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2510,7 +2518,7 @@ class PersistentHistoryDB:
         self._create_tables()
         self._migrate_database()
         logger.info(f"📚 PersistentHistoryDB инициализирован: {self.db_path}")
-
+    
     def _init_connection(self):
         try:
             if self.use_duckdb:
@@ -2521,7 +2529,7 @@ class PersistentHistoryDB:
         except (duckdb.Error, sqlite3.Error) as e:
             logger.error(f"Ошибка подключения к БД: {e}")
             self.conn = None
-
+    
     def _create_tables(self):
         if self.conn is None:
             return
@@ -2584,36 +2592,98 @@ class PersistentHistoryDB:
                 self.conn.commit()
         except (duckdb.Error, sqlite3.Error) as e:
             logger.error(f"Ошибка создания таблиц: {e}")
-
+    
+    # ========================================================================
+    # ✅ ИСПРАВЛЕНИЕ v100.15: Поддержка DuckDB через несколько fallback-запросов
+    # ========================================================================
     def _get_db_columns(self) -> List[str]:
-        """Получить список колонок таблицы"""
+        """
+        🆕 v100.5 → v100.15: Получить список колонок таблицы с поддержкой DuckDB и SQLite.
+        ✅ ИСПРАВЛЕНИЕ v100.15: DuckDB хранит таблицы в схеме 'main', а не в 'information_schema'.
+        Используется несколько fallback-запросов для максимальной совместимости.
+        """
         if self.conn is None:
+            logger.warning("⚠️ _get_db_columns: соединение с БД не установлено")
             return []
         try:
             if self.use_duckdb:
-                rows = self.conn.execute(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'calculation_history'"
-                ).fetchall()
-                return [row[0] for row in rows]
+                # ✅ ИСПРАВЛЕНИЕ v100.15: Пробуем несколько вариантов запросов для DuckDB
+                queries = [
+                    # Вариант 1: С указанием схемы 'main' (правильный для DuckDB)
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'calculation_history' AND table_schema = 'main'",
+                    # Вариант 2: Без фильтра по схеме (для старых версий DuckDB)
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'calculation_history'",
+                    # Вариант 3: Через DESCRIBE (самый надёжный)
+                    "SELECT column_name FROM (DESCRIBE calculation_history)",
+                ]
+                for query in queries:
+                    try:
+                        rows = self.conn.execute(query).fetchall()
+                        if rows:
+                            columns = [row[0] for row in rows]
+                            logger.debug(f"✅ Получено {len(columns)} колонок из БД (DuckDB)")
+                            return columns
+                    except Exception as e:
+                        logger.debug(f"Запрос не сработал: {query[:50]}... → {e}")
+                        continue
+                
+                # ✅ Fallback: получаем колонки через cursor.description
+                try:
+                    cursor = self.conn.execute("SELECT * FROM calculation_history LIMIT 0")
+                    columns = [desc[0] for desc in cursor.description]
+                    if columns:
+                        logger.info(f"✅ Fallback: получено {len(columns)} колонок через cursor.description")
+                        return columns
+                except Exception as e:
+                    logger.warning(f"Fallback через cursor.description не сработал: {e}")
+                
+                logger.error("❌ Не удалось получить список колонок из DuckDB. Таблица может не существовать.")
+                return []
             else:
+                # SQLite
                 rows = self.conn.execute("PRAGMA table_info(calculation_history)").fetchall()
-                return [row[1] for row in rows]
+                columns = [row[1] for row in rows]
+                logger.debug(f"✅ Получено {len(columns)} колонок из БД (SQLite)")
+                return columns
         except Exception as e:
-            logger.warning(f"Ошибка получения колонок: {e}")
+            logger.error(f"❌ Критическая ошибка получения колонок: {e}")
+            logger.error(traceback.format_exc())
             return []
-
+    
+    # ========================================================================
+    # ✅ ИСПРАВЛЕНИЕ v100.15: Защита от пустого списка колонок + автопересоздание
+    # ========================================================================
     def _migrate_database(self):
-        """🆕 v100.5: Автоматическая миграция БД - добавление новых колонок"""
+        """
+        🆕 v100.5 → v100.15: Автоматическая миграция БД - добавление новых колонок.
+        ✅ ИСПРАВЛЕНИЕ v100.15: Защита от пустого списка колонок.
+        """
         if self.conn is None:
             return
         try:
             db_columns = self._get_db_columns()
+            
+            # ✅ ИСПРАВЛЕНИЕ v100.15: Если список пуст — создаём таблицу заново
+            if not db_columns:
+                logger.warning("⚠️ _migrate_database: список колонок пуст, пересоздаём таблицу...")
+                self._create_tables()
+                db_columns = self._get_db_columns()
+                if not db_columns:
+                    logger.error("❌ Не удалось получить список колонок после пересоздания")
+                    return
+            
             new_columns = {
                 'billable_weight': 'DOUBLE' if self.use_duckdb else 'REAL',
                 'advertising_cost': 'DOUBLE' if self.use_duckdb else 'REAL',
                 'auto_parts_specific': 'DOUBLE' if self.use_duckdb else 'REAL',
                 'calculation_id': 'VARCHAR' if self.use_duckdb else 'TEXT',
+                'article': 'VARCHAR' if self.use_duckdb else 'TEXT',
+                'brand': 'VARCHAR' if self.use_duckdb else 'TEXT',
+                'id': 'VARCHAR' if self.use_duckdb else 'TEXT',
             }
+            
             for col_name, col_type in new_columns.items():
                 if col_name not in db_columns:
                     try:
@@ -2623,10 +2693,18 @@ class PersistentHistoryDB:
                         logger.warning(f"Не удалось добавить {col_name}: {e}")
         except Exception as e:
             logger.warning(f"Ошибка миграции: {e}")
-
+            logger.error(traceback.format_exc())
+    
+    # ========================================================================
+    # ✅ ИСПРАВЛЕНИЕ v100.15: Автопересоздание таблицы + ON CONFLICT для DuckDB
+    # ========================================================================
     def save_calculation(self, result: 'UnitEconomicsResult', article: str = "", brand: str = "") -> bool:
-        """🆕 v100.5: Сохранение с учётом схемы БД"""
+        """
+        🆕 v100.5 → v100.15: Сохранение с учётом схемы БД и авто-пересозданием таблицы.
+        ✅ ИСПРАВЛЕНИЕ v100.15: Если список колонок пуст — пробуем пересоздать таблицу.
+        """
         if self.conn is None:
+            logger.warning("⚠️ save_calculation: соединение с БД не установлено")
             return False
         try:
             data = result.to_dict()
@@ -2639,27 +2717,69 @@ class PersistentHistoryDB:
             data['billable_weight'] = getattr(result, 'billable_weight', 0.0)
             data['advertising_cost'] = getattr(result, 'advertising_cost', 0.0)
             data['auto_parts_specific'] = getattr(result, 'auto_parts_specific', 0.0)
+            
             db_columns = self._get_db_columns()
-            filtered_data = {k: v for k, v in data.items() if k in db_columns}
-            if not filtered_data:
-                logger.warning("Нет подходящих колонок для сохранения")
+            
+            # ✅ ИСПРАВЛЕНИЕ v100.15: Если колонок нет — пробуем пересоздать таблицу
+            if not db_columns:
+                logger.warning("⚠️ Список колонок пуст. Попытка пересоздать таблицу...")
+                try:
+                    self._create_tables()
+                    self._migrate_database()
+                    db_columns = self._get_db_columns()
+                except Exception as e:
+                    logger.error(f"Не удалось пересоздать таблицу: {e}")
+            
+            if not db_columns:
+                logger.error("❌ После пересоздания таблицы колонки всё ещё не найдены")
                 return False
+            
+            # ✅ Логируем несовпадения для отладки
+            data_keys = set(data.keys())
+            db_cols_set = set(db_columns)
+            missing_in_db = data_keys - db_cols_set
+            if missing_in_db and len(missing_in_db) < 10:
+                logger.debug(f"ℹ️ Колонки из data, отсутствующие в БД: {missing_in_db}")
+            
+            filtered_data = {k: v for k, v in data.items() if k in db_columns}
+            
+            if not filtered_data:
+                logger.error(
+                    f"❌ Нет подходящих колонок! "
+                    f"data.keys()={list(data.keys())[:10]}..., "
+                    f"db_columns={db_columns[:10]}..."
+                )
+                return False
+            
             if 'id' not in filtered_data and 'calculation_id' in filtered_data:
                 filtered_data['id'] = filtered_data['calculation_id']
             elif 'id' not in filtered_data:
                 filtered_data['id'] = str(uuid.uuid4())
+            
             columns = list(filtered_data.keys())
             values = list(filtered_data.values())
             placeholders = ", ".join(["?"] * len(values))
             col_names = ", ".join([f'"{c}"' for c in columns])
-            sql = f"INSERT OR REPLACE INTO calculation_history ({col_names}) VALUES ({placeholders})"
+            
+            if self.use_duckdb:
+                # DuckDB использует INSERT OR REPLACE через ON CONFLICT
+                sql = f"""
+                    INSERT INTO calculation_history ({col_names}) 
+                    VALUES ({placeholders})
+                    ON CONFLICT (id) DO UPDATE SET 
+                    {', '.join([f'"{c}" = excluded."{c}"' for c in columns if c != 'id'])}
+                """
+            else:
+                sql = f"INSERT OR REPLACE INTO calculation_history ({col_names}) VALUES ({placeholders})"
+            
             self.conn.execute(sql, values)
             self.conn.commit()
             return True
         except (duckdb.Error, sqlite3.Error, ValueError) as e:
             logger.error(f"Ошибка сохранения расчёта: {e}")
+            logger.error(traceback.format_exc())
             return False
-
+    
     def load_history(self, limit: int = 1000, filters: Optional[Dict] = None) -> pd.DataFrame:
         if self.conn is None:
             return pd.DataFrame()
@@ -2687,9 +2807,11 @@ class PersistentHistoryDB:
                 if filters.get('end_date'):
                     conditions.append("timestamp <= ?")
                     params.append(filters['end_date'])
+            
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             sql = f"SELECT * FROM calculation_history WHERE {where_clause} ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
+            
             if self.use_duckdb:
                 df = self.conn.execute(sql, params).pl().to_pandas()
             else:
@@ -2698,7 +2820,7 @@ class PersistentHistoryDB:
         except (duckdb.Error, sqlite3.Error) as e:
             logger.error(f"Ошибка загрузки истории: {e}")
             return pd.DataFrame()
-
+    
     def get_stats(self) -> Dict[str, Any]:
         if self.conn is None:
             return {}
@@ -2725,7 +2847,7 @@ class PersistentHistoryDB:
         except (duckdb.Error, sqlite3.Error) as e:
             logger.error(f"Ошибка получения статистики: {e}")
             return {}
-
+    
     def clear_history(self) -> int:
         if self.conn is None:
             return 0
@@ -2737,7 +2859,7 @@ class PersistentHistoryDB:
         except (duckdb.Error, sqlite3.Error) as e:
             logger.error(f"Ошибка очистки истории: {e}")
             return 0
-
+    
     def close(self):
         if self.conn is not None:
             try:
@@ -2745,296 +2867,6 @@ class PersistentHistoryDB:
             except Exception:
                 pass
             self.conn = None
-# ============================================================================
-# 🆕 v100.5: ПРОФЕССИОНАЛЬНЫЙ EXCEL-ЭКСПОРТ
-# ============================================================================
-class ProfessionalExcelExporter:
-    """Профессиональный экспорт юнит-экономики в Excel"""
-    COLORS = {
-        "header_bg": "0F3460",
-        "header_fg": "FFFFFF",
-        "subheader_bg": "E2EFDA",
-        "positive": "C6EFCE",
-        "negative": "FFC7CE",
-        "warning": "FFEB9C",
-        "total_bg": "DCE6F1",
-        "alt_row": "F5F5F5",
-        "border": "B4C6E7",
-    }
-
-    def __init__(self):
-        self.thin_border = Border(
-            left=Side(style='thin', color=self.COLORS["border"]),
-            right=Side(style='thin', color=self.COLORS["border"]),
-            top=Side(style='thin', color=self.COLORS["border"]),
-            bottom=Side(style='thin', color=self.COLORS["border"])
-        )
-
-    def export_unit_economics(self, df: pd.DataFrame,
-                              output_path: str,
-                              metadata: Dict = None) -> bool:
-        """Полноценный отчёт с 6 листами"""
-        try:
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                self._write_dashboard_sheet(writer, df, metadata)
-                self._write_details_sheet(writer, df)
-                self._write_marketplace_comparison(writer, df)
-                self._write_category_analysis(writer, df)
-                self._write_top_bottom_sheet(writer, df)
-                self._write_parameters_sheet(writer, metadata)
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка экспорта: {e}")
-            return False
-
-    def _write_dashboard_sheet(self, writer, df: pd.DataFrame, metadata):
-        """Сводный дашборд с KPI"""
-        ws = writer.book.create_sheet("📊 Дашборд", 0)
-        ws.merge_cells('A1:H1')
-        ws['A1'] = "📊 ОТЧЁТ ПО ЮНИТ-ЭКОНОМИКЕ АВТОЗАПЧАСТЕЙ"
-        ws['A1'].font = Font(size=16, bold=True, color="FFFFFF")
-        ws['A1'].fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
-        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-        ws.row_dimensions[1].height = 35
-        ws['A2'] = f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-        ws['A3'] = f"📦 Товаров: {len(df):,}".replace(",", " ")
-        ws['A4'] = f"💰 Общая прибыль: {df['profit'].sum():,.2f} ₽".replace(",", " ")
-        kpis = [
-            ("Общая прибыль", df['profit'].sum(), "₽", "positive"),
-            ("Средняя маржа", df['margin_percent'].mean(), "%", "neutral"),
-            ("Средний ROI", df['roi'].mean() if 'roi' in df.columns else 0, "%", "neutral"),
-            ("Убыточных SKU", (df['profit'] < 0).sum(), "шт", "negative"),
-        ]
-        row = 6
-        for label, value, unit, style in kpis:
-            ws[f'A{row}'] = label
-            ws[f'A{row}'].font = Font(bold=True)
-            ws[f'B{row}'] = value
-            ws[f'B{row}'].number_format = '#,##0.00' if unit == "₽" else '0.00'
-            ws[f'C{row}'] = unit
-            if style == "positive" and value > 0:
-                ws[f'B{row}'].fill = PatternFill("solid", fgColor=self.COLORS["positive"])
-            elif style == "negative" and value > 0:
-                ws[f'B{row}'].fill = PatternFill("solid", fgColor=self.COLORS["negative"])
-            row += 1
-        if 'marketplace' in df.columns:
-            mp_summary = df.groupby('marketplace')['profit'].sum().reset_index()
-            ws_summary = writer.book.create_sheet("_data_mp")
-            ws_summary.append(["Маркетплейс", "Прибыль"])
-            for _, r in mp_summary.iterrows():
-                ws_summary.append([r['marketplace'], r['profit']])
-            chart = BarChart()
-            chart.title = "Прибыль по маркетплейсам"
-            chart.y_axis.title = "₽"
-            chart.x_axis.title = "Маркетплейс"
-            chart.style = 10
-            data = Reference(ws_summary, min_col=2, min_row=1,
-                             max_row=len(mp_summary) + 1)
-            cats = Reference(ws_summary, min_col=1, min_row=2,
-                             max_row=len(mp_summary) + 1)
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(cats)
-            chart.height = 12
-            chart.width = 20
-            ws.add_chart(chart, "A12")
-
-    def _write_details_sheet(self, writer, df: pd.DataFrame):
-        """Детализация с форматированием"""
-        sheet_name = "📋 Детализация"
-        columns_map = {
-            'Артикул': 'Артикул',
-            'Бренд': 'Бренд',
-            'marketplace': 'Маркетплейс',
-            'price': 'Цена продажи',
-            'cost': 'Себестоимость',
-            'commission': 'Комиссия МП',
-            'logistics': 'Логистика',
-            'storage_cost': 'Хранение',
-            'acquiring': 'Эквайринг',
-            'last_mile': 'Посл. миля',
-            'returns': 'Возвраты',
-            'tax_amount': 'Налог',
-            'total_expenses': 'ИТОГО расходов',
-            'profit': 'Прибыль',
-            'margin_percent': 'Маржа %',
-            'roi': 'ROI %',
-            'breakeven_price': 'Точка безубыт.',
-            'recommended_min_price': 'Мин. цена рек.',
-            'billable_weight': 'Оплач. вес',
-            'advertising_cost': 'Реклама (ДРР)',
-            'auto_parts_specific': 'Спец. расходы',
-        }
-        cols_to_export = [c for c in columns_map if c in df.columns]
-        df_export = df[cols_to_export].rename(columns=columns_map)
-        df_export.to_excel(writer, sheet_name=sheet_name,
-                           index=False, startrow=1)
-        ws = writer.sheets[sheet_name]
-        header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
-        header_font = Font(bold=True, color="FFFFFF", size=10)
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal='center',
-                                       vertical='center',
-                                       wrap_text=True)
-            cell.border = self.thin_border
-        ws.row_dimensions[1].height = 30
-        money_cols = ['Цена продажи', 'Себестоимость', 'Комиссия МП',
-                      'Логистика', 'Хранение', 'ИТОГО расходов',
-                      'Прибыль', 'Точка безубыт.', 'Мин. цена рек.',
-                      'Оплач. вес', 'Реклама (ДРР)', 'Спец. расходы']
-        percent_cols = ['Маржа %', 'ROI %']
-        for col_idx, col_name in enumerate(df_export.columns, 1):
-            col_letter = get_column_letter(col_idx)
-            if col_name in money_cols:
-                for row in range(2, len(df_export) + 2):
-                    ws[f'{col_letter}{row}'].number_format = '#,##0.00 ₽'
-            elif col_name in percent_cols:
-                for row in range(2, len(df_export) + 2):
-                    ws[f'{col_letter}{row}'].number_format = '0.00"%"'
-            max_len = max(
-                len(str(col_name)),
-                df_export[col_name].astype(str).str.len().max() if len(df_export) > 0 else 0
-            )
-            ws.column_dimensions[col_letter].width = min(max_len + 3, 25)
-        if 'Прибыль' in df_export.columns:
-            profit_col_idx = df_export.columns.get_loc('Прибыль') + 1
-            profit_col_letter = get_column_letter(profit_col_idx)
-            data_range = f"{profit_col_letter}2:{profit_col_letter}{len(df_export) + 1}"
-            ws.conditional_formatting.add(data_range,
-                                          CellIsRule(operator='greaterThan', formula=['0'],
-                                                     fill=PatternFill("solid", fgColor=self.COLORS["positive"])))
-            ws.conditional_formatting.add(data_range,
-                                          CellIsRule(operator='lessThan', formula=['0'],
-                                                     fill=PatternFill("solid", fgColor=self.COLORS["negative"])))
-        if 'Маржа %' in df_export.columns:
-            margin_col_idx = df_export.columns.get_loc('Маржа %') + 1
-            margin_letter = get_column_letter(margin_col_idx)
-            margin_range = f"{margin_letter}2:{margin_letter}{len(df_export) + 1}"
-            ws.conditional_formatting.add(margin_range,
-                                          DataBarRule(start_type='min', end_type='max',
-                                                      color="636EFA"))
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
-        total_row = len(df_export) + 3
-        ws[f'A{total_row}'] = "ИТОГО / СРЕДНЕЕ:"
-        ws[f'A{total_row}'].font = Font(bold=True, size=11)
-        ws[f'A{total_row}'].fill = PatternFill("solid", fgColor=self.COLORS["total_bg"])
-        for col_idx, col_name in enumerate(df_export.columns, 1):
-            col_letter = get_column_letter(col_idx)
-            if col_name in money_cols:
-                ws[f'{col_letter}{total_row}'] = f"=SUM({col_letter}2:{col_letter}{len(df_export)+1})"
-                ws[f'{col_letter}{total_row}'].number_format = '#,##0.00 ₽'
-                ws[f'{col_letter}{total_row}'].font = Font(bold=True)
-            elif col_name in percent_cols:
-                ws[f'{col_letter}{total_row}'] = f"=AVERAGE({col_letter}2:{col_letter}{len(df_export)+1})"
-                ws[f'{col_letter}{total_row}'].number_format = '0.00"%"'
-                ws[f'{col_letter}{total_row}'].font = Font(bold=True)
-        ws.print_title_rows = '1:1'
-
-    def _write_marketplace_comparison(self, writer, df: pd.DataFrame):
-        """Сравнительная таблица маркетплейсов"""
-        if 'marketplace' not in df.columns:
-            return
-        agg = df.groupby('marketplace').agg({
-            'profit': ['sum', 'mean', 'count'],
-            'margin_percent': 'mean',
-            'price': 'mean',
-            'commission': 'mean',
-            'logistics': 'mean',
-            'tax_amount': 'mean',
-        }).reset_index()
-        agg.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
-                       'Кол-во SKU', 'Средняя маржа %', 'Средняя цена',
-                       'Средняя комиссия', 'Средняя логистика', 'Средний налог']
-        agg.to_excel(writer, sheet_name="🏪 Сравнение МП",
-                     index=False, startrow=1)
-        ws = writer.sheets["🏪 Сравнение МП"]
-        header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
-        header_font = Font(bold=True, color="FFFFFF", size=10)
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = self.thin_border
-        ws.row_dimensions[1].height = 30
-        ws.freeze_panes = "A2"
-
-    def _write_category_analysis(self, writer, df: pd.DataFrame):
-        """Анализ по категориям"""
-        if 'category' not in df.columns:
-            return
-        agg = df.groupby('category').agg({
-            'profit': ['sum', 'mean'],
-            'margin_percent': 'mean',
-            'price': 'mean',
-        }).reset_index()
-        agg.columns = ['Категория', 'Общая прибыль', 'Средняя прибыль',
-                       'Средняя маржа %', 'Средняя цена']
-        agg.to_excel(writer, sheet_name="📂 Анализ категорий",
-                     index=False, startrow=1)
-        ws = writer.sheets["📂 Анализ категорий"]
-        header_fill = PatternFill("solid", fgColor=self.COLORS["header_bg"])
-        header_font = Font(bold=True, color="FFFFFF", size=10)
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = self.thin_border
-        ws.row_dimensions[1].height = 30
-        ws.freeze_panes = "A2"
-
-    def _write_top_bottom_sheet(self, writer, df: pd.DataFrame):
-        """Топ прибыльных и убыточных товаров"""
-        ws = writer.book.create_sheet("🏆 Топ товары")
-        top_cols = ['Артикул', 'Бренд', 'marketplace', 'profit', 'margin_percent']
-        top_cols = [c for c in top_cols if c in df.columns]
-        top_profit = df.nlargest(20, 'profit')[top_cols]
-        rename_map = {'marketplace': 'Маркетплейс', 'profit': 'Прибыль', 'margin_percent': 'Маржа %'}
-        top_profit = top_profit.rename(columns={k: v for k, v in rename_map.items() if k in top_profit.columns})
-        ws['A1'] = "🏆 ТОП-20 ПРИБЫЛЬНЫХ ТОВАРОВ"
-        ws['A1'].font = Font(bold=True, size=12)
-        ws.merge_cells('A1:E1')
-        top_profit.to_excel(writer, sheet_name="🏆 Топ товары",
-                            index=False, startrow=2)
-        bottom_row = len(top_profit) + 5
-        ws[f'A{bottom_row}'] = "💸 ТОП-20 УБЫТОЧНЫХ ТОВАРОВ"
-        ws[f'A{bottom_row}'].font = Font(bold=True, size=12)
-        ws.merge_cells(f'A{bottom_row}:E{bottom_row}')
-        bottom_profit = df.nsmallest(20, 'profit')[top_cols]
-        bottom_profit = bottom_profit.rename(columns={k: v for k, v in rename_map.items() if k in bottom_profit.columns})
-        bottom_profit.to_excel(writer, sheet_name="🏆 Топ товары",
-                               index=False, startrow=bottom_row + 1)
-        ws = writer.sheets["🏆 Топ товары"]
-        ws.freeze_panes = "A3"
-
-    def _write_parameters_sheet(self, writer, metadata: Dict):
-        """Лист с параметрами расчёта"""
-        ws = writer.book.create_sheet("⚙️ Параметры")
-        ws['A1'] = "ПАРАМЕТРЫ РАСЧЁТА"
-        ws['A1'].font = Font(bold=True, size=14)
-        params = [
-            ("Дата расчёта", datetime.now().strftime('%d.%m.%Y %H:%M')),
-            ("Версия приложения", APP_VERSION),
-            ("Маркетплейсы", ", ".join(metadata.get('marketplaces', []))),
-            ("Режим работы", metadata.get('operation_mode', 'FBS')),
-            ("Дней хранения", metadata.get('days_in_storage', 30)),
-            ("Налоговая система", metadata.get('tax_system', 'УСН_6')),
-            ("Интенсивность рекламы", metadata.get('ad_intensity', 'medium')),
-            ("Курс валют", metadata.get('currency_rate', 1.0)),
-            ("Учтена сезонность", "Да" if metadata.get('seasonal', True) else "Нет"),
-            ("Источник тарифов", metadata.get('tariff_source', 'Захардкожены')),
-            ("Учтён объёмный вес", "Да"),
-            ("Прогрессивное хранение", "Да"),
-            ("Реальные возвраты", "Да"),
-            ("Рекламные расходы", "Да"),
-        ]
-        for idx, (key, value) in enumerate(params, 3):
-            ws[f'A{idx}'] = key
-            ws[f'A{idx}'].font = Font(bold=True)
-            ws[f'B{idx}'] = value
-        ws.column_dimensions['A'].width = 30
-        ws.column_dimensions['B'].width = 50
 # ============================================================================
 # БЛОК 4: КОНФИГУРАЦИИ МАРКЕТПЛЕЙСОВ 2026
 # ============================================================================
