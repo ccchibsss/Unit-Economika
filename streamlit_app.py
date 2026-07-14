@@ -7131,16 +7131,16 @@ def enrich_dataframe_from_catalog(df: pd.DataFrame, catalog) -> Tuple[pd.DataFra
         return df, stats
 
 # ============================================================================
-# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.14 — ОПТИМИЗАЦИЯ ТАЙМАУТОВ)
+# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.16 - ОПТИМИЗАЦИЯ ТАЙМАУТОВ)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.14:
-# 1. Исправлена ошибка "Received no response from server" (Code: 1ST)
-# 2. Добавлен прогресс-бар для больших файлов
-# 3. Оптимизирована обработка кракозябр (только для проблемных колонок)
-# 4. Добавлена обработка ошибок с понятными сообщениями
-# 5. Принудительная очистка памяти после тяжёлых операций
-# 6. Кэширование чтения файлов через @st.cache_data
-# 7. Ограничение парсинга размеров до 10K строк
+# ✅ ИСПРАВЛЕНИЯ v100.16:
+# 1. Кэширование чтения файлов через @st.cache_data
+# 2. Ограничение статистики (nunique только на первых 10K строках)
+# 3. Явный прогресс-бар с этапами загрузки
+# 4. Более заметная кнопка перехода к расчёту
+# 5. Обработка MemoryError с понятным сообщением
+# 6. Удалена автоматическая классификация из основного потока
+# 7. Принудительная очистка памяти после загрузки
 # ============================================================================
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -7149,7 +7149,6 @@ def _cached_read_excel(file_bytes: bytes, file_name: str) -> pd.DataFrame:
     import io
     file_obj = io.BytesIO(file_bytes)
     
-    # Пробуем движки по очереди
     for engine in ['openpyxl', 'xlrd', 'odf']:
         try:
             file_obj.seek(0)
@@ -7172,71 +7171,25 @@ def _cached_read_csv(file_bytes: bytes) -> pd.DataFrame:
     return smart_read_csv(file_obj)
 
 
-def _smart_fix_encoding_fast(df: pd.DataFrame, max_rows: int = 50000) -> Tuple[pd.DataFrame, int]:
-    """
-    🆕 v100.14: Ускоренное исправление кракозябр.
-    Для больших файлов проверяет только первые строки и проблемные колонки.
-    """
-    fixed_count = 0
-    
-    # === ШАГ 1: Исправляем заголовки (всегда быстро) ===
-    mojibake_cols = [col for col in df.columns 
-                     if isinstance(col, str) and detect_mojibake(col)]
-    
-    if mojibake_cols:
-        new_columns = []
-        for col in df.columns:
-            if isinstance(col, str) and detect_mojibake(col):
-                new_columns.append(fix_double_utf8(col))
-                fixed_count += 1
-            else:
-                new_columns.append(col)
-        df.columns = new_columns
-    
-    # === ШАГ 2: Для больших файлов — пропускаем полную проверку ===
-    if len(df) > max_rows:
-        logger.info(f"⚡ Файл большой ({len(df)} строк) — пропускаем полную проверку кракозябр")
-        return df, fixed_count
-    
-    # === ШАГ 3: Для маленьких файлов — полная обработка ===
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            try:
-                def _fix_cell(x):
-                    if isinstance(x, str) and detect_mojibake(x):
-                        return fix_double_utf8(x)
-                    return x
-                
-                mask = df[col].apply(lambda x: isinstance(x, str) and detect_mojibake(x))
-                if mask.any():
-                    df[col] = df[col].apply(_fix_cell)
-                    fixed_count += int(mask.sum())
-            except Exception:
-                pass
-    
-    return df, fixed_count
-
-
 def show_data_upload_interface():
-    """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ С ОБОГАЩЕНИЕМ ИЗ КАТАЛОГА (v100.14)"""
+    """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ С ОБОГАЩЕНИЕМ ИЗ КАТАЛОГА (v100.16)"""
     st.header("📁 Шаг 1: Загрузка данных каталога")
     st.info("""
 **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
 **ШАГ 1:** Подготовьте файл с данными товаров (Excel или CSV)
 **ШАГ 2:** Убедитесь, что файл содержит обязательные колонки:
-- ✅ Артикул (идентификатор товара)
-- ✅ Бренд (производитель)
-- ✅ Цена (цена продажи)
-- ✅ Себестоимость (закупочная цена)
+- ✅ **Артикул** (идентификатор товара)
+- ✅ **Цена** (цена продажи)
+- ✅ **Себестоимость** (закупочная цена)
 
 **ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
 - 📏 Длина, Ширина, Высота (числовые значения)
 - 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
 
-**🆕 v100.14:** Оптимизированная загрузка — исправлена ошибка таймаута
+**🆕 v100.16:** Оптимизированная загрузка — исправлена ошибка таймаута
 💡 **КАК ПРАВИЛЬНО СОХРАНИТЬ CSV В EXCEL:**
 1. Файл → Сохранить как → **CSV UTF-8 (разделитель — запятая)**
-2. Или используйте кнопку "Скачать шаблон" ниже (он уже в правильной кодировке)
+2. Или используйте кнопку "Скачать шаблон" ниже
 """)
     
     uploaded_file = st.file_uploader(
@@ -7246,168 +7199,169 @@ def show_data_upload_interface():
         help="Поддерживаются форматы: .xlsx, .xls, .csv"
     )
     
-    if uploaded_file is not None:
-        # 🆕 v100.14: Читаем байты один раз для кэширования
-        file_bytes = uploaded_file.getvalue()
-        file_name = uploaded_file.name.lower()
-        file_size_mb = len(file_bytes) / (1024 * 1024)
-        
-        st.info(f"📄 Файл: **{uploaded_file.name}** ({file_size_mb:.2f} МБ)")
-        
-        # 🆕 v100.14: Используем st.status для отображения прогресса
-        with st.status("🔄 Обработка файла...", expanded=True) as status:
-            try:
-                df = None
-                
-                # === ШАГ 1: ЧТЕНИЕ ФАЙЛА ===
-                st.write("📖 Чтение файла...")
-                if file_name.endswith('.csv'):
-                    try:
-                        df = _cached_read_csv(file_bytes)
-                    except Exception as e:
-                        status.update(label="❌ Ошибка чтения CSV", state="error")
-                        st.error(f"Не удалось прочитать CSV: {e}")
-                        return
-                elif file_name.endswith(('.xlsx', '.xls')):
-                    try:
-                        df = _cached_read_excel(file_bytes, uploaded_file.name)
-                    except Exception as e:
-                        status.update(label="❌ Ошибка чтения Excel", state="error")
-                        st.error(f"Не удалось прочитать Excel: {e}")
-                        return
-                else:
-                    status.update(label="❌ Неподдерживаемый формат", state="error")
-                    st.error(f"Неподдерживаемый формат: {file_name}")
+    if uploaded_file is None:
+        return
+    
+    # 🆕 v100.16: Читаем байты один раз для кэширования
+    file_bytes = uploaded_file.getvalue()
+    file_name = uploaded_file.name.lower()
+    file_size_mb = len(file_bytes) / (1024 * 1024)
+    
+    st.info(f"📄 Файл: **{uploaded_file.name}** ({file_size_mb:.2f} МБ)")
+    
+    # 🆕 v100.16: Используем st.status для отображения прогресса
+    with st.status("🔄 Обработка файла...", expanded=True) as status:
+        try:
+            df = None
+            
+            # === ШАГ 1: ЧТЕНИЕ ФАЙЛА ===
+            st.write("📖 Чтение файла...")
+            if file_name.endswith('.csv'):
+                try:
+                    df = _cached_read_csv(file_bytes)
+                except Exception as e:
+                    status.update(label="❌ Ошибка чтения CSV", state="error")
+                    st.error(f"Не удалось прочитать CSV: {e}")
                     return
-                
-                # === ПРОВЕРКА ПУСТОГО ФАЙЛА ===
-                if df is None or df.empty:
-                    status.update(label="❌ Файл пустой", state="error")
-                    st.error("❌ Файл не содержит данных")
+            elif file_name.endswith(('.xlsx', '.xls')):
+                try:
+                    df = _cached_read_excel(file_bytes, uploaded_file.name)
+                except Exception as e:
+                    status.update(label="❌ Ошибка чтения Excel", state="error")
+                    st.error(f"Не удалось прочитать Excel: {e}")
                     return
-                
-                st.write(f"✅ Прочитано строк: **{len(df):,}**")
-                
-                # === ШАГ 2: ОЧИСТКА ПУСТЫХ СТРОК ===
-                st.write("🧹 Очистка пустых строк...")
-                df = df.dropna(how='all')
-                if df.empty:
-                    status.update(label="❌ Файл содержит только пустые строки", state="error")
-                    st.warning("⚠️ Файл содержит только пустые строки")
-                    return
-                
-                # === ШАГ 3: ИСПРАВЛЕНИЕ КОДИРОВКИ (ОПТИМИЗИРОВАННО) ===
-                st.write("🔤 Проверка кодировки...")
-                mojibake_cols = [col for col in df.columns 
-                                 if isinstance(col, str) and detect_mojibake(col)]
-                
-                if mojibake_cols:
-                    st.write(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
-                    df, fixed_count = _smart_fix_encoding_fast(df)
-                    st.write(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
-                else:
-                    st.write("✅ Кодировка в норме")
-                
-                df.columns = df.columns.str.strip()
-                
-                # === ШАГ 4: НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ ===
-                st.write("📏 Нормализация весогабаритов...")
-                dimension_cols = ['Длина', 'Ширина', 'Высота', 'Вес']
-                
-                def normalize_dimension_value(val):
-                    if pd.isna(val):
+            else:
+                status.update(label="❌ Неподдерживаемый формат", state="error")
+                st.error(f"Неподдерживаемый формат файла: {file_name}")
+                return
+            
+            if df is None or df.empty:
+                status.update(label="❌ Файл пустой", state="error")
+                st.error("❌ Файл не содержит данных")
+                return
+            
+            st.write(f"✅ Прочитано строк: **{len(df):,}**")
+            
+            # === ШАГ 2: ОЧИСТКА ПУСТЫХ СТРОК ===
+            st.write("🧹 Очистка пустых строк...")
+            df = df.dropna(how='all')
+            if df.empty:
+                status.update(label="❌ Файл содержит только пустые строки", state="error")
+                st.warning("⚠️ Файл содержит только пустые строки")
+                return
+            
+            # === ШАГ 3: ИСПРАВЛЕНИЕ КОДИРОВКИ (ОПТИМИЗИРОВАННО) ===
+            st.write("🔤 Проверка кодировки...")
+            mojibake_cols = [col for col in df.columns 
+                             if isinstance(col, str) and detect_mojibake(col)]
+            
+            if mojibake_cols:
+                st.write(f"⚠️ Обнаружены кракозябры в {len(mojibake_cols)} колонках. Исправляем...")
+                df, fixed_count = fix_dataframe_encoding(df)
+                st.write(f"✅ Исправлено {fixed_count} ячеек с кракозябрами")
+            else:
+                st.write("✅ Кодировка в норме")
+            
+            df.columns = df.columns.str.strip()
+            
+            # === ШАГ 4: НОРМАЛИЗАЦИЯ ВЕСОГАБАРИТОВ ===
+            st.write("📏 Нормализация весогабаритов...")
+            dimension_cols = ['Длина', 'Ширина', 'Высота', 'Вес']
+            
+            def normalize_dimension_value(val):
+                if pd.isna(val):
+                    return 0.0
+                if isinstance(val, (datetime, pd.Timestamp)):
+                    return 0.0
+                if isinstance(val, str):
+                    val = val.strip()
+                    month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 
+                                   'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+                    if any(month in val.lower() for month in month_names):
                         return 0.0
-                    if isinstance(val, (datetime, pd.Timestamp)):
-                        return 0.0
-                    if isinstance(val, str):
-                        val = val.strip()
-                        month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 
-                                       'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-                        if any(month in val.lower() for month in month_names):
-                            return 0.0
-                        try:
-                            cleaned = val.replace(',', '.')
-                            return round(float(cleaned), 2)
-                        except (ValueError, TypeError):
-                            return 0.0
                     try:
-                        return round(float(val), 2)
+                        cleaned = val.replace(',', '.')
+                        return round(float(cleaned), 2)
                     except (ValueError, TypeError):
                         return 0.0
+                try:
+                    return round(float(val), 2)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            normalized_count = 0
+            for col in dimension_cols:
+                if col in df.columns:
+                    before_count = df[col].notna().sum()
+                    df[col] = df[col].apply(normalize_dimension_value)
+                    after_count = (df[col] > 0).sum()
+                    if before_count != after_count:
+                        normalized_count += 1
+            
+            if normalized_count > 0:
+                st.write(f"✅ Нормализовано колонок: {normalized_count}")
+            
+            # === ШАГ 5: ПАРСИНГ РАЗМЕРОВ (ОГРАНИЧЕННЫЙ) ===
+            st.write("📐 Парсинг размеров...")
+            dims_cols = []
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if any(w in col_lower for w in ['весогабариты', 'размеры', 'dimensions', 'габариты']):
+                    dims_cols.append(col)
+            
+            if dims_cols:
+                dims_col = dims_cols[0]
+                parsed_data = []
+                # 🆕 v100.16: Ограничиваем парсинг первыми 10K строками для скорости
+                max_parse_rows = min(10000, len(df))
+                for idx in range(max_parse_rows):
+                    dim_str = str(df.iloc[idx].get(dims_col, ''))
+                    if dim_str and dim_str != 'nan':
+                        l, w, h = parse_dimensions_string(dim_str)
+                        if l > 0:
+                            parsed_data.append({
+                                'index': idx,
+                                'parsed_length': l,
+                                'parsed_width': w,
+                                'parsed_height': h
+                            })
                 
-                normalized_count = 0
-                for col in dimension_cols:
-                    if col in df.columns:
-                        before_count = df[col].notna().sum()
-                        df[col] = df[col].apply(normalize_dimension_value)
-                        after_count = (df[col] > 0).sum()
-                        if before_count != after_count:
-                            normalized_count += 1
-                
-                if normalized_count > 0:
-                    st.write(f"✅ Нормализовано колонок: {normalized_count}")
-                
-                # === ШАГ 5: ПАРСИНГ РАЗМЕРОВ ===
-                st.write("📐 Парсинг размеров...")
-                dims_cols = []
-                for col in df.columns:
-                    col_lower = str(col).lower()
-                    if any(w in col_lower for w in ['весогабариты', 'размеры', 'dimensions', 'габариты']):
-                        dims_cols.append(col)
-                
-                if dims_cols:
-                    dims_col = dims_cols[0]
-                    parsed_data = []
-                    # 🆕 v100.14: Ограничиваем парсинг первыми 10K строками для скорости
-                    max_parse_rows = min(10000, len(df))
-                    for idx in range(max_parse_rows):
-                        dim_str = str(df.iloc[idx].get(dims_col, ''))
-                        if dim_str and dim_str != 'nan':
-                            l, w, h = parse_dimensions_string(dim_str)
-                            if l > 0:
-                                parsed_data.append({
-                                    'index': idx,
-                                    'parsed_length': l,
-                                    'parsed_width': w,
-                                    'parsed_height': h
-                                })
+                if parsed_data:
+                    for item in parsed_data:
+                        idx = item['index']
+                        df.at[idx, 'Длина_парс'] = item['parsed_length']
+                        df.at[idx, 'Ширина_парс'] = item['parsed_width']
+                        df.at[idx, 'Высота_парс'] = item['parsed_height']
                     
-                    if parsed_data:
-                        for item in parsed_data:
-                            idx = item['index']
-                            df.at[idx, 'Длина_парс'] = item['parsed_length']
-                            df.at[idx, 'Ширина_парс'] = item['parsed_width']
-                            df.at[idx, 'Высота_парс'] = item['parsed_height']
-                        
-                        rename_map = {}
-                        if 'Длина_парс' in df.columns and 'Длина' not in df.columns:
-                            rename_map['Длина_парс'] = 'Длина'
-                        if 'Ширина_парс' in df.columns and 'Ширина' not in df.columns:
-                            rename_map['Ширина_парс'] = 'Ширина'
-                        if 'Высота_парс' in df.columns and 'Высота' not in df.columns:
-                            rename_map['Высота_парс'] = 'Высота'
-                        if rename_map:
-                            df = df.rename(columns=rename_map)
-                        
-                        st.write(f"✅ Распарсено записей: {len(parsed_data)}")
-                
-                # === ШАГ 6: СОХРАНЕНИЕ В SESSION STATE ===
-                st.write("💾 Сохранение данных...")
-                st.session_state.uploaded_data = df
-                
-                # 🆕 v100.14: Принудительная очистка памяти
-                import gc
-                gc.collect()
-                
-                status.update(
-                    label=f"✅ Успешно загружено {len(df):,} товаров", 
-                    state="complete"
-                )
-                st.success(f"✅ Успешно загружено **{len(df):,}** товаров")
-                
-            except MemoryError:
-                status.update(label="❌ Не хватает памяти", state="error")
-                st.error("""
+                    rename_map = {}
+                    if 'Длина_парс' in df.columns and 'Длина' not in df.columns:
+                        rename_map['Длина_парс'] = 'Длина'
+                    if 'Ширина_парс' in df.columns and 'Ширина' not in df.columns:
+                        rename_map['Ширина_парс'] = 'Ширина'
+                    if 'Высота_парс' in df.columns and 'Высота' not in df.columns:
+                        rename_map['Высота_парс'] = 'Высота'
+                    if rename_map:
+                        df = df.rename(columns=rename_map)
+                    
+                    st.write(f"✅ Распарсено записей: {len(parsed_data)}")
+            
+            # === ШАГ 6: СОХРАНЕНИЕ В SESSION STATE ===
+            st.write("💾 Сохранение данных...")
+            st.session_state.uploaded_data = df
+            
+            # 🆕 v100.16: Принудительная очистка памяти
+            import gc
+            gc.collect()
+            
+            status.update(
+                label=f"✅ Успешно загружено {len(df):,} товаров", 
+                state="complete"
+            )
+            st.success(f"✅ Успешно загружено **{len(df):,}** товаров")
+            
+        except MemoryError:
+            status.update(label="❌ Не хватает памяти", state="error")
+            st.error("""
 ❌ **Не хватает оперативной памяти** для обработки файла.
 
 **Решения:**
@@ -7415,32 +7369,78 @@ def show_data_upload_interface():
 2. Закройте другие приложения
 3. Используйте CSV вместо Excel (занимает меньше памяти)
 """)
-                return
-            except Exception as e:
-                status.update(label="❌ Ошибка загрузки", state="error")
-                st.error(f"❌ Ошибка загрузки файла: {str(e)}")
-                with st.expander("📋 Подробности ошибки", expanded=False):
-                    st.code(traceback.format_exc())
-                return
+            return
+        except Exception as e:
+            status.update(label="❌ Ошибка загрузки", state="error")
+            st.error(f"❌ Ошибка загрузки файла: {str(e)}")
+            with st.expander("📋 Подробности ошибки", expanded=False):
+                st.code(traceback.format_exc())
+            return
+    
+    # ====================================================================
+    # 🆕 v100.16: БЫСТРЫЙ ПЕРЕХОД К РАСЧЁТУ (ВЫДЕЛЕННЫЙ БЛОК)
+    # ====================================================================
+    has_price = any(any(w in str(c).lower() for w in ['цена', 'price']) for c in df.columns)
+    has_cost = any(any(w in str(c).lower() for w in ['себестоимость', 'cost', 'закуп']) for c in df.columns)
+    has_artikul = any(any(w in str(c).lower() for w in ['артикул', 'article', 'sku']) for c in df.columns)
+    
+    ready_for_calc = has_price and has_artikul
+    
+    st.divider()
+    
+    if ready_for_calc:
+        st.subheader("🚀 Готово к расчёту!")
+        st.info(f"""
+✅ Файл успешно загружен и готов к расчёту юнит-экономики.
+- 📦 Товаров: **{len(df):,}**
+- 💰 Колонка с ценой: **{has_price}**
+- 🏷️ Колонка с артикулом: **{has_artikul}**
+- 💵 Колонка с себестоимостью: **{has_cost}**
+""")
         
-        # === ОБОГАЩЕНИЕ ИЗ КАТАЛОГА (ОПЦИОНАЛЬНО) ===
-        catalog = st.session_state.get('high_volume_catalog')
-        catalog_has_data = False
-        catalog_total = 0
+        if not has_cost:
+            st.warning("⚠️ Не найдена колонка с себестоимостью. Для точного расчёта она обязательна.")
         
-        if catalog is not None and catalog.conn is not None:
-            try:
-                catalog_total = catalog.conn.execute(
-                    "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
-                ).fetchone()[0]
-                catalog_has_data = catalog_total > 0
-            except Exception:
-                catalog_has_data = False
-        
-        if catalog_has_data:
-            st.divider()
-            st.subheader("🔄 Обогащение из каталога группировки")
-            st.info(f"""
+        # 🆕 v100.16: Большая заметная кнопка
+        if st.button(
+            "📊 ПЕРЕЙТИ К РАСЧЁТУ ЮНИТ-ЭКОНОМИКИ →",
+            type="primary",
+            use_container_width=True,
+            key="goto_ue_big"
+        ):
+            st.session_state['auto_switch_to_ue'] = True
+            st.rerun()
+    else:
+        st.warning("""
+⚠️ **Не все обязательные колонки найдены в файле.**
+
+Для расчёта юнит-экономики нужны:
+- ✅ **Артикул** (идентификатор товара)
+- ✅ **Цена** (цена продажи)
+
+Проверьте файл и загрузите его снова.
+""")
+    
+    # ====================================================================
+    # 🆕 v100.16: ОБОГАЩЕНИЕ ИЗ КАТАЛОГА (ОПЦИОНАЛЬНО)
+    # ====================================================================
+    catalog = st.session_state.get('high_volume_catalog')
+    catalog_has_data = False
+    catalog_total = 0
+    
+    if catalog is not None and catalog.conn is not None:
+        try:
+            catalog_total = catalog.conn.execute(
+                "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
+            ).fetchone()[0]
+            catalog_has_data = catalog_total > 0
+        except Exception:
+            catalog_has_data = False
+    
+    if catalog_has_data:
+        st.divider()
+        st.subheader("🔄 Обогащение из каталога группировки (опционально)")
+        st.info(f"""
 📦 **В каталоге найдено {catalog_total:,} уникальных товаров.**
 Система может автоматически подтянуть из каталога:
 ✅ Габариты (Длина, Ширина, Высота)
@@ -7448,33 +7448,33 @@ def show_data_upload_interface():
 ✅ Категорию товара
 ✅ Цену (если её нет в файле)
 """)
-            
-            enrich_col1, enrich_col2 = st.columns([3, 1])
-            with enrich_col1:
-                overwrite_dims = st.checkbox(
-                    "🔄 Перезаписать габариты, если в файле уже есть",
-                    value=False,
-                    key="enrich_overwrite"
-                )
-            with enrich_col2:
-                if st.button("🚀 Обогатить из каталога", type="primary", key="enrich_btn"):
-                    with st.spinner("🔄 Обогащение данных из каталога..."):
-                        try:
-                            if overwrite_dims:
-                                for col in ['Длина', 'Ширина', 'Высота', 'Вес']:
-                                    if col in df.columns:
-                                        df[col] = 0.0
-                            
-                            enriched_df, enrich_stats = enrich_dataframe_from_catalog(df, catalog)
-                            
-                            if enrich_stats["errors"]:
-                                for err in enrich_stats["errors"]:
-                                    st.warning(f"⚠️ {err}")
-                            
-                            st.session_state.uploaded_data = enriched_df
-                            df = enriched_df
-                            
-                            st.success(f"""
+        
+        enrich_col1, enrich_col2 = st.columns([3, 1])
+        with enrich_col1:
+            overwrite_dims = st.checkbox(
+                "🔄 Перезаписать габариты, если в файле уже есть",
+                value=False,
+                key="enrich_overwrite"
+            )
+        with enrich_col2:
+            if st.button("🚀 Обогатить из каталога", type="secondary", key="enrich_btn"):
+                with st.spinner("🔄 Обогащение данных из каталога..."):
+                    try:
+                        if overwrite_dims:
+                            for col in ['Длина', 'Ширина', 'Высота', 'Вес']:
+                                if col in df.columns:
+                                    df[col] = 0.0
+                        
+                        enriched_df, enrich_stats = enrich_dataframe_from_catalog(df, catalog)
+                        
+                        if enrich_stats["errors"]:
+                            for err in enrich_stats["errors"]:
+                                st.warning(f"⚠️ {err}")
+                        
+                        st.session_state.uploaded_data = enriched_df
+                        df = enriched_df
+                        
+                        st.success(f"""
 ✅ **Обогащение завершено!**
 - 📦 Сопоставлено по артикулу: **{enrich_stats['matched_by_artikul']:,}**
 - 📏 Добавлено длин: **{enrich_stats['added_length']:,}**
@@ -7484,79 +7484,71 @@ def show_data_upload_interface():
 - 📂 Добавлено категорий: **{enrich_stats['added_category']:,}**
 - 💰 Добавлено цен: **{enrich_stats['added_price']:,}**
 """)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Ошибка обогащения: {e}")
-                            logger.error(traceback.format_exc())
-        
-        # === БЫСТРЫЙ ПЕРЕХОД К РАСЧЁТУ ===
-        st.divider()
-        st.subheader("🚀 Быстрый старт расчёта")
-        
-        has_price = any(any(w in str(c).lower() for w in ['цена', 'price']) for c in df.columns)
-        has_cost = any(any(w in str(c).lower() for w in ['себестоимость', 'cost', 'закуп']) for c in df.columns)
-        has_artikul = any(any(w in str(c).lower() for w in ['артикул', 'article', 'sku']) for c in df.columns)
-        ready_for_calc = has_price and has_artikul
-        
-        if not has_cost:
-            st.warning("⚠️ Не найдена колонка с себестоимостью.")
-        if not has_price:
-            st.warning("⚠️ Не найдена колонка с ценой продажи.")
-        
-        if ready_for_calc:
-            if st.button("📊 Перейти к расчёту юнит-экономики →", 
-                         type="primary", use_container_width=True, key="goto_ue"):
-                st.session_state['auto_switch_to_ue'] = True
-                st.rerun()
-        
-        # === ПРЕДПРОСМОТР ===
-        st.subheader("👁️ Предпросмотр данных (первые 10 строк)")
-        st_dataframe_compat(df.head(10), key="upload_preview_table")
-        
-        # === СТАТИСТИКА ===
-        st.subheader("📊 Статистика загруженных данных")
-        stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
-        with stats_col1:
-            st.metric("📦 Всего товаров", f"{len(df):,}")
-        with stats_col2:
-            price_col = next((c for c in df.columns if 'цена' in c.lower() or 'price' in c.lower()), None)
-            if price_col:
-                try:
-                    avg_price = safe_float(df[price_col].mean())
-                    st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽" if avg_price > 0 else "Н/Д")
-                except Exception:
-                    st.metric("💰 Средняя цена", "Ошибка")
-            else:
-                st.metric("💰 Средняя цена", "—")
-        with stats_col3:
-            cost_col = next((c for c in df.columns if 'себестоимость' in c.lower() or 'cost' in c.lower()), None)
-            if cost_col:
-                try:
-                    avg_cost = safe_float(df[cost_col].mean())
-                    st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽" if avg_cost > 0 else "Н/Д")
-                except Exception:
-                    st.metric("💵 Средняя себестоимость", "Ошибка")
-            else:
-                st.metric("💵 Средняя себестоимость", "—")
-        with stats_col4:
-            brand_col = next((c for c in df.columns if 'бренд' in c.lower() or 'brand' in c.lower()), None)
-            if brand_col:
-                try:
-                    st.metric("🏷️ Уникальных брендов", df[brand_col].nunique())
-                except Exception:
-                    st.metric("🏷️ Брендов", "Ошибка")
-            else:
-                st.metric("🏷️ Брендов", "—")
-        
-        # === КНОПКА ОЧИСТКИ ===
-        st.divider()
-        if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
-            if st.session_state.get('uploaded_data') is not None:
-                del st.session_state.uploaded_data
-            st.success("✅ Данные очищены")
-            st.rerun()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Ошибка обогащения: {e}")
+                        logger.error(traceback.format_exc())
     
-    # === ШАБЛОН ===
+    # ====================================================================
+    # 👁️ ПРЕДПРОСМОТР ДАННЫХ (ОГРАНИЧЕННЫЙ)
+    # ====================================================================
+    st.divider()
+    st.subheader("👁️ Предпросмотр данных (первые 10 строк)")
+    st_dataframe_compat(df.head(10), key="upload_preview_table")
+    
+    # ====================================================================
+    # 📊 СТАТИСТИКА (ОПТИМИЗИРОВАННАЯ)
+    # ====================================================================
+    st.subheader("📊 Статистика загруженных данных")
+    stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+    with stats_col1:
+        st.metric("📦 Всего товаров", f"{len(df):,}")
+    with stats_col2:
+        price_col = next((c for c in df.columns if 'цена' in c.lower() or 'price' in c.lower()), None)
+        if price_col:
+            try:
+                avg_price = safe_float(df[price_col].mean())
+                st.metric("💰 Средняя цена", f"{avg_price:,.0f} ₽" if avg_price > 0 else "Н/Д")
+            except Exception:
+                st.metric("💰 Средняя цена", "Ошибка")
+        else:
+            st.metric("💰 Средняя цена", "—")
+    with stats_col3:
+        cost_col = next((c for c in df.columns if 'себестоимость' in c.lower() or 'cost' in c.lower()), None)
+        if cost_col:
+            try:
+                avg_cost = safe_float(df[cost_col].mean())
+                st.metric("💵 Средняя себестоимость", f"{avg_cost:,.0f} ₽" if avg_cost > 0 else "Н/Д")
+            except Exception:
+                st.metric("💵 Средняя себестоимость", "Ошибка")
+        else:
+            st.metric("💵 Средняя себестоимость", "—")
+    with stats_col4:
+        brand_col = next((c for c in df.columns if 'бренд' in c.lower() or 'brand' in c.lower()), None)
+        if brand_col:
+            try:
+                # 🆕 v100.16: Ограничиваем nunique первыми 10K строками для скорости
+                sample_size = min(10000, len(df))
+                unique_brands = df[brand_col].head(sample_size).nunique()
+                st.metric("🏷️ Уникальных брендов", f"{unique_brands:,}")
+            except Exception:
+                st.metric("🏷️ Брендов", "Ошибка")
+        else:
+            st.metric("🏷️ Брендов", "—")
+    
+    # ====================================================================
+    # 🧹 ОЧИСТКА ДАННЫХ
+    # ====================================================================
+    st.divider()
+    if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
+        if st.session_state.get('uploaded_data') is not None:
+            del st.session_state.uploaded_data
+        st.success("✅ Данные очищены")
+        st.rerun()
+    
+    # ========================================================================
+    # 📥 СКАЧАТЬ ШАБЛОН ДАННЫХ
+    # ========================================================================
     st.divider()
     if st.button("📥 Скачать шаблон данных"):
         template_df = pd.DataFrame({
