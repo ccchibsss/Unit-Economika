@@ -7029,7 +7029,6 @@ class AdvancedDimensionsValidator:
         }
         
         cat_key = category.lower()
-        
         if cat_key in defaults:
             dims = defaults[cat_key]
         else:
@@ -7041,7 +7040,6 @@ class AdvancedDimensionsValidator:
                 dims = {"l": 20, "w": 20, "h": 20}
         
         scale = max(0.5, min(3.0, weight / 2.0))
-        
         return {
             "length_cm": dims["l"] * scale,
             "width_cm": dims["w"] * scale,
@@ -7084,21 +7082,237 @@ class AdvancedDimensionsValidator:
             "height_cm": round(height, 2),
             "weight_kg": round(weight, 2)
         }
-# ============================================================================
-# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.7 - С НОРМАЛИЗАЦИЕЙ ВЕСОГАБАРИТОВ)
-# ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.7:
-# 1. Добавлена нормализация весогабаритов после чтения файла
-# 2. Исправлена проблема с датами вместо чисел
-# 3. Исправлена проблема с плавающей точностью (16.400000000000002)
-# 4. Округление до 2 знаков после запятой
-# ============================================================================
 
+
+# ============================================================================
+# 🆕 БЛОК 12.5: ОБОГАЩЕНИЕ ДАННЫХ ИЗ КАТАЛОГА ГРУППИРОВКИ
+# ============================================================================
+def enrich_dataframe_from_catalog(df: pd.DataFrame, catalog) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    🆕 v100.13: Обогащает загруженный DataFrame данными из каталога группировки.
+    По артикулу/бренду подтягивает: габариты, вес, категорию, цену, OE, аналоги.
+    """
+    stats = {
+        "total_rows": len(df),
+        "matched_by_artikul": 0,
+        "matched_by_oe": 0,
+        "added_length": 0,
+        "added_width": 0,
+        "added_height": 0,
+        "added_weight": 0,
+        "added_category": 0,
+        "added_price": 0,
+        "errors": []
+    }
+    
+    if catalog is None or catalog.conn is None:
+        stats["errors"].append("Каталог не инициализирован")
+        return df, stats
+    
+    try:
+        # === Определяем колонки артикула и бренда в загруженном df ===
+        artikul_col = None
+        brand_col = None
+        for col in df.columns:
+            cl = str(col).lower().strip()
+            if artikul_col is None and any(w in cl for w in ['артикул', 'article', 'sku', 'код']):
+                artikul_col = col
+            if brand_col is None and any(w in cl for w in ['бренд', 'brand', 'производитель']):
+                brand_col = col
+        
+        if artikul_col is None:
+            stats["errors"].append("Не найдена колонка с артикулом")
+            return df, stats
+        
+        # === Нормализуем артикулы для сопоставления ===
+        df['_art_norm'] = df[artikul_col].astype(str).apply(
+            lambda x: catalog.normalize_single(str(x))
+        )
+        df['_brand_norm'] = df[brand_col].astype(str).apply(
+            lambda x: catalog.normalize_single(str(x))
+        ) if brand_col else ''
+        
+        # === Регистрируем DataFrame во временное представление DuckDB ===
+        temp_view = f"tmp_upload_{int(time.time())}"
+        try:
+            catalog.conn.register(temp_view, df)
+        except Exception as e:
+            stats["errors"].append(f"Не удалось зарегистрировать временную таблицу: {e}")
+            return df, stats
+        
+        # === Основной SQL-запрос обогащения ===
+        enrich_query = f"""
+        WITH src AS (
+            SELECT
+                _art_norm,
+                _brand_norm,
+                *
+            FROM {temp_view}
+        ),
+        parts_match AS (
+            SELECT
+                s._art_norm,
+                s._brand_norm,
+                p.length   AS p_length,
+                p.width    AS p_width,
+                p.height   AS p_height,
+                p.weight   AS p_weight,
+                p.billable_weight AS p_billable_weight,
+                p.dimensions_str  AS p_dimensions_str
+            FROM src s
+            LEFT JOIN parts p
+              ON p.artikul_norm = s._art_norm
+             AND (s._brand_norm = '' OR p.brand_norm = s._brand_norm)
+        ),
+        oe_match AS (
+            SELECT
+                cr.artikul_norm,
+                cr.brand_norm,
+                o.category,
+                o.length   AS o_length,
+                o.width    AS o_width,
+                o.height   AS o_height,
+                o.weight   AS o_weight,
+                o.name     AS oe_name
+            FROM cross_references cr
+            JOIN src s ON s._art_norm = cr.artikul_norm
+                      AND (s._brand_norm = '' OR s._brand_norm = cr.brand_norm)
+            LEFT JOIN oe o ON o.oe_number_norm = cr.oe_number_norm
+        ),
+        price_match AS (
+            SELECT
+                pr.artikul_norm,
+                pr.brand_norm,
+                pr.price AS catalog_price,
+                pr.currency AS catalog_currency
+            FROM prices pr
+            JOIN src s ON s._art_norm = pr.artikul_norm
+                      AND (s._brand_norm = '' OR s._brand_norm = pr.brand_norm)
+        )
+        SELECT
+            s._art_norm,
+            s._brand_norm,
+            pm.p_length, pm.p_width, pm.p_height, pm.p_weight, pm.p_billable_weight, pm.p_dimensions_str,
+            om.category, om.oe_name,
+            prm.catalog_price, prm.catalog_currency
+        FROM src s
+        LEFT JOIN parts_match pm ON pm._art_norm = s._art_norm
+                                AND (s._brand_norm = '' OR pm._brand_norm = s._brand_norm)
+        LEFT JOIN oe_match om    ON om.artikul_norm = s._art_norm
+                                AND (s._brand_norm = '' OR om.brand_norm = s._brand_norm)
+        LEFT JOIN price_match prm ON prm.artikul_norm = s._art_norm
+                                 AND (s._brand_norm = '' OR prm.brand_norm = s._brand_norm)
+        """
+        
+        try:
+            enriched_pdf = catalog.conn.execute(enrich_query).fetchdf()
+        except Exception as e:
+            stats["errors"].append(f"Ошибка SQL-обогащения: {e}")
+            catalog.conn.unregister(temp_view)
+            return df, stats
+        
+        catalog.conn.unregister(temp_view)
+        
+        if enriched_pdf.empty:
+            stats["errors"].append("SQL-запрос не вернул данных")
+            return df, stats
+        
+        # === Слияние обратно в исходный df ===
+        enriched_pdf['_idx'] = enriched_pdf.index
+        df = df.reset_index(drop=True)
+        df['_idx'] = df.index
+        
+        df = df.merge(
+            enriched_pdf[['_idx', 'p_length', 'p_width', 'p_height', 'p_weight',
+                          'p_billable_weight', 'p_dimensions_str', 'category',
+                          'oe_name', 'catalog_price', 'catalog_currency']],
+            on='_idx', how='left'
+        )
+        
+        # === Применяем обогащение к колонкам ===
+        mapping = [
+            ('p_length',   'Длина'),
+            ('p_width',    'Ширина'),
+            ('p_height',   'Высота'),
+            ('p_weight',   'Вес'),
+        ]
+        for src_col, target_col in mapping:
+            if src_col not in df.columns:
+                continue
+            if target_col not in df.columns:
+                df[target_col] = df[src_col]
+                stats[f"added_{target_col.lower()}"] = int(df[src_col].notna().sum())
+            else:
+                # Заполняем только пустые ячейки
+                mask = df[target_col].isna() | (pd.to_numeric(df[target_col], errors='coerce') == 0)
+                filled = mask.sum()
+                df.loc[mask, target_col] = df.loc[mask, src_col]
+                stats[f"added_{target_col.lower()}"] = int(filled)
+        
+        # === Категория ===
+        if 'category' in df.columns:
+            if 'Категория' not in df.columns:
+                df['Категория'] = df['category']
+            else:
+                mask = df['Категория'].isna() | (df['Категория'].astype(str).str.strip() == '')
+                df.loc[mask, 'Категория'] = df.loc[mask, 'category']
+            stats["added_category"] = int(df['category'].notna().sum())
+        
+        # === Цена из каталога (если в файле нет цены) ===
+        if 'catalog_price' in df.columns:
+            price_col = None
+            for col in df.columns:
+                if any(w in str(col).lower() for w in ['цена', 'price', 'стоимость']):
+                    price_col = col
+                    break
+            if price_col is None:
+                df['Цена'] = df['catalog_price']
+                stats["added_price"] = int(df['catalog_price'].notna().sum())
+            else:
+                mask = df[price_col].isna() | (pd.to_numeric(df[price_col], errors='coerce') == 0)
+                df.loc[mask, price_col] = df.loc[mask, 'catalog_price']
+                stats["added_price"] = int(mask.sum())
+        
+        # === OE и аналоги — добавляем как информационные колонки ===
+        if 'oe_name' in df.columns and df['oe_name'].notna().any():
+            df['OE из каталога'] = df['oe_name']
+        
+        # === Оплачиваемый вес ===
+        if 'p_billable_weight' in df.columns and df['p_billable_weight'].notna().any():
+            if 'Оплач. вес' not in df.columns:
+                df['Оплач. вес'] = df['p_billable_weight']
+        
+        stats["matched_by_artikul"] = int(df['p_length'].notna().sum())
+        
+        # === Удаляем служебные колонки ===
+        drop_cols = ['_art_norm', '_brand_norm', '_idx',
+                     'p_length', 'p_width', 'p_height', 'p_weight',
+                     'p_billable_weight', 'p_dimensions_str',
+                     'category', 'oe_name', 'catalog_price', 'catalog_currency']
+        df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
+        
+        return df, stats
+    
+    except Exception as e:
+        stats["errors"].append(f"Критическая ошибка обогащения: {e}")
+        logger.error(f"Ошибка обогащения: {traceback.format_exc()}")
+        return df, stats
+
+
+# ============================================================================
+# 🆕 БЛОК 13: UI ФУНКЦИИ - ЗАГРУЗКА ДАННЫХ (v100.13 + ОБОГАЩЕНИЕ ИЗ КАТАЛОГА)
+# ============================================================================
+# ✅ ИСПРАВЛЕНИЯ v100.13:
+# 1. Добавлена функция обогащения данных из каталога группировки
+# 2. Автоматическое подтягивание габаритов, веса, категории, цены из каталога
+# 3. Кнопка быстрого перехода к расчёту юнит-экономики
+# 4. Детальная статистика обогащения
+# ============================================================================
 def show_data_upload_interface():
-    """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ"""
+    """📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ С ОБОГАЩЕНИЕМ ИЗ КАТАЛОГА"""
     st.header("📁 Шаг 1: Загрузка данных каталога")
     st.info("""
- **ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
+**ИНСТРУКЦИЯ ПО ЗАГРУЗКЕ:**
 **ШАГ 1:** Подготовьте файл с данными товаров (Excel или CSV)
 **ШАГ 2:** Убедитесь, что файл содержит обязательные колонки:
 - ✅ Артикул (идентификатор товара)
@@ -7108,7 +7322,8 @@ def show_data_upload_interface():
 **ДОПОЛНИТЕЛЬНО:** Система автоматически распознает размеры из колонок:
 - 📏 Длина, Ширина, Высота (числовые значения)
 - 📏 Весогабариты (строки вида "20x15x10" или "20*15*10")
-**🆕 v100.7:** Автоматическая нормализация весогабаритов (исправление дат и плавающей точности)
+**🆕 v100.7:** Автоматическая нормализация весогабаритов (исправление дат и плавающей точки)
+**🆕 v100.13:** Обогащение данных из каталога группировки (габариты, вес, категория, цена)
 **ШАГ 3:** Нажмите кнопку ниже и выберите файл
 **ШАГ 4:** Дождитесь успешной загрузки
 💡 **КАК ПРАВИЛЬНО СОХРАНИТЬ CSV В EXCEL:**
@@ -7134,7 +7349,6 @@ def show_data_upload_interface():
                 except Exception as e:
                     logger.error(f"Ошибка умного чтения CSV: {e}")
                     raise ValueError(f"Не удалось прочитать CSV файл: {e}")
-            
             elif file_name.endswith(('.xlsx', '.xls')):
                 excel_engines = ['openpyxl', 'xlrd']
                 for engine in excel_engines:
@@ -7187,56 +7401,44 @@ def show_data_upload_interface():
             # ====================================================================
             st.subheader("🔧 Нормализация весогабаритов")
             
-            # Колонки для нормализации
             dimension_cols = ['Длина', 'Ширина', 'Высота', 'Вес']
             
-            # Функция для нормализации числовых значений
             def normalize_dimension_value(val):
                 """Нормализует значение весогабарита"""
                 if pd.isna(val):
                     return 0.0
                 
-                # Если это дата (datetime)
                 if isinstance(val, (datetime, pd.Timestamp)):
                     logger.warning(f"Обнаружена дата вместо числа: {val}")
                     return 0.0
                 
-                # Если это строка
                 if isinstance(val, str):
                     val = val.strip()
-                    # Проверяем, не дата ли это (содержит буквы месяцев)
                     month_names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-                                  'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+                                   'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
                     if any(month in val.lower() for month in month_names):
                         logger.warning(f"Обнаружена дата в строке: {val}")
                         return 0.0
                     
-                    # Пробуем преобразовать строку в число
                     try:
-                        # Заменяем запятую на точку
                         cleaned = val.replace(',', '.')
                         return round(float(cleaned), 2)
                     except (ValueError, TypeError):
                         logger.warning(f"Не удалось преобразовать строку в число: {val}")
                         return 0.0
                 
-                # Если это число
                 try:
                     num = float(val)
-                    # Округляем до 2 знаков после запятой
                     return round(num, 2)
                 except (ValueError, TypeError):
                     return 0.0
             
-            # Применяем нормализацию к колонкам весогабаритов
             normalized_count = 0
             for col in dimension_cols:
                 if col in df.columns:
-                    # Считаем количество исправленных значений
                     before_count = df[col].notna().sum()
                     df[col] = df[col].apply(normalize_dimension_value)
                     after_count = (df[col] > 0).sum()
-                    
                     if before_count != after_count:
                         normalized_count += 1
                         logger.info(f"Нормализована колонка {col}: {before_count} → {after_count} значений")
@@ -7244,17 +7446,16 @@ def show_data_upload_interface():
             if normalized_count > 0:
                 st.success(f"✅ Нормализовано колонок: {normalized_count}")
                 st.info("📋 Все значения округлены до 2 знаков после запятой")
-                
-                # Показываем пример нормализованных данных
-                st.write("Пример нормализованных данных:")
-                available_cols = [col for col in dimension_cols if col in df.columns]
-                if available_cols:
-                    st_dataframe_compat(df[available_cols].head(10))
+            
+            st.write("Пример нормализованных данных:")
+            available_cols = [col for col in dimension_cols if col in df.columns]
+            if available_cols:
+                st_dataframe_compat(df[available_cols].head(10))
             
             # ====================================================================
             # 📏 Автоматический парсинг размеров
             # ====================================================================
-            st.subheader(" Автоматический парсинг размеров")
+            st.subheader("📏 Автоматический парсинг размеров")
             dims_cols = []
             for col in df.columns:
                 col_lower = str(col).lower()
@@ -7279,7 +7480,6 @@ def show_data_upload_interface():
                 
                 if parsed_data:
                     parsed_df = pd.DataFrame(parsed_data)
-                    
                     for i, row in parsed_df.iterrows():
                         idx = row['index']
                         if row['parsed_length'] > 0:
@@ -7313,9 +7513,106 @@ def show_data_upload_interface():
                     if sample_data:
                         st_dataframe_compat(pd.DataFrame(sample_data))
             
-            # Сохраняем в session_state
+            # ====================================================================
+            # 💾 Сохраняем в session_state
+            # ====================================================================
             st.session_state.uploaded_data = df
             st.success(f"✅ Успешно загружено {len(df)} товаров")
+            
+            # ====================================================================
+            # 🆕 v100.13: ОБОГАЩЕНИЕ ИЗ КАТАЛОГА ГРУППИРОВКИ
+            # ====================================================================
+            catalog = st.session_state.get('high_volume_catalog')
+            catalog_has_data = False
+            catalog_total = 0
+            
+            if catalog is not None and catalog.conn is not None:
+                try:
+                    catalog_total = catalog.conn.execute(
+                        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
+                    ).fetchone()[0]
+                    catalog_has_data = catalog_total > 0
+                except Exception:
+                    catalog_has_data = False
+            
+            if catalog_has_data:
+                st.divider()
+                st.subheader("🔄 Обогащение из каталога группировки")
+                st.info(f"""
+                📦 **В каталоге найдено {catalog_total:,} уникальных товаров.**
+                Система может автоматически подтянуть из каталога:
+                ✅ Габариты (Длина, Ширина, Высота)
+                ✅ Вес и оплачиваемый вес
+                ✅ Категорию товара
+                ✅ Цену (если её нет в файле)
+                ✅ OE-номера и названия
+                """)
+                
+                enrich_col1, enrich_col2 = st.columns([3, 1])
+                with enrich_col1:
+                    overwrite_dims = st.checkbox(
+                        "🔄 Перезаписать габариты, если в файле уже есть",
+                        value=False,
+                        key="enrich_overwrite"
+                    )
+                with enrich_col2:
+                    if st.button("🚀 Обогатить из каталога", type="primary", key="enrich_btn"):
+                        with st.spinner("🔄 Обогащение данных из каталога..."):
+                            try:
+                                if overwrite_dims:
+                                    for col in ['Длина', 'Ширина', 'Высота', 'Вес']:
+                                        if col in df.columns:
+                                            df[col] = 0.0
+                                
+                                enriched_df, enrich_stats = enrich_dataframe_from_catalog(df, catalog)
+                                
+                                if enrich_stats["errors"]:
+                                    for err in enrich_stats["errors"]:
+                                        st.warning(f"⚠️ {err}")
+                                
+                                st.session_state.uploaded_data = enriched_df
+                                df = enriched_df
+                                
+                                st.success(f"""
+                                ✅ **Обогащение завершено!**
+                                - 📦 Сопоставлено по артикулу: **{enrich_stats['matched_by_artikul']:,}**
+                                - 📏 Добавлено длин: **{enrich_stats['added_length']:,}**
+                                - 📏 Добавлено ширин: **{enrich_stats['added_width']:,}**
+                                - 📏 Добавлено высот: **{enrich_stats['added_height']:,}**
+                                - ⚖️ Добавлено весов: **{enrich_stats['added_weight']:,}**
+                                - 📂 Добавлено категорий: **{enrich_stats['added_category']:,}**
+                                - 💰 Добавлено цен: **{enrich_stats['added_price']:,}**
+                                """)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Ошибка обогащения: {e}")
+                                logger.error(traceback.format_exc())
+            
+            # ====================================================================
+            # 🆕 БЫСТРЫЙ ПЕРЕХОД К РАСЧЁТУ ЮНИТ-ЭКОНОМИКИ
+            # ====================================================================
+            st.divider()
+            st.subheader("🚀 Быстрый старт расчёта")
+            st.info("""
+            💡 Данные загружены и готовы к расчёту.
+            Перейдите в раздел **«📊 Юнит-экономика»** → **«📦 Весь каталог (из файла)»**
+            для расчёта юнит-экономики по всем товарам.
+            """)
+            
+            has_price = any(any(w in str(c).lower() for w in ['цена', 'price']) for c in df.columns)
+            has_cost = any(any(w in str(c).lower() for w in ['себестоимость', 'cost', 'закуп']) for c in df.columns)
+            has_artikul = any(any(w in str(c).lower() for w in ['артикул', 'article', 'sku']) for c in df.columns)
+            
+            ready_for_calc = has_price and has_artikul
+            if not has_cost:
+                st.warning("⚠️ Не найдена колонка с себестоимостью. Для расчёта юнит-экономики она обязательна.")
+            if not has_price:
+                st.warning("⚠️ Не найдена колонка с ценой продажи.")
+            
+            if ready_for_calc:
+                if st.button("📊 Перейти к расчёту юнит-экономики →", type="primary", use_container_width=True, key="goto_ue"):
+                    st.session_state['auto_switch_to_ue'] = True
+                    st.rerun()
             
             # ====================================================================
             # 👁️ Предпросмотр данных
@@ -7346,7 +7643,7 @@ def show_data_upload_interface():
                     except Exception:
                         st.metric("💰 Средняя цена", "Ошибка")
                 else:
-                    st.metric(" Средняя цена", "—")
+                    st.metric("💰 Средняя цена", "—")
             
             with stats_col3:
                 cost_col = None
@@ -7378,12 +7675,12 @@ def show_data_upload_interface():
                     except Exception:
                         st.metric("🏷️ Брендов", "Ошибка")
                 else:
-                    st.metric("️ Брендов", "—")
+                    st.metric("🏷️ Брендов", "—")
             
             # ====================================================================
             # 🔧 Доступные действия
             # ====================================================================
-            st.subheader(" Доступные действия")
+            st.subheader("🔧 Доступные действия")
             action_col1, action_col2, action_col3 = st.columns(3)
             
             with action_col1:
@@ -7402,22 +7699,22 @@ def show_data_upload_interface():
                             st.session_state.uploaded_data = df
                             st.success("✅ Классификация завершена!")
                             
-                            st.subheader(" Распределение по категориям")
+                            st.subheader("📊 Распределение по категориям")
                             category_counts = df['Категория'].value_counts()
                             st_dataframe_compat(category_counts, key="category_counts")
                         else:
                             st.warning("⚠️ Не найдена колонка с названием товара")
             
             with action_col2:
-                if st.button(" Обогатить каталог", type="primary", key="upload_enrich_button"):
+                if st.button("🔗 Обогатить каталог", type="primary", key="upload_enrich_button"):
                     st.info("ℹ️ Перейдите в раздел '🔍 Обогащение каталога' для поиска аналогов")
             
             with action_col3:
                 if st.button("🧹 Очистить данные", type="secondary", key="clear_data_btn"):
                     if st.session_state.get('uploaded_data') is not None:
                         del st.session_state.uploaded_data
-                        st.success("✅ Данные очищены")
-                        st.rerun()
+                    st.success("✅ Данные очищены")
+                    st.rerun()
         
         except Exception as e:
             st.error(f"❌ Ошибка загрузки файла: {str(e)}")
@@ -7446,13 +7743,12 @@ def show_data_upload_interface():
         import codecs
         output = io.BytesIO()
         output.write(codecs.BOM_UTF8)
-        
         csv_string = template_df.to_csv(index=False, sep=';')
         output.write(csv_string.encode('utf-8'))
         output.seek(0)
         
         st.download_button(
-            label=" Скачать шаблон CSV (Excel-совместимый)",
+            label="📥 Скачать шаблон CSV (Excel-совместимый)",
             data=output,
             file_name="шаблон_каталога.csv",
             mime="text/csv; charset=utf-8",
@@ -11535,7 +11831,12 @@ def show_settings_interface():
         st.json(settings)
 
 # ============================================================================
-# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ v100.5.2 + AI ТАРИФЫ)
+# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.13 + АВТО-ПЕРЕКЛЮЧЕНИЕ ПОСЛЕ ОБОГАЩЕНИЯ)
+# ============================================================================
+# ✅ ИСПРАВЛЕНИЯ v100.13:
+# 1. Добавлено авто-переключение на раздел "📊 Юнит-экономика" после обогащения
+# 2. Сохранены все существующие разделы навигации
+# 3. Корректная работа с session_state
 # ============================================================================
 def main():
     """Главная функция приложения"""
@@ -11547,8 +11848,22 @@ def main():
     )
     st.title(APP_NAME)
     st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-
+    
+    # ====================================================================
+    # 🆕 v100.13: АВТО-ПЕРЕКЛЮЧЕНИЕ НА РАЗДЕЛ ЮНИТ-ЭКОНОМИКИ
+    # ====================================================================
+    # Если пользователь нажал кнопку "📊 Перейти к расчёту юнит-экономики"
+    # в разделе загрузки данных — автоматически переключаемся туда
+    if st.session_state.get('auto_switch_to_ue'):
+        st.session_state['auto_switch_to_ue'] = False
+        st.session_state['main_navigation'] = "📊 Юнит-экономика"
+        st.rerun()
+    
+    # ====================================================================
+    # 🧭 НАВИГАЦИЯ
+    # ====================================================================
     st.sidebar.title("🧭 Навигация")
+    
     section = st.sidebar.radio(
         "Выберите раздел:",
         [
@@ -11564,26 +11879,48 @@ def main():
         ],
         key="main_navigation",
     )
-
+    
+    # ====================================================================
+    # 🎯 МАРШРУТИЗАЦИЯ РАЗДЕЛОВ
+    # ====================================================================
     if section == "📁 Загрузка данных":
         show_data_upload_interface()
+    
     elif section == "📊 Юнит-экономика":
         show_unit_economics_interface()
+    
     elif section == "🗂️ Каталог для группировки":
         show_catalog_grouping_interface()
+    
     elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
+    
     elif section == "🤖 AI Тарифы":
         show_ai_tariffs_interface()
+    
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
+    
     elif section == "🧠 Умная загрузка тарифов":
         show_smart_tariff_interface()
+    
     elif section == "📚 История расчётов":
         show_history_interface()
+    
     elif section == "⚙️ Настройки":
         show_settings_interface()
+    
+    # ====================================================================
+    # 📊 ФУТЕР С ИНФОРМАЦИЕЙ О ВЕРСИИ
+    # ====================================================================
+    st.sidebar.divider()
+    st.sidebar.caption(f"🚗 {APP_NAME} v{APP_VERSION}")
+    st.sidebar.caption(f"📅 {datetime.now().strftime('%d.%m.%Y')}")
+    st.sidebar.caption(f"© {APP_COPYRIGHT}")
 
+
+# ============================================================================
 # ✅ ТОЧКА ВХОДА
+# ============================================================================
 if __name__ == "__main__":
     main()
