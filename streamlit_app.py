@@ -9529,8 +9529,8 @@ class DeepSeekRateUpdater:
             try:
                 from openai import OpenAI
                 client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com/v1")
-                
-                prompt = f"""Ты эксперт по юнит-экономике маркетплейсов. 
+
+                prompt = f"""Ты эксперт по юнит-экономике маркетплейсов.
                 Маркетплейс: {marketplace}. Категория: {category or 'Общая'}.
                 Верни ТОЛЬКО валидный JSON с актуальными или наиболее вероятными тарифами:
                 {{
@@ -9549,12 +9549,12 @@ class DeepSeekRateUpdater:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
                 )
-                
+
                 import json
                 content = response.choices[0].message.content
                 content = content.replace("```json", "").replace("```", "").strip()
                 rates = json.loads(content)
-                
+
                 forecast = None
                 if include_forecast:
                     forecast = {
@@ -9562,7 +9562,7 @@ class DeepSeekRateUpdater:
                         "month_2": {"commission_rate": round(rates.get("commission_rate", 0.15) * 1.04, 4), "trend": "stable_up", "confidence": 0.70},
                         "month_3": {"commission_rate": round(rates.get("commission_rate", 0.15) * 1.06, 4), "trend": "stable_up", "confidence": 0.65},
                     }
-                
+
                 self.logger.info(f"✅ Тарифы для {marketplace} получены через DeepSeek API")
                 return rates, TariffSource.AI_LIVE, forecast
 
@@ -9586,7 +9586,7 @@ class DeepSeekRateUpdater:
             config = configs.get(marketplace)
             if not config:
                 return None
-            
+
             base_rate = config.category_rates.get(category, config.commission_rate) if category else config.commission_rate
             forecast = {}
             for i in range(1, months_ahead + 1):
@@ -9619,16 +9619,20 @@ class DeepSeekRateUpdater:
         except Exception as e:
             self.logger.error(f"Ошибка update_all_marketplaces: {e}")
         return results
-
 # ============================================================================
-# 🆕 БЛОК 19: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА
+# 🆕 БЛОК 19 (ОБЪЕДИНЁННЫЙ): SmartTariffLoader + AI UI + API UI
 # ============================================================================
 # 🆕 v100.10: УМНЫЙ ВЫБОР ИСТОЧНИКА ТАРИФОВ
 # ✅ API маркетплейса (прямое подключение)
 # ✅ AI анализ документации (автоматический парсинг)
 # ✅ Загруженные ранее тарифы (кэш)
 # ✅ Гибридный режим (комбинация источников)
-# 🆕 v100.12: ПОДДЕРЖКА ЯНДЕКС МАРКЕТ API (OAuth + campaign_id)
+# ✅ UI для AI тарифов с вводом API ключа DeepSeek
+# ✅ Информационный раздел API Тарифов маркетплейсов
+# ============================================================================
+
+# ============================================================================
+# ЧАСТЬ 1: КЛАСС SmartTariffLoader
 # ============================================================================
 class SmartTariffLoader:
     """
@@ -9724,7 +9728,7 @@ class SmartTariffLoader:
                 else:
                     result["errors"].append("Не удалось получить данные из API WB")
 
-            # === ЯНДЕКС МАРКЕТ (🆕 v100.12) ===
+            # === ЯНДЕКС МАРКЕТ ===
             elif marketplace == "Яндекс Маркет" and oauth_token:
                 result = self._load_yandex_market_api(
                     oauth_token, campaign_id, result
@@ -9755,10 +9759,10 @@ class SmartTariffLoader:
                                  campaign_id: Optional[int],
                                  result: Dict) -> Dict:
         """
-        🆕 v100.12: Загрузка тарифов Яндекс Маркет через Partner API.
+        Загрузка тарифов Яндекс Маркет через Partner API.
         Логика:
         1. Если campaign_id НЕ задан — получаем список кампаний автоматически
-        2. Берём первую кампанию (или все, если их несколько)
+        2. Берём первую активную кампанию
         3. Получаем тарифы доставки для этой кампании
         4. Нормализуем в единый формат тарифов
         """
@@ -9790,7 +9794,6 @@ class SmartTariffLoader:
             # Шаг 2: Выбираем кампанию
             target_campaign = None
             if campaign_id:
-                # Ищем указанную кампанию
                 for c in campaigns:
                     if c.get('id') == campaign_id:
                         target_campaign = c
@@ -9802,7 +9805,6 @@ class SmartTariffLoader:
                     )
                     return result
             else:
-                # Берём первую активную кампанию
                 for c in campaigns:
                     if c.get('state') == 'ACTIVE':
                         target_campaign = c
@@ -9850,10 +9852,9 @@ class SmartTariffLoader:
     def _normalize_yandex_tariffs(self, raw_data: Dict,
                                    campaign_id: int) -> Dict[str, Any]:
         """
-        🆕 v100.12: Нормализация сырых данных Яндекс Маркет API
+        Нормализация сырых данных Яндекс Маркет API
         в единый формат тарифов, совместимый с MarketplaceConfig.
         """
-        # Базовые значения из конфигурации (fallback)
         configs = get_marketplace_configs_2026()
         default_config = configs.get("Яндекс Маркет")
 
@@ -9872,10 +9873,8 @@ class SmartTariffLoader:
         }
 
         # Пытаемся извлечь реальные значения из сырых данных API
-        # Формат ответа: {"deliveries": [{"type": "DELIVERY", "fee": ...}, ...]}
         deliveries = raw_data.get('deliveries', [])
         if deliveries:
-            # Берём базовую стоимость доставки
             for d in deliveries:
                 fee = d.get('fee')
                 if fee is not None:
@@ -9885,13 +9884,11 @@ class SmartTariffLoader:
                     except (ValueError, TypeError):
                         pass
 
-        # Если есть информация о комиссиях
         commission_info = raw_data.get('commission', {})
         if commission_info:
             rate = commission_info.get('rate') or commission_info.get('percent')
             if rate is not None:
                 try:
-                    # API может возвращать процент как 15 (означает 15%)
                     rate_float = float(rate)
                     if rate_float > 1:
                         rate_float = rate_float / 100.0
@@ -10003,16 +10000,12 @@ class SmartTariffLoader:
     def get_available_sources(self, marketplace: str) -> List[str]:
         """Получить список доступных источников для маркетплейса"""
         sources = []
-        # Проверяем API — теперь поддерживаем Ozon, WB и Яндекс Маркет
         if marketplace in ["Ozon", "Wildberries", "Яндекс Маркет"]:
             sources.append("api")
-        # AI всегда доступен (если есть ключ)
         if self.ai_updater.api_key:
             sources.append("ai")
-        # Кэш доступен если есть данные
         if self.tariff_cache.get(marketplace, None, use_expired=False):
             sources.append("cache")
-        # Гибридный доступен всегда
         sources.append("hybrid")
         return sources
 
@@ -10051,23 +10044,177 @@ class SmartTariffLoader:
                     "Предупреждения": result["errors"][0][:50] if result["errors"] else ""
                 })
         return pd.DataFrame(results)
+
+
 # ============================================================================
-# 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ v100.12)
+# ЧАСТЬ 2: UI ДЛЯ AI ТАРИФОВ (бывший Блок 19.5)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.11:
-# 1. Улучшена обработка ошибок инициализации
-# 2. Корректная обработка тарифов из прямого API
-# 3. Добавлены проверки доступности методов
-# 🆕 v100.12:
-# 4. Добавлена поддержка Яндекс Маркет API (OAuth токен + campaign_id)
-# 5. Автоматический выбор первой активной кампании, если campaign_id не задан
-# 6. Отображение найденных кампаний в UI
+def show_ai_tariffs_interface():
+    """🤖 Интерфейс получения тарифов через DeepSeek AI с вводом API ключа"""
+    st.header("🤖 AI Тарифы (DeepSeek)")
+    st.info("""
+    📋 **Как это работает:**
+    1. Введите ваш API-ключ DeepSeek (получить можно на platform.deepseek.com)
+    2. Ключ сохраняется только в рамках текущей сессии браузера (безопасно)
+    3. AI анализирует актуальные правила маркетплейсов и возвращает точные тарифы
+    4. Тарифы автоматически интегрируются в расчеты и Excel с живыми формулами
+    """)
+
+    # 1. Ввод API ключа
+    st.subheader("🔑 Настройка API")
+    api_key = st.text_input(
+        "DeepSeek API Key",
+        type="password",
+        value=st.session_state.get("deepseek_api_key", ""),
+        placeholder="sk-...",
+        help="Ключ сохраняется только в session_state и не отправляется на сторонние серверы, кроме API DeepSeek"
+    )
+
+    if api_key:
+        st.session_state["deepseek_api_key"] = api_key
+        st.success("✅ API ключ сохранен в сессии")
+    else:
+        st.warning("⚠️ Без API ключа будет использован режим заглушки (базовые тарифы 2026)")
+
+    st.divider()
+
+    # 2. Выбор маркетплейса и запрос
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        unit_economics = get_marketplace_unit_economics()
+        marketplace = st.selectbox(
+            "🏪 Выберите маркетплейс",
+            list(unit_economics._configs.keys()),
+            key="ai_tariff_mp"
+        )
+        category = st.text_input("📂 Категория (опционально, для уточнения комиссии)", key="ai_tariff_cat")
+
+    with col2:
+        include_forecast = st.checkbox("📈 Добавить прогноз", value=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        fetch_btn = st.button("🚀 Получить тарифы через AI", type="primary", use_container_width=True)
+
+    if fetch_btn:
+        with st.spinner("🤖 DeepSeek анализирует тарифы... (может занять 5-10 сек)"):
+            updater = DeepSeekRateUpdater(api_key=st.session_state.get("deepseek_api_key", ""))
+            rates, source, forecast = updater.get_rates_from_ai(
+                marketplace=marketplace,
+                category=category if category else None,
+                force_refresh=True,
+                include_forecast=include_forecast
+            )
+
+            if rates:
+                st.success(f"✅ Тарифы успешно получены! Источник: {source.value}")
+
+                st.subheader("📊 Извлеченные тарифы")
+                st.json(rates)
+
+                if forecast:
+                    with st.expander("📈 Прогноз на 3 месяца"):
+                        st.json(forecast)
+
+                st.divider()
+                st.subheader("💾 Интеграция в расчеты")
+                st.info("При нажатии этой кнопки тарифы обновятся в памяти приложения и будут использованы во всех последующих расчетах и экспорте в Excel с живыми формулами.")
+
+                if st.button("✅ Применить эти тарифы к расчетам", type="secondary", use_container_width=True):
+                    try:
+                        unit_economics._apply_ai_tariffs(marketplace, rates)
+                        st.success(f"🎉 Тарифы для {marketplace} успешно обновлены!")
+                        st.info("Теперь при экспорте в Excel (📊 Расчет) будут использованы эти актуальные значения через формулы VLOOKUP.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Ошибка применения: {e}")
+            else:
+                st.error("❌ Не удалось получить тарифы. Проверьте API ключ или попробуйте позже.")
+
+
+# ============================================================================
+# ЧАСТЬ 3: UI ДЛЯ API ТАРИФОВ МАРКЕТПЛЕЙСОВ (бывший Блок 19.6)
+# ============================================================================
+def show_api_tariffs_interface():
+    """🌐 API Тарифы маркетплейсов - информационный раздел"""
+    st.header("🌐 API Тарифы маркетплейсов")
+    st.info("""
+    🚧 **Раздел в разработке**
+    Прямое подключение к API маркетплейсов интегрировано в блок '🧠 Умная загрузка тарифов'.
+    **Используйте раздел '🧠 Умная загрузка тарифов' для:**
+    - ✅ Получения тарифов через API Ozon/Wildberries
+    - ✅ AI-анализа документации через DeepSeek
+    - ✅ Гибридного режима (API + AI)
+    - ✅ Работы с кэшированными тарифами
+    """)
+    st.markdown("""
+    ### 📋 Доступные API:
+
+    **Ozon Seller API:**
+    - `https://api-seller.ozon.ru/v1/finance/tariff-rates` — Тарифы
+    - `https://api-seller.ozon.ru/v2/products/info/stocks` — Остатки
+
+    **Wildberries API:**
+    - `https://common-api.wildberries.ru/tariffs/box` — Тарифы коробов
+    - `https://statistics-api.wildberries.ru/api/v1/supplier/reportDetailByPeriod` — Отчёты
+
+    **Яндекс Маркет API:**
+    - `https://api.partner.market.yandex.ru/v2/campaigns` — Кампании
+    - `https://api.partner.market.yandex.ru/v2/campaigns/{id}/deliveries/fees` — Тарифы
+    """)
+
+    st.divider()
+
+    st.subheader("🔑 Как использовать API")
+    st.markdown("""
+    **1. Получите API-ключ маркетплейса:**
+    - **Ozon:** Личный кабинет → API Keys → Создать ключ
+    - **Wildberries:** Личный кабинет → Настройки → Доступ к API
+    - **Яндекс Маркет:** OAuth-токен через партнёрский кабинет
+
+    **2. Перейдите в раздел '🧠 Умная загрузка тарифов'**
+
+    **3. Выберите источник '🔌 API Маркетплейса' или '🔄 Гибридный'**
+
+    **4. Введите API-ключ и Client ID (для Ozon)**
+
+    **5. Нажмите '🚀 Загрузить тарифы'**
+    """)
+
+    st.divider()
+
+    st.subheader("🤖 Альтернатива: AI-тарифы")
+    st.info("""
+    Если у вас нет API-ключа или вы хотите получить **прогнозируемые тарифы на основе документации**,
+    используйте раздел **'🤖 AI Тарифы'**:
+
+    1. Введите API-ключ DeepSeek (получить на platform.deepseek.com)
+    2. AI проанализирует актуальные правила маркетплейсов
+    3. Вернёт точные тарифы с прогнозом на 3 месяца
+    4. Тарифы автоматически интегрируются в Excel с живыми формулами
+    """)
+
+    if st.button("🤖 Перейти к AI Тарифам", type="primary", use_container_width=True):
+        st.info("💡 Выберите раздел '🤖 AI Тарифы' в левом меню навигации")
+
+    st.divider()
+
+    st.subheader("📊 Статус API маркетплейсов")
+    status_data = {
+        "Маркетплейс": ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"],
+        "API доступен": ["✅ Да", "✅ Да", "✅ Да", "⚠️ Ограниченно", "⚠️ Ограниченно", "⚠️ Ограниченно"],
+        "Тарифы через API": ["✅ Да", "✅ Да", "✅ Да", "❌ Нет", "❌ Нет", "❌ Нет"],
+        "AI-тарифы": ["✅ Да", "✅ Да", "✅ Да", "✅ Да", "✅ Да", "✅ Да"],
+        "Рекомендация": ["API + AI", "API + AI", "API + AI", "Только AI", "Только AI", "Только AI"]
+    }
+    st_dataframe_compat(pd.DataFrame(status_data))
+
+    st.warning("⚠️ Для работы с API используйте раздел '🧠 Умная загрузка тарифов'")
+# ============================================================================
+# 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (v100.12 - С ЯНДЕКС МАРКЕТ)
 # ============================================================================
 def show_smart_tariff_interface():
     """
     🧠 ИНТЕРФЕЙС УМНОЙ ЗАГРУЗКИ ТАРИФОВ
-    ✅ ИСПРАВЛЕНО: Корректная обработка тарифов из прямого API
-    🆕 v100.12: Поддержка Яндекс Маркет API с OAuth токеном и campaign_id
+    ✅ v100.12: Поддержка Яндекс Маркет API с OAuth токеном и campaign_id
     """
     st.header("🧠 Умная загрузка тарифов")
     st.info("""
@@ -10077,10 +10224,10 @@ def show_smart_tariff_interface():
     💾 **Загруженные ранее** — использование кэшированных тарифов
     🔄 **Гибридный** — AI + API (рекомендуемый)
     💡 **Рекомендация:** Используйте гибридный режим для максимальной надёжности
-    
+
     🆕 **v100.12:** Поддерживаются API Ozon, Wildberries и **Яндекс Маркет** (OAuth + campaign_id)
     """)
-    
+
     # ✅ Инициализация с обработкой ошибок
     try:
         tariff_loader = SmartTariffLoader()
@@ -10089,7 +10236,7 @@ def show_smart_tariff_interface():
         st.error(f"❌ Ошибка инициализации SmartTariffLoader: {e}")
         tariff_loader = None
         return
-    
+
     try:
         unit_economics = get_marketplace_unit_economics()
         if unit_economics is None:
@@ -10098,7 +10245,7 @@ def show_smart_tariff_interface():
     except Exception as e:
         st.error(f"❌ Ошибка инициализации UnitEconomics: {e}")
         return
-    
+
     col1, col2 = st.columns([2, 1])
     with col1:
         marketplace = st.selectbox(
@@ -10118,7 +10265,7 @@ def show_smart_tariff_interface():
             format_func=lambda x: SmartTariffLoader.SOURCES.get(x, x) if hasattr(SmartTariffLoader, 'SOURCES') else x,
             key="smart_tariff_source"
         )
-    
+
     # ✅ Показываем доступные источники
     if tariff_loader and hasattr(tariff_loader, 'get_available_sources'):
         try:
@@ -10129,17 +10276,17 @@ def show_smart_tariff_interface():
             st.warning(f"⚠️ Ошибка получения доступных источников: {e}")
     else:
         st.info("ℹ️ Доступны все источники")
-    
+
     # ✅ API ключи (если выбран API режим)
     # 🆕 v100.12: Разделение полей по маркетплейсам
     oauth_token = None
     campaign_id = None
     api_key = None
     client_id = None
-    
+
     if source in ["api", "hybrid"]:
         st.subheader("🔑 API ключи")
-        
+
         # === OZON / WILDBERRIES ===
         if marketplace in ["Ozon", "Wildberries"]:
             col1, col2 = st.columns(2)
@@ -10162,8 +10309,8 @@ def show_smart_tariff_interface():
                     )
                 else:
                     st.info("ℹ️ Для Wildberries нужен только API Key")
-        
-        # === ЯНДЕКС МАРКЕТ (🆕 v100.12) ===
+
+        # === ЯНДЕКС МАРКЕТ ===
         elif marketplace == "Яндекс Маркет":
             st.info("""
             🔵 **Яндекс Маркет Partner API**
@@ -10193,10 +10340,10 @@ def show_smart_tariff_interface():
                 except ValueError:
                     st.warning("⚠️ Campaign ID должен быть числом. Будет использована первая кампания.")
                     campaign_id = None
-        
+
         else:
             st.warning(f"⚠️ Прямое API для {marketplace} не поддерживается. Используйте AI или кэш.")
-    
+
     # ✅ Кнопка сравнения источников
     if st.button("📊 Сравнить источники", key="smart_tariff_compare"):
         if tariff_loader and hasattr(tariff_loader, 'compare_sources'):
@@ -10215,13 +10362,13 @@ def show_smart_tariff_interface():
                     st.error(f"❌ Ошибка сравнения: {e}")
         else:
             st.warning("⚠️ Метод compare_sources не найден")
-    
+
     # ✅ Кнопка загрузки
     if st.button("🚀 Загрузить тарифы", type="primary", key="smart_tariff_load"):
         if not tariff_loader or not hasattr(tariff_loader, 'load_tariffs'):
             st.error("❌ Метод load_tariffs не найден")
             return
-        
+
         with st.spinner(f"Загрузка тарифов из источника: {SmartTariffLoader.SOURCES.get(source, source) if hasattr(SmartTariffLoader, 'SOURCES') else source}..."):
             try:
                 result = tariff_loader.load_tariffs(
@@ -10233,55 +10380,49 @@ def show_smart_tariff_interface():
                     campaign_id=campaign_id,
                     force_refresh=True
                 )
-                
+
                 if not isinstance(result, dict):
                     st.error("❌ Неверный формат результата")
                     return
-                
+
                 if result.get("errors"):
                     st.error(f"❌ Ошибки загрузки:")
                     for err in result["errors"]:
                         st.error(f"  - {err}")
-                
+
                 if result.get("warnings"):
                     st.info(f"ℹ️ Информация:")
                     for warn in result["warnings"]:
                         st.info(f"  - {warn}")
-                
+
                 # 🆕 v100.12: Показываем найденные кампании Яндекс Маркет
                 if result.get("campaigns_found"):
                     with st.expander("🔍 Найденные кампании Яндекс Маркет", expanded=False):
                         campaigns_df = pd.DataFrame(result["campaigns_found"])
                         st_dataframe_compat(campaigns_df)
-                
+
                 if result.get("data"):
                     st.success(f"✅ Тарифы успешно загружены из источника: {result.get('source_used', 'Неизвестно')}")
                     confidence = result.get('confidence', 0)
                     st.info(f"🎯 Доверие к данным: {confidence*100:.0f}%")
-                    
-                    # Показываем загруженные тарифы
+
                     with st.expander("📋 Загруженные тарифы", expanded=True):
                         if isinstance(result["data"], dict):
                             st.json(result["data"])
                         else:
                             st.write(result["data"])
-                    
-                    # ✅ ИСПРАВЛЕНИЕ: Применяем тарифы с учётом структуры данных
+
                     if st.button("💾 Применить тарифы к расчётам", key="smart_tariff_apply"):
                         rates_to_apply = None
-                        
-                        # ✅ ИСПРАВЛЕНИЕ: Проверяем разные структуры данных
+
                         if "rates" in result["data"]:
-                            # Структура от AI или Яндекс Маркет API
                             rates_to_apply = result["data"]["rates"]
                         elif "raw_data" in result["data"]:
-                            # Структура от прямого API
                             st.warning("⚠️ Прямой API вернул сырые данные. Применяем базовые тарифы.")
                             rates_to_apply = result["data"].get("raw_data", {})
                         elif isinstance(result["data"], dict) and any(k in result["data"] for k in ["commission_rate", "logistics_base"]):
-                            # Прямая структура тарифов
                             rates_to_apply = result["data"]
-                        
+
                         if rates_to_apply and unit_economics and hasattr(unit_economics, '_apply_ai_tariffs'):
                             try:
                                 unit_economics._apply_ai_tariffs(marketplace, rates_to_apply)
@@ -10296,7 +10437,7 @@ def show_smart_tariff_interface():
             except Exception as e:
                 st.error(f"❌ Ошибка загрузки: {e}")
                 logger.exception("Ошибка в load_tariffs")
-    
+
     # ✅ Отображение текущих тарифов
     st.subheader("📊 Текущие тарифы")
     if unit_economics and hasattr(unit_economics, '_configs'):
@@ -11396,11 +11537,6 @@ def show_settings_interface():
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ v100.5.2 + AI ТАРИФЫ)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.5.2:
-# 1. Добавлен эмодзи 🧠 к "Умная загрузка тарифов"
-# 2. Добавлены новые разделы: "📚 История расчётов" и "⚙️ Настройки"
-# 3. ✅ ИСПРАВЛЕНИЕ NAMEERROR: Корректный вызов show_ai_tariffs_interface()
-# ============================================================================
 def main():
     """Главная функция приложения"""
     st.set_page_config(
@@ -11411,7 +11547,7 @@ def main():
     )
     st.title(APP_NAME)
     st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-    
+
     st.sidebar.title("🧭 Навигация")
     section = st.sidebar.radio(
         "Выберите раздел:",
@@ -11428,7 +11564,7 @@ def main():
         ],
         key="main_navigation",
     )
-    
+
     if section == "📁 Загрузка данных":
         show_data_upload_interface()
     elif section == "📊 Юнит-экономика":
@@ -11438,7 +11574,7 @@ def main():
     elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
     elif section == "🤖 AI Тарифы":
-        show_ai_tariffs_interface()  # ✅ ТЕПЕРЬ ЭТА ФУНКЦИЯ ОПРЕДЕЛЕНА (БЛОК 19.5)
+        show_ai_tariffs_interface()
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
     elif section == "🧠 Умная загрузка тарифов":
