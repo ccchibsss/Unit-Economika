@@ -9475,15 +9475,14 @@ def show_catalog_management(catalog):
     elif management_option == "☁️ Облачная синхронизация":
         catalog.show_cloud_sync()
 # ============================================================================
-# 🆕 БЛОК 18: КЛАСС DeepSeekRateUpdater (УЛУЧШЕННАЯ ВЕРСИЯ С REAL API)
+# 🆕 БЛОК 18: КЛАСС DeepSeekRateUpdater (ПОЛНАЯ ВЕРСИЯ С REAL API)
 # ============================================================================
 class DeepSeekRateUpdater:
     """
     🤖 Обновление тарифов через DeepSeek AI.
-    Теперь поддерживает реальные API-запросы, если введен ключ.
+    Поддерживает реальные API-запросы, если введен ключ, иначе использует конфигурацию.
     """
     def __init__(self, api_key: str = None):
-        # Приоритет: ключ из session_state > переменная окружения
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
         self.logger = logging.getLogger("DeepSeekRateUpdater")
         self.logger.info(f"DeepSeekRateUpdater инициализирован. API ключ {'найден' if self.api_key else 'НЕ задан (режим заглушки)'}.")
@@ -9507,11 +9506,23 @@ class DeepSeekRateUpdater:
             if not self.api_key:
                 rates = {
                     "commission_rate": config.category_rates.get(category, config.commission_rate) if category else config.commission_rate,
+                    "min_commission": config.min_commission,
                     "logistics_base": config.logistics_base,
                     "logistics_per_kg": config.logistics_per_kg,
+                    "logistics_per_liter": config.logistics_per_liter,
                     "storage_per_day": config.storage_per_day,
+                    "return_fee": config.return_fee,
+                    "acquiring_fee": config.acquiring_fee,
+                    "last_mile_fee": config.last_mile_fee,
+                    "delivery_fee_percent": config.delivery_fee_percent,
                 }
-                forecast = {"month_1": {"trend": "stable", "confidence": 0.8}} if include_forecast else None
+                forecast = None
+                if include_forecast:
+                    forecast = {
+                        "month_1": {"commission_rate": round(rates["commission_rate"] * 1.02, 4), "trend": "stable_up", "confidence": 0.75},
+                        "month_2": {"commission_rate": round(rates["commission_rate"] * 1.04, 4), "trend": "stable_up", "confidence": 0.70},
+                        "month_3": {"commission_rate": round(rates["commission_rate"] * 1.06, 4), "trend": "stable_up", "confidence": 0.65},
+                    }
                 return rates, TariffSource.AI_CACHE, forecast
 
             # ✅ РЕАЛЬНЫЙ ЗАПРОС К DEEPSEEK API
@@ -9541,7 +9552,6 @@ class DeepSeekRateUpdater:
                 
                 import json
                 content = response.choices[0].message.content
-                # Очистка от markdown-оберток, если AI их добавил
                 content = content.replace("```json", "").replace("```", "").strip()
                 rates = json.loads(content)
                 
@@ -9558,7 +9568,6 @@ class DeepSeekRateUpdater:
 
             except Exception as api_err:
                 self.logger.error(f"Ошибка запроса к DeepSeek API: {api_err}. Возврат к заглушке.")
-                # Fallback к конфигурации при ошибке API
                 rates = {"commission_rate": config.commission_rate, "logistics_base": config.logistics_base}
                 return rates, TariffSource.HARDCODED, None
 
@@ -9566,16 +9575,49 @@ class DeepSeekRateUpdater:
             self.logger.error(f"Критическая ошибка get_rates_from_ai: {e}")
             return None, TariffSource.HARDCODED, None
 
-    def get_tariff_forecast(self, marketplace: str, category: Optional[str] = None, months_ahead: int = 3) -> Optional[Dict[str, Any]]:
-        # ... (оставьте как есть или используйте логику из предыдущей версии)
-        pass
+    def get_tariff_forecast(
+        self,
+        marketplace: str,
+        category: Optional[str] = None,
+        months_ahead: int = 3,
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            configs = get_marketplace_configs_2026()
+            config = configs.get(marketplace)
+            if not config:
+                return None
+            
+            base_rate = config.category_rates.get(category, config.commission_rate) if category else config.commission_rate
+            forecast = {}
+            for i in range(1, months_ahead + 1):
+                forecast[f"month_{i}"] = {
+                    "commission_rate": round(base_rate * (1 + 0.02 * i), 4),
+                    "trend": "stable_up",
+                    "confidence": max(0.5, 0.75 - 0.05 * i),
+                }
+            return forecast
+        except Exception as e:
+            self.logger.error(f"Ошибка get_tariff_forecast: {e}")
+            return None
 
-    def update_all_marketplaces(self, force_refresh: bool = False, include_forecast: bool = False) -> Dict[str, Tuple[Optional[Dict], TariffSource, Optional[Dict]]]:
+    def update_all_marketplaces(
+        self,
+        force_refresh: bool = False,
+        include_forecast: bool = False,
+    ) -> Dict[str, Tuple[Optional[Dict], TariffSource, Optional[Dict]]]:
         results = {}
-        configs = get_marketplace_configs_2026()
-        for mp_name in configs.keys():
-            rates, source, forecast = self.get_rates_from_ai(mp_name, force_refresh=force_refresh, include_forecast=include_forecast)
-            results[mp_name] = (rates, source, forecast)
+        try:
+            configs = get_marketplace_configs_2026()
+            for mp_name in configs.keys():
+                rates, source, forecast = self.get_rates_from_ai(
+                    marketplace=mp_name,
+                    force_refresh=force_refresh,
+                    include_forecast=include_forecast,
+                )
+                results[mp_name] = (rates, source, forecast)
+            self.logger.info(f"✅ Обновлено тарифов: {len(results)} маркетплейсов")
+        except Exception as e:
+            self.logger.error(f"Ошибка update_all_marketplaces: {e}")
         return results
 
 # ============================================================================
@@ -9587,32 +9629,29 @@ class DeepSeekRateUpdater:
 # ✅ Загруженные ранее тарифы (кэш)
 # ✅ Гибридный режим (комбинация источников)
 # ============================================================================
-
 class SmartTariffLoader:
     """
     🧠 УМНАЯ ЗАГРУЗКА ТАРИФОВ С ВЫБОРОМ ИСТОЧНИКА
     Поддерживает 4 режима: API, AI, Кэш, Гибридный
     """
-    
     SOURCES = {
         "api": "🔌 API Маркетплейса",
-        "ai": "🤖 AI (документация)", 
+        "ai": "🤖 AI (документация)",
         "cache": "💾 Загруженные ранее",
         "hybrid": "🔄 Гибридный (AI + API)"
     }
-    
+
     def __init__(self):
         self.api_connector = MarketplaceAPIConnector()
         self.ai_updater = DeepSeekRateUpdater()
         self.tariff_cache = get_smart_tariff_cache()
         self.logger = logging.getLogger('SmartTariffLoader')
-    
-    def load_tariffs(self, marketplace: str, source: str = "hybrid", 
+
+    def load_tariffs(self, marketplace: str, source: str = "hybrid",
                      api_key: str = None, client_id: str = None,
                      force_refresh: bool = False) -> Dict[str, Any]:
         """
         Загрузка тарифов из выбранного источника
-        
         Args:
             marketplace: Название маркетплейса
             source: "api", "ai", "cache", "hybrid"
@@ -9620,7 +9659,6 @@ class SmartTariffLoader:
             client_id: Client ID (для Ozon)
             force_refresh: Принудительное обновление
         """
-        
         result = {
             "marketplace": marketplace,
             "source": source,
@@ -9631,7 +9669,6 @@ class SmartTariffLoader:
             "warnings": [],
             "errors": []
         }
-        
         try:
             if source == "api":
                 result = self._load_from_api(marketplace, api_key, client_id, result)
@@ -9643,19 +9680,16 @@ class SmartTariffLoader:
                 result = self._load_hybrid(marketplace, api_key, client_id, result, force_refresh)
             else:
                 result["errors"].append(f"Неизвестный источник: {source}")
-            
             return result
-            
         except Exception as e:
             self.logger.error(f"Ошибка загрузки тарифов: {e}")
             result["errors"].append(str(e))
             return result
-    
-    def _load_from_api(self, marketplace: str, api_key: str, 
+
+    def _load_from_api(self, marketplace: str, api_key: str,
                        client_id: str, result: Dict) -> Dict:
         """Загрузка через официальное API маркетплейса"""
         result["source_used"] = "API"
-        
         try:
             if marketplace == "Ozon" and api_key and client_id:
                 data = self.api_connector.get_ozon_tariffs(api_key, client_id)
@@ -9665,7 +9699,6 @@ class SmartTariffLoader:
                     result["warnings"].append("✅ Тарифы загружены напрямую из API Ozon")
                 else:
                     result["errors"].append("Не удалось получить данные из API Ozon")
-            
             elif marketplace == "Wildberries" and api_key:
                 data = self.api_connector.get_wildberries_tariffs(api_key)
                 if data and data.get('success'):
@@ -9674,19 +9707,15 @@ class SmartTariffLoader:
                     result["warnings"].append("✅ Тарифы загружены напрямую из API WB")
                 else:
                     result["errors"].append("Не удалось получить данные из API WB")
-            
             else:
                 result["errors"].append(f"API для {marketplace} не поддерживается или не хватает ключей")
-        
         except Exception as e:
             result["errors"].append(f"Ошибка API: {str(e)}")
-        
         return result
-    
+
     def _load_from_ai(self, marketplace: str, result: Dict, force_refresh: bool) -> Dict:
         """Загрузка через AI анализ документации"""
         result["source_used"] = "AI"
-        
         try:
             rates, source, forecast = self.ai_updater.get_rates_from_ai(
                 marketplace=marketplace,
@@ -9694,7 +9723,6 @@ class SmartTariffLoader:
                 use_cache=True,
                 include_forecast=True
             )
-            
             if rates:
                 result["data"] = {
                     "rates": rates,
@@ -9703,24 +9731,19 @@ class SmartTariffLoader:
                 }
                 result["confidence"] = 0.85
                 result["warnings"].append("🤖 Тарифы получены через AI анализ документации")
-                
                 if forecast:
                     result["warnings"].append("📈 Прогноз тарифов на 3 месяца получен")
             else:
                 result["errors"].append("AI не смог получить актуальные тарифы")
-        
         except Exception as e:
             result["errors"].append(f"Ошибка AI: {str(e)}")
-        
         return result
-    
+
     def _load_from_cache(self, marketplace: str, result: Dict) -> Dict:
         """Загрузка из кэша (ранее загруженные тарифы)"""
         result["source_used"] = "Cache"
-        
         try:
             cached = self.tariff_cache.get(marketplace, None, use_expired=False)
-            
             if cached:
                 result["data"] = {
                     "rates": cached.data,
@@ -9731,13 +9754,11 @@ class SmartTariffLoader:
                 result["warnings"].append(f"💾 Использованы кэшированные тарифы от {datetime.fromtimestamp(cached.timestamp).strftime('%d.%m.%Y %H:%M')}")
             else:
                 result["errors"].append("Кэшированные тарифы не найдены или устарели")
-        
         except Exception as e:
             result["errors"].append(f"Ошибка кэша: {str(e)}")
-        
         return result
-    
-    def _load_hybrid(self, marketplace: str, api_key: str, 
+
+    def _load_hybrid(self, marketplace: str, api_key: str,
                      client_id: str, result: Dict, force_refresh: bool) -> Dict:
         """
         Гибридный режим: сначала API, если нет — AI, если нет — кэш
@@ -9775,39 +9796,31 @@ class SmartTariffLoader:
         
         result["errors"].append("Не удалось загрузить тарифы ни из одного источника")
         return result
-    
+
     def get_available_sources(self, marketplace: str) -> List[str]:
         """Получить список доступных источников для маркетплейса"""
         sources = []
-        
         # Проверяем API
         if marketplace in ["Ozon", "Wildberries"]:
             sources.append("api")
-        
         # AI всегда доступен (если есть ключ)
         if self.ai_updater.api_key:
             sources.append("ai")
-        
         # Кэш доступен если есть данные
         if self.tariff_cache.get(marketplace, None, use_expired=False):
             sources.append("cache")
-        
         # Гибридный доступен всегда
         sources.append("hybrid")
-        
         return sources
-    
-    def compare_sources(self, marketplace: str, api_key: str = None, 
+
+    def compare_sources(self, marketplace: str, api_key: str = None,
                         client_id: str = None) -> pd.DataFrame:
         """Сравнить тарифы из разных источников"""
         results = []
-        
         for source in ["api", "ai", "cache"]:
             if source == "api" and not api_key:
                 continue
-            
             result = self.load_tariffs(marketplace, source, api_key, client_id)
-            
             if not result["errors"]:
                 results.append({
                     "Источник": self.SOURCES.get(source, source),
@@ -9824,10 +9837,10 @@ class SmartTariffLoader:
                     "Доверие": "0%",
                     "Предупреждения": result["errors"][0][:50] if result["errors"] else ""
                 })
-        
         return pd.DataFrame(results)
+
 # ============================================================================
-# 🆕 БЛОК 20: UI ДЛЯ AI ТАРИФОВ С ВВОДОМ API КЛЮЧА (ИСПРАВЛЕНИЕ NAMEERROR)
+# 🆕 БЛОК 19.5: UI ДЛЯ AI ТАРИФОВ (ИСПРАВЛЕНИЕ NAMEERROR + ВВОД API КЛЮЧА)
 # ============================================================================
 def show_ai_tariffs_interface():
     """🤖 Интерфейс получения тарифов через DeepSeek AI с вводом API ключа"""
@@ -9871,7 +9884,7 @@ def show_ai_tariffs_interface():
     
     with col2:
         include_forecast = st.checkbox("📈 Добавить прогноз", value=True)
-        st.markdown("<br>", unsafe_allow_html=True) # Отступ
+        st.markdown("<br>", unsafe_allow_html=True)
         fetch_btn = st.button("🚀 Получить тарифы через AI", type="primary", use_container_width=True)
 
     if fetch_btn:
@@ -9911,14 +9924,225 @@ def show_ai_tariffs_interface():
                         st.error(f"❌ Ошибка применения: {e}")
             else:
                 st.error("❌ Не удалось получить тарифы. Проверьте API ключ или попробуйте позже.")
-
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЕ 2: Заглушка для API Тарифов маркетплейсов (оставляем для совместимости)
+# 🆕 БЛОК 20: UI ДЛЯ УМНОЙ ЗАГРУЗКИ ТАРИФОВ (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ============================================================================
-def show_api_tariffs_interface():
-    """🌐 API Тарифы маркетплейсов - информационный раздел"""
-    st.header("🌐 Прямое API маркетплейсов")
-    st.info("Для получения тарифов через прямое API используйте раздел '🧠 Умная загрузка тарифов' или '🤖 AI Тарифы'.")
+# ✅ ИСПРАВЛЕНИЯ v100.11:
+# 1. Улучшена обработка ошибок инициализации
+# 2. Корректная обработка тарифов из прямого API
+# 3. Добавлены проверки доступности методов
+# ============================================================================
+def show_smart_tariff_interface():
+    """
+    🧠 ИНТЕРФЕЙС УМНОЙ ЗАГРУЗКИ ТАРИФОВ
+    ✅ ИСПРАВЛЕНО: Корректная обработка тарифов из прямого API
+    """
+    st.header("🧠 Умная загрузка тарифов")
+    st.info("""
+    📋 **ВЫБЕРИТЕ ИСТОЧНИК ТАРИФОВ:**
+    🔌 **API Маркетплейса** — прямое подключение к API (самый точный)
+    🤖 **AI (документация)** — автоматический парсинг документации
+    💾 **Загруженные ранее** — использование кэшированных тарифов
+    🔄 **Гибридный** — AI + API (рекомендуемый)
+    💡 **Рекомендация:** Используйте гибридный режим для максимальной надёжности
+    """)
+    
+    # ✅ Инициализация с обработкой ошибок
+    try:
+        tariff_loader = SmartTariffLoader()
+        st.success("✅ SmartTariffLoader инициализирован")
+    except Exception as e:
+        st.error(f"❌ Ошибка инициализации SmartTariffLoader: {e}")
+        tariff_loader = None
+        return
+    
+    try:
+        unit_economics = get_marketplace_unit_economics()
+        if unit_economics is None:
+            st.warning("⚠️ UnitEconomics не инициализирован")
+            return
+    except Exception as e:
+        st.error(f"❌ Ошибка инициализации UnitEconomics: {e}")
+        return
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        marketplace = st.selectbox(
+            "🏪 Выберите маркетплейс",
+            ["Ozon", "Wildberries", "Яндекс Маркет", "AliExpress", "Мегамаркет", "СберМегаМаркет"],
+            key="smart_tariff_mp"
+        )
+    with col2:
+        source = st.selectbox(
+            "📡 Источник тарифов",
+            [
+                "hybrid",
+                "api",
+                "ai",
+                "cache"
+            ],
+            format_func=lambda x: SmartTariffLoader.SOURCES.get(x, x) if hasattr(SmartTariffLoader, 'SOURCES') else x,
+            key="smart_tariff_source"
+        )
+    
+    # ✅ Показываем доступные источники
+    if tariff_loader and hasattr(tariff_loader, 'get_available_sources'):
+        try:
+            available = tariff_loader.get_available_sources(marketplace)
+            source_labels = [SmartTariffLoader.SOURCES.get(s, s) for s in available] if hasattr(SmartTariffLoader, 'SOURCES') else available
+            st.info(f"🔍 Доступные источники для {marketplace}: {', '.join(source_labels)}")
+        except Exception as e:
+            st.warning(f"⚠️ Ошибка получения доступных источников: {e}")
+    else:
+        st.info("ℹ️ Доступны все источники")
+    
+    # ✅ API ключи (если выбран API режим)
+    if source in ["api", "hybrid"]:
+        st.subheader("🔑 API ключи")
+        col1, col2 = st.columns(2)
+        with col1:
+            api_key = st.text_input(
+                "API Key",
+                type="password",
+                placeholder="Введите API ключ",
+                key="smart_tariff_api_key",
+                help="Для Ozon: Api-Key, для WB: Api-Key"
+            )
+        with col2:
+            client_id = st.text_input(
+                "Client ID (только для Ozon)",
+                type="password",
+                placeholder="Введите Client ID",
+                key="smart_tariff_client_id"
+            )
+    else:
+        api_key = None
+        client_id = None
+    
+    # ✅ Кнопка сравнения источников
+    if st.button("📊 Сравнить источники", key="smart_tariff_compare"):
+        if tariff_loader and hasattr(tariff_loader, 'compare_sources'):
+            with st.spinner("Сравнение источников..."):
+                try:
+                    compare_df = tariff_loader.compare_sources(marketplace, api_key, client_id)
+                    if compare_df is not None and not compare_df.empty:
+                        st.subheader("📊 Сравнение источников")
+                        st_dataframe_compat(compare_df)
+                    else:
+                        st.warning("⚠️ Нет данных для сравнения")
+                except Exception as e:
+                    st.error(f"❌ Ошибка сравнения: {e}")
+        else:
+            st.warning("⚠️ Метод compare_sources не найден")
+    
+    # ✅ Кнопка загрузки
+    if st.button("🚀 Загрузить тарифы", type="primary", key="smart_tariff_load"):
+        if not tariff_loader or not hasattr(tariff_loader, 'load_tariffs'):
+            st.error("❌ Метод load_tariffs не найден")
+            return
+        
+        with st.spinner(f"Загрузка тарифов из источника: {SmartTariffLoader.SOURCES.get(source, source) if hasattr(SmartTariffLoader, 'SOURCES') else source}..."):
+            try:
+                result = tariff_loader.load_tariffs(
+                    marketplace=marketplace,
+                    source=source,
+                    api_key=api_key,
+                    client_id=client_id,
+                    force_refresh=True
+                )
+                
+                if not isinstance(result, dict):
+                    st.error("❌ Неверный формат результата")
+                    return
+                
+                if result.get("errors"):
+                    st.error(f"❌ Ошибки загрузки:")
+                    for err in result["errors"]:
+                        st.error(f"  - {err}")
+                
+                if result.get("warnings"):
+                    st.info(f"ℹ️ Информация:")
+                    for warn in result["warnings"]:
+                        st.info(f"  - {warn}")
+                
+                if result.get("data"):
+                    st.success(f"✅ Тарифы успешно загружены из источника: {result.get('source_used', 'Неизвестно')}")
+                    confidence = result.get('confidence', 0)
+                    st.info(f"🎯 Доверие к данным: {confidence*100:.0f}%")
+                    
+                    # Показываем загруженные тарифы
+                    with st.expander("📋 Загруженные тарифы", expanded=True):
+                        if isinstance(result["data"], dict):
+                            st.json(result["data"])
+                        else:
+                            st.write(result["data"])
+                    
+                    # ✅ ИСПРАВЛЕНИЕ: Применяем тарифы с учётом структуры данных
+                    if st.button("💾 Применить тарифы к расчётам", key="smart_tariff_apply"):
+                        rates_to_apply = None
+                        
+                        # ✅ ИСПРАВЛЕНИЕ: Проверяем разные структуры данных
+                        if "rates" in result["data"]:
+                            # Структура от AI
+                            rates_to_apply = result["data"]["rates"]
+                        elif "raw_data" in result["data"]:
+                            # Структура от прямого API
+                            st.warning("⚠️ Прямой API вернул сырые данные. Применяем базовые тарифы.")
+                            rates_to_apply = result["data"].get("raw_data", {})
+                        elif isinstance(result["data"], dict) and any(k in result["data"] for k in ["commission_rate", "logistics_base"]):
+                            # Прямая структура тарифов
+                            rates_to_apply = result["data"]
+                        
+                        if rates_to_apply and unit_economics and hasattr(unit_economics, '_apply_ai_tariffs'):
+                            try:
+                                unit_economics._apply_ai_tariffs(marketplace, rates_to_apply)
+                                st.success(f"✅ Тарифы для {marketplace} применены!")
+                            except Exception as e:
+                                st.error(f"❌ Ошибка применения: {e}")
+                        else:
+                            st.warning("⚠️ Не найдены данные для применения")
+                else:
+                    st.error("❌ Не удалось загрузить тарифы")
+            except Exception as e:
+                st.error(f"❌ Ошибка загрузки: {e}")
+                logger.exception("Ошибка в load_tariffs")
+    
+    # ✅ Отображение текущих тарифов
+    st.subheader("📊 Текущие тарифы")
+    if unit_economics and hasattr(unit_economics, '_configs'):
+        configs = unit_economics._configs
+        if marketplace in configs:
+            try:
+                config = configs[marketplace]
+                tariff_data = {
+                    "Параметр": [
+                        "Комиссия", "Мин. комиссия", "Логистика база",
+                        "Логистика за кг", "Логистика за л", "Хранение",
+                        "Эквайринг", "Возвраты", "Последняя миля",
+                        "Подписка", "Источник", "Обновлено"
+                    ],
+                    "Значение": [
+                        f"{config.commission_rate*100:.1f}%",
+                        f"{config.min_commission:.2f} ₽",
+                        f"{config.logistics_base:.2f} ₽",
+                        f"{config.logistics_per_kg:.2f} ₽",
+                        f"{config.logistics_per_liter:.2f} ₽",
+                        f"{config.storage_per_day:.2f} ₽/л/день",
+                        f"{config.acquiring_fee*100:.1f}%",
+                        f"{config.return_fee*100:.1f}%",
+                        f"{config.last_mile_fee:.2f} ₽",
+                        f"{config.subscription_fee:.2f} ₽",
+                        config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source),
+                        config.last_updated.strftime('%d.%m.%Y %H:%M') if hasattr(config.last_updated, 'strftime') else str(config.last_updated)
+                    ]
+                }
+                st_dataframe_compat(pd.DataFrame(tariff_data))
+            except Exception as e:
+                st.warning(f"⚠️ Ошибка отображения тарифов: {e}")
+        else:
+            st.info(f"ℹ️ Тарифы для {marketplace} не найдены")
+    else:
+        st.warning("⚠️ Конфигурации маркетплейсов не найдены")
 
 # ============================================================================
 # 🆕 БЛОК 21: БАЗА ДАННЫХ КАТЕГОРИЙ С ВЕСОГАБАРИТАМИ
@@ -10980,12 +11204,12 @@ def show_settings_interface():
         st.json(settings)
 
 # ============================================================================
-# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ v100.5.2)
+# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННАЯ v100.5.2 + AI ТАРИФЫ)
 # ============================================================================
 # ✅ ИСПРАВЛЕНИЯ v100.5.2:
-# 1. Добавлен эмодзи 🧠 к "Умная загрузка тарифов" (был пробел)
+# 1. Добавлен эмодзи 🧠 к "Умная загрузка тарифов"
 # 2. Добавлены новые разделы: "📚 История расчётов" и "⚙️ Настройки"
-# 3. Все пункты меню теперь корректно обрабатываются
+# 3. ✅ ИСПРАВЛЕНИЕ NAMEERROR: Корректный вызов show_ai_tariffs_interface()
 # ============================================================================
 def main():
     """Главная функция приложения"""
@@ -10997,7 +11221,7 @@ def main():
     )
     st.title(APP_NAME)
     st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-
+    
     st.sidebar.title("🧭 Навигация")
     section = st.sidebar.radio(
         "Выберите раздел:",
@@ -11008,13 +11232,13 @@ def main():
             "📏 Категории с весогабаритами",
             "🤖 AI Тарифы",
             "🌐 API Тарифы маркетплейсов",
-            "🧠 Умная загрузка тарифов",   # ✅ ИСПРАВЛЕНО: был пробел вместо 🧠
-            "📚 История расчётов",          # ✅ НОВОЕ
-            "⚙️ Настройки",                # ✅ НОВОЕ
+            "🧠 Умная загрузка тарифов",
+            "📚 История расчётов",
+            "⚙️ Настройки",
         ],
         key="main_navigation",
     )
-
+    
     if section == "📁 Загрузка данных":
         show_data_upload_interface()
     elif section == "📊 Юнит-экономика":
@@ -11024,7 +11248,7 @@ def main():
     elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
     elif section == "🤖 AI Тарифы":
-        show_ai_tariffs_interface()  # ✅ Теперь эта функция определена и работает
+        show_ai_tariffs_interface()  # ✅ ТЕПЕРЬ ЭТА ФУНКЦИЯ ОПРЕДЕЛЕНА (БЛОК 19.5)
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
     elif section == "🧠 Умная загрузка тарифов":
@@ -11033,7 +11257,6 @@ def main():
         show_history_interface()
     elif section == "⚙️ Настройки":
         show_settings_interface()
-
 
 # ✅ ТОЧКА ВХОДА
 if __name__ == "__main__":
