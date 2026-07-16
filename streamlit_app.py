@@ -11829,476 +11829,738 @@ def show_settings_interface():
     with st.expander("📋 Текущие настройки (JSON)", expanded=False):
         st.json(settings)
 # ============================================================================
-# 🆕 БЛОК 26: AI ФОТО-РЕДАКТОР И ИНФОГРАФИКА (MPSTATS Photo Editor)
+# 🆕 БЛОК 26: AI ФОТО-РЕДАКТОР И ИНФОГРАФИКА (HYBRID GENERATOR v8.0)
 # ============================================================================
-# 🆕 v100.7: ИНТЕГРАЦИЯ MPSTATS PHOTO EDITOR API
-# ✅ AI-генерация визуала под карточки WB/Ozon
-# ✅ DeepSeek как оркестратор (составление промптов)
-# ✅ Фотосессии, инфографика, замена фона, апскейл, перекраска
-# ✅ "Товар в действии" с произвольным prompt-edit
-# ✅ Двухшаговые пайплайны (test → generate) в одну команду auto
+# 🚗 Полная локальная генерация инфографики для автозапчастей (без внешних API)
+# ✅ Исправлены все проблемы с NameResolutionError
+# ✅ Совместимость со Streamlit 1.58+ (width='stretch')
 # ============================================================================
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+import os
+import re
+from datetime import datetime
+from typing import Dict, List, Optional, Union, Tuple, Any
+from pathlib import Path
+import warnings
+import textwrap
+import random
+from enum import Enum
+from dataclasses import dataclass
+import json
+import math
+import io
 import base64
-from io import BytesIO
+import sys
 
-class MpstatsPhotoEditor:
-    """
-    🎨 Клиент для MPSTATS Photo Editor API.
-    Поддерживает: инфографику, удаление фона, апскейл, перекраску, товар в действии.
-    Использует DeepSeek как AI-оркестратор для улучшения промптов.
-    """
-    
-    # 📌 ЗАМЕНИТЕ на реальный базовый URL API MPSTATS Photo Editor
-    DEFAULT_API_URL = "https://api.mpstats.io/v1/photo-editor"
-    
-    def __init__(self, mpstats_token: str = "", deepseek_api_key: str = ""):
-        self.mpstats_token = mpstats_token
-        self.deepseek_api_key = deepseek_api_key
-        self.base_url = self.DEFAULT_API_URL
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "AutoPartsUnitEconomicsPro/100.7",
-            "Accept": "application/json"
-        })
-        if self.mpstats_token:
-            self.session.headers["X-Mpstats-TOKEN"] = self.mpstats_token
-        self.logger = logging.getLogger("MpstatsPhotoEditor")
-    
-    @staticmethod
-    def image_to_base64(image_bytes: bytes) -> str:
-        """Конвертация байтов изображения в base64 строку"""
-        return base64.b64encode(image_bytes).decode('utf-8')
-    
-    @staticmethod
-    def base64_to_image(base64_str: str) -> bytes:
-        """Декодирование base64 строки обратно в байты"""
-        if "," in base64_str:
-            base64_str = base64_str.split(",")[1]
-        return base64.b64decode(base64_str)
-    
-    def enhance_prompt_with_deepseek(self, raw_prompt: str, task: str, product_info: str = "") -> str:
-        """
-        🤖 DeepSeek улучшает сырой промпт пользователя до профессионального уровня.
-        Возвращает оптимизированный промпт на английском для лучшего качества генерации.
-        """
-        if not self.deepseek_api_key:
-            self.logger.warning("DeepSeek API ключ не задан. Возвращаем исходный промпт.")
-            return raw_prompt
-        
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=self.deepseek_api_key, base_url="https://api.deepseek.com/v1")
-            
-            system_prompt = f"""Ты эксперт по промпт-инжинирингу для AI-генерации изображений товаров на маркетплейсы (Ozon, Wildberries).
-Твоя задача — превратить сырой запрос пользователя в профессиональный, детализированный промпт на АНГЛИЙСКОМ языке для Stable Diffusion / DALL-E.
+warnings.filterwarnings('ignore')
 
-Задача генерации: {task}
-Информация о товаре: {product_info or 'Не указана'}
+# ============================================================================
+# 🚗 КОНСТАНТЫ И НАСТРОЙКИ ДЛЯ АВТОЗАПЧАСТЕЙ
+# ============================================================================
 
-Требования к промпту:
-1. Опиши товар максимально точно (материал, цвет, форма, детали)
-2. Укажи стиль: marketplace product photography, studio lighting, 8k, ultra-detailed
-3. Для инфографики добавь: clean background, space for text overlay, professional layout
-4. Для "товар в действии": realistic scene, lifestyle photography, natural lighting
-5. Добавь негативные промпты: blurry, low quality, distorted, watermark
-6. Длина промпта: 50-100 слов
+AUTO_ICONS = {
+    'engine': '🔧', 'brake': '🛑', 'filter': '🧹', 'battery': '🔋',
+    'tire': '🌀', 'oil': '🛢️', 'lamp': '💡', 'suspension': '⚙️',
+    'exhaust': '📯', 'cooling': '❄️', 'electrical': '⚡', 'interior': '🚗',
+    'body': '🛞', 'transmission': '⚙️', 'fuel': '⛽', 'ac': '🌬️',
+    'new': '🆕', 'best': '👑', 'stock': '📦', 'discount': '🔥',
+    'fast': '⚡', 'quality': '✅', 'original': '🏭', 'analog': '🔀',
+    'delivery': '🚚', 'pickup': '📍', 'warranty': '🛡️', 'install': '🔧',
+    'rating': '⭐', 'review': '💬', 'compatible': '🔗', 'oem': '🏷️',
+    'calendar': '📅', 'clock': '⏰', 'location': '📍', 'phone': '📞',
+    'car': '🚘', 'truck': '🚛', 'motorcycle': '🏍️', 'tools': '🛠️',
+    'warning': '⚠️', 'info': 'ℹ️', 'check': '✓', 'certificate': '📜'
+}
 
-Верни ТОЛЬКО финальный промпт на английском, без пояснений и кавычек."""
+AUTO_CATEGORIES = {
+    'Двигатель': ['Масло', 'Фильтры', 'Ремни', 'Свечи', 'ТНВД', 'Поршни', 'Клапаны'],
+    'Тормоза': ['Колодки', 'Диски', 'Тормозная жидкость', 'Суппорта', 'Тормозные шланги'],
+    'Подвеска': ['Амортизаторы', 'Сайлентблоки', 'Пружины', 'Рычаги', 'Шаровые опоры'],
+    'Электрика': ['Аккумуляторы', 'Генераторы', 'Стартеры', 'Провода', 'Реле', 'Предохранители'],
+    'Кузов': ['Фары', 'Зеркала', 'Щетки стеклоочистителя', 'Молдинги', 'Бампера', 'Капоты'],
+    'Трансмиссия': ['Сцепление', 'Масло АКПП', 'ШРУСы', 'Подшипники', 'Карданные валы'],
+    'Охлаждение': ['Радиаторы', 'Помпы', 'Термостаты', 'Патрубки', 'Вентиляторы'],
+    'Выхлопная': ['Глушители', 'Коллекторы', 'Сажевые фильтры', 'Кислородные датчики']
+}
 
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Улучши этот промпт: {raw_prompt}"}
-                ],
-                temperature=0.3,
-                max_tokens=300
-            )
-            
-            enhanced = response.choices[0].message.content.strip()
-            self.logger.info(f"✅ DeepSeek улучшил промпт: {len(enhanced)} символов")
-            return enhanced
-            
-        except Exception as e:
-            self.logger.error(f"Ошибка DeepSeek: {e}. Используем исходный промпт.")
-            return raw_prompt
-    
-    @retry_decorator(max_retries=3, delay=2.0, backoff=2.0, exceptions=(requests.exceptions.RequestException,))
-    def process_image(self, 
-                      image_bytes: bytes, 
-                      task: str, 
-                      prompt: str = "", 
-                      hex_color: str = "",
-                      style: str = "marketplace_card",
-                      num_frames: int = 1) -> bytes:
-        """
-        Универсальный метод обработки изображения (auto-пайплайн).
-        task: 'infographic', 'remove_background', 'upscale', 'recolor', 'in_action', 'photoshoot'
-        """
-        if not self.mpstats_token:
-            raise ValueError("Не задан MPSTATS API токен. Укажите его в настройках.")
-        
-        payload = {
-            "task": task,
-            "image_base64": self.image_to_base64(image_bytes),
-            "prompt": prompt,
-            "hex_color": hex_color,
-            "style": style,
-            "num_frames": num_frames,
-            "auto_pipeline": True  # Двухшаговый пайплайн (test → generate) в один вызов
+AUTO_BRANDS = [
+    'Bosch', 'Mann', 'Mahle', 'Valeo', 'Febi', 'Bilstein',
+    'KYB', 'Monroe', 'Brembo', 'ATE', 'NGK', 'Denso',
+    'VAG', 'BMW', 'Mercedes', 'Toyota', 'Honda', 'Nissan',
+    'Lada', 'GAZ', 'УАЗ', 'Hyundai', 'Kia', 'Ford',
+    'Gates', 'Osram', 'Varta', 'Lynx', 'Profit', 'AutoParts'
+]
+
+# ============================================================================
+# 🎨 ТИПЫ ДАННЫХ И КОНФИГУРАЦИЯ
+# ============================================================================
+
+class TemplateStyle(Enum):
+    AUTO_MODERN = "auto_modern"
+    AUTO_PRO = "auto_pro"
+    AUTO_BUDGET = "auto_budget"
+    AUTO_PREMIUM = "auto_premium"
+    AUTO_TECH = "auto_tech"
+    AUTO_STOCK = "auto_stock"
+    AUTO_LUXURY = "auto_luxury"
+
+class ColorPalette:
+    PALETTES = {
+        TemplateStyle.AUTO_MODERN: {
+            'primary': (41, 128, 185), 'secondary': (231, 76, 60),
+            'accent': (52, 152, 219), 'background': (255, 255, 255),
+            'card_bg': (245, 245, 245), 'text': (44, 62, 80),
+            'highlight': (241, 196, 15), 'danger': (231, 76, 60),
+            'success': (46, 204, 113), 'border': (220, 220, 220)
+        },
+        TemplateStyle.AUTO_PRO: {
+            'primary': (30, 30, 30), 'secondary': (192, 57, 43),
+            'accent': (52, 73, 94), 'background': (250, 250, 250),
+            'card_bg': (255, 255, 255), 'text': (50, 50, 50),
+            'highlight': (230, 126, 34), 'danger': (192, 57, 43),
+            'success': (39, 174, 96), 'border': (200, 200, 200)
+        },
+        TemplateStyle.AUTO_PREMIUM: {
+            'primary': (0, 0, 0), 'secondary': (218, 165, 32),
+            'accent': (120, 120, 120), 'background': (255, 255, 255),
+            'card_bg': (255, 250, 240), 'text': (40, 40, 40),
+            'highlight': (218, 165, 32), 'danger': (160, 64, 0),
+            'success': (46, 125, 50), 'border': (218, 165, 32)
+        },
+        TemplateStyle.AUTO_TECH: {
+            'primary': (0, 100, 200), 'secondary': (0, 200, 255),
+            'accent': (100, 100, 255), 'background': (15, 25, 40),
+            'card_bg': (25, 35, 50), 'text': (220, 220, 255),
+            'highlight': (0, 255, 200), 'danger': (255, 50, 100),
+            'success': (0, 255, 150), 'border': (0, 150, 255)
+        },
+        TemplateStyle.AUTO_LUXURY: {
+            'primary': (20, 20, 20), 'secondary': (184, 134, 11),
+            'accent': (139, 69, 19), 'background': (248, 248, 255),
+            'card_bg': (255, 255, 255), 'text': (30, 30, 30),
+            'highlight': (184, 134, 11), 'danger': (139, 0, 0),
+            'success': (34, 139, 34), 'border': (184, 134, 11)
         }
-        
-        url = f"{self.base_url}/generate"
-        
-        try:
-            response = self.session.post(url, json=payload, timeout=120)
-            response.raise_for_status()
-            
-            result = response.json()
-            if result.get("status") == "success" and "image_base64" in result:
-                return self.base64_to_image(result["image_base64"])
-            else:
-                error_msg = result.get('error', 'Неизвестная ошибка API')
-                raise ValueError(f"MPSTATS API вернул ошибку: {error_msg}")
-                
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429:
-                self.logger.warning("Превышен лимит запросов MPSTATS API. Ожидание...")
-                raise
-            raise
-        except Exception as e:
-            self.logger.error(f"Ошибка обработки изображения: {e}")
-            raise
+    }
 
+@dataclass
+class AutoPartData:
+    name: str
+    price: str
+    old_price: Optional[str] = None
+    brand: str = ""
+    oem: str = ""
+    category: str = ""
+    car_model: str = ""
+    year_from: str = ""
+    year_to: str = ""
+    stock: str = "В наличии"
+    delivery: str = "1-3 дня"
+    warranty: str = "12 месяцев"
+    rating: float = 4.5
+    reviews: int = 0
+    compatibility: List[str] = None
+    features: List[str] = None
+    images: List[str] = None
+    description: str = ""
+    weight: str = ""
+    dimensions: str = ""
+    country: str = ""
+
+    def __post_init__(self):
+        if self.compatibility is None: self.compatibility = []
+        if self.features is None: self.features = []
+        if self.images is None: self.images = []
+        if not self.oem: self.oem = self._generate_oem()
+    
+    def _generate_oem(self) -> str:
+        letters = random.choice(['AB', 'CD', 'EF', 'GH', 'IJ'])
+        numbers = f"{random.randint(1000, 9999):04d}"
+        suffix = random.choice(['A', 'B', 'C', 'D', 'X'])
+        return f"{letters}{numbers}{suffix}"
+
+# ============================================================================
+# 🎨 ТЕКСТОВЫЙ ПРОЦЕССОР
+# ============================================================================
+
+class AutoTextProcessor:
+    def __init__(self, language: str = 'ru'):
+        self.language = language
+        self.icons = AUTO_ICONS
+        
+    def get_icon_for_category(self, category: str) -> str:
+        category_lower = category.lower()
+        icon_map = {
+            'двигатель': '🔧', 'двига': '🔧', 'мотор': '🔧',
+            'тормоз': '🛑', 'колодк': '🛑', 'диск': '🛑',
+            'фильтр': '🧹', 'масл': '🛢️', 'смазк': '🛢️',
+            'аккумулятор': '🔋', 'батаре': '🔋',
+            'шина': '🌀', 'колес': '🌀', 'резин': '🌀',
+            'фара': '💡', ' ламп': '💡', 'свет': '💡',
+            'подвеск': '⚙️', 'амортизатор': '⚙️',
+            'выхлоп': '📯', 'глушител': '📯',
+            'охлажден': '❄️', 'радиатор': '❄️',
+            'электрик': '⚡', 'провод': '⚡',
+            'кузов': '🚗', 'двер': '🚗', 'капот': '🚗',
+            'трансмиссия': '⚙️', 'сцеплен': '⚙️', 'коробк': '⚙️',
+            'топливо': '⛽', 'бензин': '⛽', 'дизель': '⛽',
+            'кондиционер': '🌬️', 'климат': '🌬️'
+        }
+        for key, icon in icon_map.items():
+            if key in category_lower: return icon
+        return '🔧'
+    
+    def format_price(self, price: str, currency: str = '₽') -> Dict:
+        try:
+            clean_price = re.sub(r'[^\d]', '', str(price))
+            numeric_price = int(clean_price) if clean_price else 0
+            formatted = f"{numeric_price:,}".replace(',', ' ')
+            return {'formatted': f"{formatted}{currency}", 'numeric': numeric_price, 'currency': currency}
+        except Exception:
+            return {'formatted': f"0{currency}", 'numeric': 0, 'currency': currency}
+
+# ============================================================================
+# 🎨 УЛУЧШЕННЫЙ ГРАФИЧЕСКИЙ ГЕНЕРАТОР
+# ============================================================================
+
+class AutoGraphicsGenerator:
+    @staticmethod
+    def create_rounded_rect(draw: ImageDraw.ImageDraw, position: Tuple[int, int], size: Tuple[int, int],
+                           radius: int, fill: Optional[Tuple[int, int, int]] = None,
+                           outline: Optional[Tuple[int, int, int]] = None, width: int = 1) -> None:
+        x, y = position
+        width_rect, height_rect = size
+        draw.rectangle([x + radius, y, x + width_rect - radius, y + height_rect], fill=fill, outline=None)
+        draw.rectangle([x, y + radius, x + width_rect, y + height_rect - radius], fill=fill, outline=None)
+        if fill:
+            draw.pieslice([x, y, x + radius * 2, y + radius * 2], 180, 270, fill=fill, outline=None)
+            draw.pieslice([x + width_rect - radius * 2, y, x + width_rect, y + radius * 2], 270, 360, fill=fill, outline=None)
+            draw.pieslice([x, y + height_rect - radius * 2, x + radius * 2, y + height_rect], 90, 180, fill=fill, outline=None)
+            draw.pieslice([x + width_rect - radius * 2, y + height_rect - radius * 2, x + width_rect, y + height_rect], 0, 90, fill=fill, outline=None)
+        if outline:
+            draw.line([(x + radius, y), (x + width_rect - radius, y)], fill=outline, width=width)
+            draw.line([(x + radius, y + height_rect), (x + width_rect - radius, y + height_rect)], fill=outline, width=width)
+            draw.line([(x, y + radius), (x, y + height_rect - radius)], fill=outline, width=width)
+            draw.line([(x + width_rect, y + radius), (x + width_rect, y + height_rect - radius)], fill=outline, width=width)
+            draw.arc([x, y, x + radius * 2, y + radius * 2], 180, 270, fill=outline)
+            draw.arc([x + width_rect - radius * 2, y, x + width_rect, y + radius * 2], 270, 360, fill=outline)
+            draw.arc([x, y + height_rect - radius * 2, x + radius * 2, y + height_rect], 90, 180, fill=outline)
+            draw.arc([x + width_rect - radius * 2, y + height_rect - radius * 2, x + width_rect, y + height_rect], 0, 90, fill=outline)
+
+# ============================================================================
+# 🎨 ГЕНЕРАТОР ПОДЛОЖЕК
+# ============================================================================
+
+class AutoBackgroundGenerator:
+    def __init__(self):
+        self.parts_patterns = {
+            'engine': self._create_engine_pattern, 'brake': self._create_brake_pattern,
+            'wheel': self._create_wheel_pattern, 'electric': self._create_electric_pattern,
+            'suspension': self._create_suspension_pattern, 'default': self._create_default_pattern
+        }
+    
+    def create_background(self, size: Tuple[int, int] = (1200, 800), bg_type: str = 'gradient', theme: str = 'auto_modern', category: str = None) -> Image.Image:
+        width, height = size
+        if bg_type == 'gradient': return self._create_gradient_background(width, height, theme)
+        elif bg_type == 'pattern': return self._create_pattern_background(width, height, category or 'default')
+        else: return self._create_gradient_background(width, height, theme)
+    
+    def _create_gradient_background(self, width: int, height: int, theme: str = 'auto_modern') -> Image.Image:
+        if theme == 'auto_modern': colors = [(41, 128, 185), (52, 152, 219), (93, 173, 226)]
+        elif theme == 'auto_pro': colors = [(30, 30, 30), (52, 73, 94), (44, 62, 80)]
+        elif theme == 'auto_premium': colors = [(0, 0, 0), (50, 50, 50), (120, 120, 120)]
+        elif theme == 'auto_tech': colors = [(15, 25, 40), (30, 45, 70), (50, 70, 100)]
+        else: colors = [(41, 128, 185), (52, 152, 219), (26, 188, 156)]
+        
+        image = Image.new('RGB', (width, height), colors[0])
+        draw = ImageDraw.Draw(image)
+        for i in range(height):
+            ratio = i / height
+            r = int(colors[0][0] * (1 - ratio) + colors[1][0] * ratio)
+            g = int(colors[0][1] * (1 - ratio) + colors[1][1] * ratio)
+            b = int(colors[0][2] * (1 - ratio) + colors[1][2] * ratio)
+            draw.line([(0, i), (width, i)], fill=(r, g, b))
+        return image
+    
+    def _create_pattern_background(self, width: int, height: int, category: str) -> Image.Image:
+        pattern_func = self.parts_patterns.get(category, self.parts_patterns['default'])
+        image = Image.new('RGB', (width, height), (245, 245, 245))
+        draw = ImageDraw.Draw(image)
+        pattern_func(draw, width, height)
+        return image
+
+    def _create_engine_pattern(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for x in range(0, width, 100):
+            for y in range(0, height, 100):
+                draw.ellipse([x + 30, y + 30, x + 70, y + 70], fill=(220, 220, 220), outline=(180, 180, 180))
+    
+    def _create_brake_pattern(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for x in range(0, width, 120):
+            for y in range(0, height, 120):
+                draw.ellipse([x + 10, y + 10, x + 110, y + 110], fill=(230, 230, 230), outline=(200, 200, 200))
+    
+    def _create_wheel_pattern(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for x in range(0, width, 150):
+            for y in range(0, height, 150):
+                draw.ellipse([x + 25, y + 25, x + 125, y + 125], fill=(220, 220, 220), outline=(200, 200, 200))
+    
+    def _create_electric_pattern(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for x in range(0, width, 80):
+            for y in range(0, height, 80):
+                draw.rectangle([x + 10, y + 10, x + 70, y + 70], fill=(230, 230, 230), outline=(200, 200, 200))
+    
+    def _create_suspension_pattern(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for x in range(0, width, 100):
+            for y in range(0, height, 100):
+                draw.rectangle([x + 30, y + 10, x + 70, y + 90], fill=(230, 230, 230), outline=(200, 200, 200))
+    
+    def _create_default_pattern(self, draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+        for x in range(0, width, 50): draw.line([(x, 0), (x, height)], fill=(220, 220, 220), width=1)
+        for y in range(0, height, 50): draw.line([(0, y), (width, y)], fill=(220, 220, 220), width=1)
+
+    def create_product_card_background(self, size: Tuple[int, int] = (800, 1200), style: str = 'auto_modern') -> Image.Image:
+        width, height = size
+        background = self.create_background(size, 'gradient', style)
+        if background.mode != 'RGBA': background = background.convert('RGBA')
+        draw = ImageDraw.Draw(background)
+        
+        # Зона продукта
+        rect_width, rect_height = 600, 400
+        rect_x, rect_y = (width - rect_width) // 2, (height - rect_height) // 2
+        bg_color = (255, 255, 255) if style != 'auto_tech' else (25, 35, 50)
+        border_color = (218, 165, 32) if style == 'auto_premium' else (220, 220, 220)
+        
+        AutoGraphicsGenerator.create_rounded_rect(draw, (rect_x, rect_y), (rect_width, rect_height), 20, fill=bg_color, outline=border_color, width=2)
+        
+        # Углы
+        corner_color = (218, 165, 32) if style == 'auto_premium' else (41, 128, 185)
+        draw.line([(0, 20), (20, 0)], fill=corner_color, width=3)
+        draw.line([(width - 20, 0), (width, 20)], fill=corner_color, width=3)
+        draw.line([(0, height - 20), (20, height)], fill=corner_color, width=3)
+        draw.line([(width - 20, height), (width, height - 20)], fill=corner_color, width=3)
+        
+        return background.convert('RGB')
+
+# ============================================================================
+# 🎯 ГИБРИДНЫЙ МЕНЕДЖЕР ШАБЛОНОВ
+# ============================================================================
+
+class HybridTemplateManager:
+    def __init__(self, templates_dir: str = "templates"):
+        self.templates_dir = Path(templates_dir)
+        self.templates = {}
+        self._load_templates()
+    
+    def _load_templates(self):
+        self.templates_dir.mkdir(exist_ok=True)
+        template_files = list(self.templates_dir.glob("*.png")) + list(self.templates_dir.glob("*.jpg"))
+        if not template_files:
+            self._create_default_templates()
+            template_files = list(self.templates_dir.glob("*.png"))
+        for template_file in template_files:
+            try:
+                template_img = Image.open(template_file)
+                self.templates[template_file.stem] = {'image': template_img, 'size': template_img.size}
+            except Exception as e:
+                print(f"❌ Ошибка загрузки шаблона {template_file.name}: {e}")
+    
+    def _create_default_templates(self):
+        bg_generator = AutoBackgroundGenerator()
+        for style in ['auto_modern', 'auto_pro', 'auto_premium', 'auto_tech']:
+            template = bg_generator.create_product_card_background(size=(800, 1200), style=style)
+            template.save(self.templates_dir / f"{style}_template.png")
+
+    def apply_template(self, template_name: str, part_data: Dict, user_texts: Dict = None) -> Image.Image:
+        if template_name not in self.templates:
+            template_name = list(self.templates.keys())[0] if self.templates else 'auto_modern_template'
+            if template_name not in self.templates:
+                raise ValueError("Нет доступных шаблонов")
+        
+        result = self.templates[template_name]['image'].copy().convert('RGBA')
+        draw = ImageDraw.Draw(result)
+        width, height = result.size
+        
+        # Заголовок
+        title = user_texts.get('title', part_data.get('name', 'Название запчасти')) if user_texts else part_data.get('name', 'Название')
+        self._draw_text_in_zone(draw, width//10, height//3 + 20, 9*width//10, title, font_size=28, color=(0, 0, 0))
+        
+        # Цена
+        price = part_data.get('price', '0')
+        self._draw_text_in_zone(draw, width//10, 2*height//3, 3*width//10, f"💰 {price} ₽", font_size=32, color=(231, 76, 60))
+        
+        # OEM
+        if part_data.get('oem'):
+            self._draw_text_in_zone(draw, 4*width//10, 2*height//3, 6*width//10, f"🔢 OEM: {part_data['oem']}", font_size=18, color=(100, 100, 100))
+        
+        # Характеристики
+        features = user_texts.get('features', part_data.get('features', ['Высокое качество', 'Гарантия'])) if user_texts else part_data.get('features', ['Высокое качество'])
+        self._draw_features_list(draw, width//10, 2*height//3 + 100, 9*width//10, features)
+        
+        return result
+    
+    def _draw_text_in_zone(self, draw, x1: int, y: int, x2: int, text: str, font_size: int = 24, color: Tuple = (0, 0, 0)):
+        try: font = ImageFont.truetype("arial.ttf", font_size)
+        except: font = ImageFont.load_default()
+        
+        max_chars = (x2 - x1) // (font_size // 2)
+        words = str(text).split()
+        lines, current_line = [], []
+        for word in words:
+            if len(' '.join(current_line + [word])) <= max_chars: current_line.append(word)
+            else:
+                if current_line: lines.append(' '.join(current_line))
+                current_line = [word]
+        if current_line: lines.append(' '.join(current_line))
+        
+        line_height = int(font_size * 1.2)
+        current_y = y
+        for line in lines[:3]:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            text_width = bbox[2] - bbox[0]
+            draw.text((x1 + (x2 - x1 - text_width) // 2, current_y), line, font=font, fill=color)
+            current_y += line_height
+    
+    def _draw_features_list(self, draw, x: int, y: int, x2: int, features: List[str]):
+        try: font = ImageFont.truetype("arial.ttf", 18)
+        except: font = ImageFont.load_default()
+        current_y = y
+        for feature in features[:5]:
+            if feature:
+                draw.text((x, current_y), f"• {feature}", fill=(50, 50, 50), font=font)
+                current_y += 30
+
+# ============================================================================
+# 🎯 МОДУЛЬ РАБОТЫ С ДАННЫМИ
+# ============================================================================
+
+class DataBridge:
+    def __init__(self): self.text_processor = AutoTextProcessor()
+    
+    def prepare_hybrid_data(self, excel_path: str) -> List[Dict]:
+        try: df = pd.read_excel(excel_path)
+        except: df = self._create_demo_data()
+        
+        products = []
+        for idx, row in df.iterrows():
+            data = {}
+            for col in row.index:
+                if pd.isna(row[col]): continue
+                col_lower = str(col).lower()
+                value = row[col]
+                if any(w in col_lower for w in ['назван', 'name', 'товар', 'артикул']): data['name'] = str(value)
+                elif any(w in col_lower for w in ['цена', 'price', 'стоимость']): data['price'] = str(value)
+                elif any(w in col_lower for w in ['бренд', 'brand', 'производитель']): data['brand'] = str(value)
+                elif any(w in col_lower for w in ['oem', 'номер', 'код']): data['oem'] = str(value)
+                elif any(w in col_lower for w in ['категор', 'category', 'тип']): data['category'] = str(value)
+                elif any(w in col_lower for w in ['характерист', 'feature', 'свойств']):
+                    data['features'] = [v.strip() for v in str(value).split(';') if v.strip()] if isinstance(value, str) else value
+            
+            data.setdefault('name', f'Автозапчасть {idx}')
+            data.setdefault('price', '1000')
+            data.setdefault('brand', random.choice(AUTO_BRANDS))
+            data.setdefault('category', random.choice(list(AUTO_CATEGORIES.keys())))
+            data.setdefault('features', ['Высокое качество', 'Гарантия производителя'])
+            products.append(data)
+        return products
+    
+    def _create_demo_data(self) -> pd.DataFrame:
+        return pd.DataFrame({
+            'Название': ['Тормозные колодки передние', 'Масляный фильтр', 'Аккумулятор 60Ач'],
+            'Цена': ['2890', '850', '5990'],
+            'Бренд': ['Brembo', 'Mann', 'Varta'],
+            'OEM': ['09.9762.80', 'HU925/3X', '574012078'],
+            'Категория': ['Тормоза', 'Фильтры', 'Аккумуляторы'],
+            'Характеристики': ['Керамический состав; Уменьшенная пыльность', 'Высокая фильтрация', 'Технология AGM']
+        })
+
+# ============================================================================
+# 🎯 ГЛАВНЫЙ ГИБРИДНЫЙ ГЕНЕРАТОР
+# ============================================================================
+
+class HybridInfographicGenerator:
+    def __init__(self, templates_dir: str = "templates"):
+        self.template_manager = HybridTemplateManager(templates_dir)
+        self.data_bridge = DataBridge()
+    
+    def generate_single(self, product_data: Dict, template_name: str = None) -> Image.Image:
+        if not template_name: template_name = self._select_template(product_data)
+        user_texts = {'title': f"⚡ {product_data['name']} ⚡", 'features': product_data.get('features', [])}
+        return self.template_manager.apply_template(template_name, product_data, user_texts)
+    
+    def generate_from_excel(self, excel_path: str, output_dir: str = "hybrid_output", use_templates: bool = True):
+        products = self.data_bridge.prepare_hybrid_data(excel_path)
+        output_path = Path(output_dir)
+        output_path.mkdir(exist_ok=True)
+        results = []
+        
+        for idx, product in enumerate(products):
+            try:
+                template_name = self._select_template(product) if use_templates else None
+                output_file = output_path / f"info_{product.get('oem', idx)}.png"
+                result_image = self.generate_single(product, template_name)
+                result_image.save(str(output_file), 'PNG', quality=95)
+                results.append({'index': idx, 'product': product.get('name'), 'file': output_file.name, 'success': True})
+            except Exception as e:
+                results.append({'index': idx, 'error': str(e), 'success': False})
+        return results
+    
+    def _select_template(self, product: Dict) -> str:
+        category = product.get('category', '').lower()
+        mapping = {'тормоз': 'auto_pro_template', 'двигатель': 'auto_modern_template', 'электрик': 'auto_tech_template', 'аккумулятор': 'auto_premium_template'}
+        for key, template in mapping.items():
+            if key in category and template in self.template_manager.templates: return template
+        return list(self.template_manager.templates.keys())[0] if self.template_manager.templates else 'auto_modern_template'
+
+class SimpleAutoPartsGenerator:
+    def __init__(self, style: str = 'auto_modern'):
+        self.style = style
+        
+    def generate_simple_card(self, part_data: Dict, output_path: str = None) -> Image.Image:
+        bg_generator = AutoBackgroundGenerator()
+        image = bg_generator.create_product_card_background((800, 1200), self.style)
+        draw = ImageDraw.Draw(image)
+        width, height = 800, 1200
+        
+        try: font_large = ImageFont.truetype("arial.ttf", 36); font_medium = ImageFont.truetype("arial.ttf", 24)
+        except: font_large = ImageFont.load_default(); font_medium = ImageFont.load_default()
+        
+        # Заголовок
+        title = part_data.get('name', 'Название')
+        draw.text((40, 100), title, fill=(0, 0, 0), font=font_medium)
+        
+        # Цена
+        price = part_data.get('price', '0')
+        draw.text((40, height - 200), f"{price} ₽", fill=(231, 76, 60), font=font_large)
+        
+        # Бренд и OEM
+        brand = part_data.get('brand', '')
+        oem = part_data.get('oem', '')
+        draw.text((40, height - 140), f"🏷️ {brand} | 🔢 OEM: {oem}", fill=(100, 100, 100), font=font_medium)
+        
+        if output_path: image.save(output_path, 'PNG', quality=95)
+        return image
+
+# ============================================================================
+# 🎯 ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ STREAMLIT
+# ============================================================================
+
+def create_demo_data():
+    return pd.DataFrame({
+        'Название': ['Тормозные колодки Brembo', 'Масляный фильтр Mann', 'Аккумулятор Varta 60Ah'],
+        'Цена': ['2890', '850', '5990'],
+        'Бренд': ['Brembo', 'Mann', 'Varta'],
+        'OEM': ['09.9762.80', 'HU925/3X', '574012078'],
+        'Категория': ['Тормоза', 'Фильтры', 'Аккумуляторы'],
+        'Характеристики': ['Керамика; Долгий срок', 'Высокая фильтрация', 'Технология AGM']
+    })
+
+def get_image_download_link(img: Image.Image, filename: str = "infographic.png", caption: str = "📥 Скачать изображение"):
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f'<a href="data:file/png;base64,{img_str}" download="{filename}" style="text-decoration: none; color: #1f77b4; font-weight: bold;">{caption}</a>'
+
+def save_uploaded_file(uploaded_file, folder: str = "uploads"):
+    os.makedirs(folder, exist_ok=True)
+    file_path = os.path.join(folder, uploaded_file.name)
+    with open(file_path, "wb") as f: f.write(uploaded_file.getbuffer())
+    return file_path
+
+# ============================================================================
+# 🎯 STREAMLIT ИНТЕРФЕЙС (БЛОК 26)
+# ============================================================================
 
 def show_photo_editor_interface():
-    """🎨 Интерфейс AI-генерации визуала и инфографики"""
-    st.header("🎨 AI Фото-редактор и Инфографика")
+    """🎨 Интерфейс AI-генерации визуала и инфографики (Hybrid v8.0)"""
+    st.header("🎨 Генератор инфографики для автозапчастей")
     st.info("""
-    📸 **Создавайте продающий визуал для карточек Ozon и Wildberries за секунды.**
-    
-    **Возможности AI-агента:**
-    - 🖼️ Генерация инфографики с преимуществами товара
-    - ✂️ Удаление или замена фона (студийный свет / товар в действии)
-    - 🎨 Перекрашивание товара в фирменный HEX-цвет
-    - 🔍 Увеличение разрешения (Upscale) без потери качества
-    - 📸 Фотосессия товара (1-8 кадров в нужном стиле)
-    - 🤖 **DeepSeek автоматически улучшает ваши промпты** для лучшего результата
-    
-    💡 **Рекомендация:** Сначала загрузите фото товара, затем выберите задачу и опишите, что хотите получить.
+    🚀 **Гибридный генератор v8.0** создает профессиональные карточки товаров локально, без внешних API.
+    **Возможности:**
+    - 📁 Загрузка данных из Excel и пакетная обработка
+    - ✏️ Ручное создание карточек с предпросмотром
+    - 🎨 4 профессиональных стиля (Modern, Pro, Premium, Tech)
+    - ⚡ Мгновенная генерация без ожидания внешних серверов
     """)
-
-    # ====================================================================
-    # 1. НАСТРОЙКА API КЛЮЧЕЙ
-    # ====================================================================
-    with st.expander("⚙️ Настройка API ключей", expanded=False):
+    
+    # Настройки в экспандере (чтобы не ломать сайдбар главного меню)
+    with st.expander("⚙️ Настройки генератора", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
-            mpstats_token = st.text_input(
-                "🔑 X-Mpstats-TOKEN",
-                type="password",
-                value=st.session_state.get("mpstats_photo_token", ""),
-                placeholder="Введите токен MPSTATS API",
-                help="Токен сохраняется только в текущей сессии браузера"
-            )
-            if mpstats_token:
-                st.session_state["mpstats_photo_token"] = mpstats_token
+            style = st.selectbox("🎨 Стиль инфографики:", ["auto_modern", "auto_pro", "auto_premium", "auto_tech", "auto_luxury"])
         with col2:
-            deepseek_key = st.text_input(
-                "🤖 DeepSeek API Key (для улучшения промптов)",
-                type="password",
-                value=st.session_state.get("deepseek_api_key", ""),
-                placeholder="sk-...",
-                help="Используется для автоматического улучшения промптов"
-            )
-            if deepseek_key:
-                st.session_state["deepseek_api_key"] = deepseek_key
+            use_templates = st.checkbox("Использовать графические шаблоны", value=True)
+            export_quality = st.slider("Качество изображения (%):", 50, 100, 95)
         
-        if not st.session_state.get("mpstats_photo_token"):
-            st.warning("⚠️ Для работы необходим токен MPSTATS API")
-        else:
-            st.success("✅ Токены сохранены в сессии")
-        st.divider()
+        # Кнопка инициализации шаблонов
+        templates_dir = "templates"
+        if not Path(templates_dir).exists() or not list(Path(templates_dir).glob("*.png")):
+            if st.button("📁 Создать базовые шаблоны"):
+                with st.spinner("Создание шаблонов..."):
+                    bg_generator = AutoBackgroundGenerator()
+                    for s in ['auto_modern', 'auto_pro', 'auto_premium', 'auto_tech']:
+                        template = bg_generator.create_product_card_background(size=(800, 1200), style=s)
+                        Path(templates_dir).mkdir(exist_ok=True)
+                        template.save(f"{templates_dir}/{s}_template.png")
+                st.success("✅ Базовые шаблоны успешно созданы!")
+                st.rerun()
 
-    if not st.session_state.get("mpstats_photo_token"):
-        st.stop()
-
-    # Инициализация клиента
-    photo_client = MpstatsPhotoEditor(
-        mpstats_token=st.session_state.get("mpstats_photo_token", ""),
-        deepseek_api_key=st.session_state.get("deepseek_api_key", "")
-    )
-
-    # ====================================================================
-    # 2. ЗАГРУЗКА ИСХОДНОГО ИЗОБРАЖЕНИЯ
-    # ====================================================================
-    st.subheader("📤 Шаг 1: Загрузите фото товара")
-    uploaded_file = st.file_uploader(
-        "Выберите изображение (JPG, PNG)", 
-        type=['jpg', 'jpeg', 'png'],
-        key="photo_editor_upload",
-        help="Рекомендуемое разрешение: от 1000x1000 px"
-    )
-
-    if uploaded_file is not None:
-        # Отображение оригинала
-        col_orig, col_info = st.columns([1, 2])
-        with col_orig:
-            st.image(uploaded_file, caption="📷 Оригинал", use_container_width=True)
-        
-        with col_info:
-            file_size_kb = uploaded_file.size / 1024
-            st.metric("📊 Размер файла", f"{file_size_kb:.1f} KB")
-            st.metric("📛 Имя файла", uploaded_file.name)
-        
-        st.divider()
-        
-        # ====================================================================
-        # 3. ВЫБОР ЗАДАЧИ И ПАРАМЕТРОВ
-        # ====================================================================
-        st.subheader("🛠️ Шаг 2: Выберите задачу и параметры")
-        
-        task_mode = st.selectbox(
-            "🎯 Выберите задачу:",
-            options=[
-                ("🖼️ Инфографика для карточки (Ozon/WB)", "infographic"),
-                ("📸 Фотосессия товара (1-8 кадров)", "photoshoot"),
-                ("✂️ Удалить фон (прозрачный PNG)", "remove_background"),
-                ("🏞️ Товар в действии (новый фон/сцена)", "in_action"),
-                ("🎨 Перекрасить товар в HEX-цвет", "recolor"),
-                ("🔍 Увеличить разрешение (Upscale 2x/4x)", "upscale"),
-                ("🪄 Произвольный prompt-edit", "custom_edit")
-            ],
-            format_func=lambda x: x[0],
-            key="photo_task_mode"
-        )
-        task_value = task_mode[1]
-
-        # Динамические поля в зависимости от задачи
-        prompt_text = ""
-        hex_color = ""
-        num_frames = 1
-        style = "marketplace_card"
-        use_deepseek = True
-        
-        col1, col2 = st.columns([2, 1])
+    st.divider()
+    
+    # Выбор режима работы
+    mode = st.radio("🎯 Выберите режим работы:", ["📁 Обработка Excel файла", "✏️ Ручное создание", "🔄 Пакетная обработка"], horizontal=True)
+    
+    # ========================================================================
+    # РЕЖИМ 1: ОБРАБОТКА EXCEL
+    # ========================================================================
+    if mode == "📁 Обработка Excel файла":
+        st.subheader("📊 Загрузка Excel файла")
+        col1, col2 = st.columns([1, 1])
         
         with col1:
-            if task_value in ["infographic", "in_action", "photoshoot", "custom_edit"]:
-                prompt_text = st.text_area(
-                    "📝 Опишите, что хотите получить:",
-                    placeholder=(
-                        "Пример для инфографики: 'Премиальные тормозные колодки. Гарантия 2 года. "
-                        "Выдерживают температуру до 800°C. Быстрая доставка по РФ.'\n\n"
-                        "Пример для 'товар в действии': 'Автомобильный фильтр на фоне чистого "
-                        "современного гаража с мягким студийным освещением'"
-                    ),
-                    height=120,
-                    key="photo_prompt_text"
-                )
+            uploaded_file = st.file_uploader("Загрузите Excel файл (.xlsx, .xls)", type=['xlsx', 'xls'])
+            if uploaded_file:
+                file_path = save_uploaded_file(uploaded_file)
+                st.success(f"✅ Файл загружен: {uploaded_file.name}")
+                try:
+                    df = pd.read_excel(file_path)
+                    st.dataframe(df.head(), width="stretch")
+                    st.info(f"📦 Загружено товаров: {len(df)}")
+                except Exception as e:
+                    st.error(f"❌ Ошибка чтения: {e}")
+                    df = create_demo_data()
+            else:
+                st.info("💡 Загрузите файл или используйте демо-данные")
+                if st.button("Использовать демо-данные"):
+                    df = create_demo_data()
+                    st.dataframe(df, width="stretch")
         
         with col2:
-            if task_value == "infographic":
-                style = st.selectbox(
-                    "🎨 Стиль карточки:",
-                    ["Ozon (синий/белый)", "Wildberries (фиолетовый)", 
-                     "Минимализм (белый)", "Премиум (черный)", "Яркий (красный)"],
-                    key="photo_style"
-                )
-            elif task_value == "recolor":
-                hex_color = st.text_input(
-                    "🎨 Целевой HEX-цвет:",
-                    placeholder="#FF0000",
-                    key="photo_hex_color"
-                )
-            elif task_value == "photoshoot":
-                num_frames = st.slider(
-                    "📸 Количество кадров:",
-                    min_value=1, max_value=8, value=4,
-                    key="photo_num_frames"
-                )
-            
-            use_deepseek = st.checkbox(
-                "🤖 Улучшить промпт через DeepSeek",
-                value=True,
-                key="photo_use_deepseek",
-                help="AI автоматически улучшит ваш промпт для лучшего качества"
-            )
+            if 'df' in locals():
+                st.subheader("⚙️ Настройка обработки")
+                output_dir = st.text_input("📂 Папка для результатов:", value="output_infographics")
+                
+                if st.button("🚀 Начать генерацию", type="primary", width="stretch"):
+                    with st.spinner("🎨 Генерация инфографик..."):
+                        try:
+                            generator = HybridInfographicGenerator("templates")
+                            results = generator.generate_from_excel(file_path, output_dir=output_dir, use_templates=use_templates)
+                            
+                            success_count = sum(1 for r in results if r['success'])
+                            st.success(f"✅ Успешно создано: {success_count} из {len(results)} инфографик")
+                            
+                            # Превью
+                            st.subheader("📸 Превью результатов")
+                            output_files = list(Path(output_dir).glob("*.png"))
+                            if output_files:
+                                cols = st.columns(min(3, len(output_files)))
+                                for idx, file in enumerate(output_files[:3]):
+                                    with cols[idx]:
+                                        img = Image.open(file)
+                                        st.image(img, caption=file.name, width="stretch")
+                                        st.markdown(get_image_download_link(img, file.name), unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"❌ Ошибка: {e}")
 
-        # ====================================================================
-        # 4. ПРЕДПРОСМОТР УЛУЧШЕННОГО ПРОМПТА (если DeepSeek включен)
-        # ====================================================================
-        if use_deepseek and prompt_text and st.session_state.get("deepseek_api_key"):
-            if st.button("🤖 Предпросмотр: улучшить промпт через DeepSeek", 
-                        key="preview_prompt_btn", use_container_width=True):
-                with st.spinner("🤖 DeepSeek анализирует и улучшает промпт..."):
-                    enhanced = photo_client.enhance_prompt_with_deepseek(
-                        raw_prompt=prompt_text,
-                        task=task_value,
-                        product_info=uploaded_file.name
-                    )
-                    st.session_state["enhanced_prompt_preview"] = enhanced
-                    st.rerun()
-            
-            if "enhanced_prompt_preview" in st.session_state:
-                st.info(f"✨ **Улучшенный промпт:**\n\n{st.session_state['enhanced_prompt_preview']}")
-                if st.button("♻️ Сбросить улучшенный промпт", key="reset_prompt"):
-                    del st.session_state["enhanced_prompt_preview"]
-                    st.rerun()
-
-        st.divider()
+    # ========================================================================
+    # РЕЖИМ 2: РУЧНОЕ СОЗДАНИЕ
+    # ========================================================================
+    elif mode == "✏️ Ручное создание":
+        st.subheader("✏️ Создание инфографики вручную")
+        col1, col2 = st.columns([1, 1])
         
-        # ====================================================================
-        # 5. КНОПКА ГЕНЕРАЦИИ
-        # ====================================================================
-        if st.button("🚀 Сгенерировать визуал", type="primary", 
-                    use_container_width=True, key="btn_generate_photo"):
+        with col1:
+            product_name = st.text_input("Название товара:", value="Тормозные колодки передние дисковые")
+            col_p1, col_p2 = st.columns(2)
+            with col_p1: price = st.text_input("Цена (₽):", value="2890")
+            with col_p2: old_price = st.text_input("Старая цена (опц.):", value="3290")
             
-            # Валидация входных данных
-            if not prompt_text and task_value in ["infographic", "in_action", "photoshoot", "custom_edit"]:
-                st.warning("⚠️ Пожалуйста, заполните описание для этой задачи.")
-                st.stop()
-            if not hex_color and task_value == "recolor":
-                st.warning("⚠️ Укажите HEX-цвет для перекраски.")
-                st.stop()
+            brand = st.text_input("Бренд:", value="Brembo")
+            oem = st.text_input("OEM номер:", value="09.9762.80")
+            category = st.selectbox("Категория:", list(AUTO_CATEGORIES.keys()))
+            
+            st.markdown("**Характеристики (через точку с запятой):**")
+            features_text = st.text_area("Введите характеристики:", value="Керамический состав; Уменьшенная пыльность; Долгий срок службы", height=100)
+            features = [f.strip() for f in features_text.split(';') if f.strip()]
+        
+        with col2:
+            if st.button("🔄 Сгенерировать инфографику", type="primary", width="stretch"):
+                with st.spinner("🎨 Создаю инфографику..."):
+                    try:
+                        product_data = {
+                            'name': product_name, 'price': price, 'old_price': old_price if old_price else None,
+                            'brand': brand, 'oem': oem, 'category': category, 'features': features
+                        }
+                        
+                        if use_templates:
+                            generator = HybridInfographicGenerator("templates")
+                            template_name = generator._select_template(product_data)
+                            result_img = generator.generate_single(product_data, template_name)
+                        else:
+                            generator = SimpleAutoPartsGenerator(style)
+                            result_img = generator.generate_simple_card(product_data)
+                        
+                        st.success("✅ Инфографика создана!")
+                        st.image(result_img, width="stretch")
+                        st.markdown(get_image_download_link(result_img, f"infographic_{oem}.png", "📥 Скачать инфографику (PNG)"), unsafe_allow_html=True)
+                        
+                        if st.button("💾 Сохранить локально"):
+                            output_dir = "manual_output"
+                            Path(output_dir).mkdir(exist_ok=True)
+                            safe_name = re.sub(r'[^\w\-_\. ]', '_', product_name[:20])
+                            output_path = f"{output_dir}/{safe_name}_{oem}.png"
+                            result_img.save(output_path, "PNG", quality=export_quality)
+                            st.success(f"💾 Сохранено: `{output_path}`")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка: {e}")
 
-            with st.spinner("🤖 AI обрабатывает изображение (это может занять 15-60 секунд)..."):
-                try:
-                    image_bytes = uploaded_file.read()
-                    
-                    # 🤖 Шаг 1: Улучшение промпта через DeepSeek (если включено)
-                    final_prompt = prompt_text
-                    if use_deepseek and prompt_text and st.session_state.get("deepseek_api_key"):
-                        final_prompt = photo_client.enhance_prompt_with_deepseek(
-                            raw_prompt=prompt_text,
-                            task=task_value,
-                            product_info=uploaded_file.name
-                        )
-                        st.info(f"✨ **Промпт улучшен DeepSeek:** {final_prompt[:100]}...")
-                    
-                    # 🎨 Шаг 2: Вызов MPSTATS Photo Editor API
-                    result_bytes = photo_client.process_image(
-                        image_bytes=image_bytes,
-                        task=task_value,
-                        prompt=final_prompt,
-                        hex_color=hex_color,
-                        style=style,
-                        num_frames=num_frames
-                    )
-                    
-                    # Сохраняем результат в session_state
-                    st.session_state["generated_photo"] = result_bytes
-                    st.session_state["photo_task"] = task_value
-                    st.session_state["photo_final_prompt"] = final_prompt
-                    st.success("✅ Генерация завершена!")
-                    st.rerun()
-                    
-                except ValueError as e:
-                    st.error(f"❌ Ошибка API: {str(e)}")
-                    st.info("💡 Проверьте правильность токена MPSTATS API в настройках.")
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        st.error("⏳ Превышен лимит запросов MPSTATS API. Подождите минуту и попробуйте снова.")
-                    else:
-                        st.error(f"❌ HTTP ошибка: {e}")
-                except Exception as e:
-                    st.error(f"❌ Непредвиденная ошибка: {str(e)}")
-                    logger.error(f"Photo Editor Error: {traceback.format_exc()}")
-
-        # ====================================================================
-        # 6. ОТОБРАЖЕНИЕ РЕЗУЛЬТАТА
-        # ====================================================================
-        if "generated_photo" in st.session_state:
-            st.divider()
-            st.subheader("✅ Результат генерации")
-            
-            res_col1, res_col2 = st.columns(2)
-            with res_col1:
-                st.image(uploaded_file, caption="📷 До (Оригинал)", use_container_width=True)
-            with res_col2:
-                st.image(
-                    st.session_state["generated_photo"], 
-                    caption=f"✨ После ({st.session_state.get('photo_task', 'AI')})", 
-                    use_container_width=True
-                )
-            
-            # Информация о генерации
-            with st.expander("📋 Детали генерации", expanded=False):
-                st.write(f"**Задача:** {st.session_state.get('photo_task', 'N/A')}")
-                st.write(f"**Финальный промпт:** {st.session_state.get('photo_final_prompt', 'N/A')}")
-                st.write(f"**Размер результата:** {len(st.session_state['generated_photo']) / 1024:.1f} KB")
-            
-            # Кнопки действий
-            action_col1, action_col2, action_col3 = st.columns(3)
-            
-            with action_col1:
-                st.download_button(
-                    label="⬇️ Скачать результат (PNG)",
-                    data=st.session_state["generated_photo"],
-                    file_name=f"mpstats_{st.session_state.get('photo_task', 'edited')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                    mime="image/png",
-                    use_container_width=True,
-                    key="download_generated_photo"
-                )
-            
-            with action_col2:
-                if st.button("🔄 Сгенерировать ещё раз", use_container_width=True, key="regen_photo"):
-                    if "generated_photo" in st.session_state:
-                        del st.session_state["generated_photo"]
-                    st.rerun()
-            
-            with action_col3:
-                if st.button("🗑️ Очистить результат", use_container_width=True, key="clear_photo"):
-                    for key in ["generated_photo", "photo_task", "photo_final_prompt", "enhanced_prompt_preview"]:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
-            
-            # 💡 Рекомендации по использованию
-            st.divider()
-            st.subheader("💡 Рекомендации по использованию результата")
-            
-            task = st.session_state.get("photo_task", "")
-            if task == "infographic":
-                st.success("""
-                ✅ **Инфографика готова!**
-                - Загрузите в основную карточку товара на Ozon/WB
-                - Убедитесь, что текст читается на мобильных устройствах
-                - Проверьте соответствие требованиям площадки (размер, фон)
-                """)
-            elif task == "remove_background":
-                st.success("""
-                ✅ **Фон удалён!**
-                - Используйте PNG с прозрачностью для карточки товара
-                - Можно наложить на любой цветной фон
-                - Идеально для главного фото карточки
-                """)
-            elif task == "photoshoot":
-                st.success(f"""
-                ✅ **Фотосессия готова!** ({num_frames} кадров)
-                - Используйте разные ракурсы для галереи карточки
-                - Первый кадр — для главной фотографии
-                - Остальные — для детализации товара
-                """)
-            elif task == "in_action":
-                st.success("""
-                ✅ **Товар в действии!**
-                - Lifestyle-фото повышает конверсию на 30-40%
-                - Используйте для 2-3 позиции в галерее карточки
-                - Отлично работает для автотоваров
-                """)
-            elif task == "recolor":
-                st.success("""
-                ✅ **Перекраска выполнена!**
-                - Проверьте точность цвета (особенно для деталей салона)
-                - Используйте для создания вариантов товара
-                """)
-            elif task == "upscale":
-                st.success("""
-                ✅ **Разрешение увеличено!**
-                - Идеально для печати или крупных баннеров
-                - Проверьте, что детали не "замылились"
-                """)
+    # ========================================================================
+    # РЕЖИМ 3: ПАКЕТНАЯ ОБРАБОТКА
+    # ========================================================================
+    elif mode == "🔄 Пакетная обработка":
+        st.subheader("📁 Пакетная обработка нескольких файлов")
+        uploaded_files = st.file_uploader("Загрузите несколько Excel файлов", type=['xlsx', 'xls'], accept_multiple_files=True)
+        
+        if uploaded_files:
+            st.success(f"✅ Загружено файлов: {len(uploaded_files)}")
+            if st.button("🚀 Начать пакетную обработку", type="primary", width="stretch"):
+                all_results = []
+                progress_bar = st.progress(0)
+                
+                for i, uploaded_file in enumerate(uploaded_files):
+                    try:
+                        file_path = save_uploaded_file(uploaded_file, "batch_uploads")
+                        output_dir = f"batch_output_{uploaded_file.name.split('.')[0]}"
+                        
+                        generator = HybridInfographicGenerator("templates")
+                        results = generator.generate_from_excel(file_path, output_dir=output_dir, use_templates=use_templates)
+                        
+                        success_count = sum(1 for r in results if r['success'])
+                        all_results.append({'file': uploaded_file.name, 'total': len(results), 'success': success_count, 'output_dir': output_dir})
+                        progress_bar.progress((i + 1) / len(uploaded_files))
+                    except Exception as e:
+                        all_results.append({'file': uploaded_file.name, 'error': str(e)})
+                
+                st.divider()
+                st.subheader("📊 Сводный отчет")
+                total_files = len(all_results)
+                total_products = sum(r.get('total', 0) for r in all_results if 'total' in r)
+                total_success = sum(r.get('success', 0) for r in all_results if 'success' in r)
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("📁 Файлов", total_files)
+                c2.metric("📦 Товаров", total_products)
+                c3.metric("✅ Успешно", total_success)
+                
+                st.markdown("**📂 Папки с результатами:**")
+                for res in all_results:
+                    if 'output_dir' in res:
+                        st.write(f"• `{res['output_dir']}/` — {res['file']} ({res['success']}/{res['total']})")
+        else:
+            st.info("💡 Загрузите Excel файлы выше для начала пакетной обработки")
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.13 + ФОТО-РЕДАКТОР)
 # ============================================================================
