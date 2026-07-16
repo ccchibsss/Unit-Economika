@@ -407,6 +407,19 @@ try:
     BABEL_AVAILABLE = True
 except ImportError:
     BABEL_AVAILABLE = False
+
+# ============================================================================
+# 🆕 v100.14: GOOGLE SHEETS API (LIVE FORMULAS)
+# ============================================================================
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSHEETS_AVAILABLE = True
+except ImportError:
+    GSHEETS_AVAILABLE = False
+    gspread = None
+    Credentials = None
+
 # ============================================================================
 # ПОДАВЛЕНИЕ ПРЕДУПРЕЖДЕНИЙ
 # ============================================================================
@@ -577,10 +590,10 @@ def smart_read_csv(file_obj, **kwargs) -> pd.DataFrame:
 # ============================================================================
 # ВЕРСИЯ И КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
 # ============================================================================
-APP_VERSION = "100.5.1"
+APP_VERSION = "100.14"  # 🆕 ОБНОВЛЕНО
 APP_NAME = "🚗 Юнит-экономика автозапчастей PRO 2026"
 APP_AUTHOR = "AutoParts Analytics Team"
-APP_DESCRIPTION = "Enterprise расчет юнит-экономики для автозапчастей с AI, ML и High-Volume обработкой"
+APP_DESCRIPTION = "Enterprise расчет юнит-экономики для автозапчастей с AI, ML, High-Volume обработкой и Google Sheets"  # 🆕 ОБНОВЛЕНО
 APP_LICENSE = "MIT License"
 APP_COPYRIGHT = f"2024-2026 {APP_AUTHOR}"
 EXCEL_ROW_LIMIT = 1_000_000
@@ -12856,7 +12869,7 @@ def show_google_sheets_interface():
     - **Обновление тарифов**: Когда вы нажимаете "Обновить тарифы", код меняет цифры *только* на листе «⚙️ Параметры». Google Таблица мгновенно пересчитывает всю прибыль и маржу на листе «📊 Расчёт».
     """)
 # ============================================================================
-# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.13 + ФОТО-РЕДАКТОР)
+# ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.14 + GOOGLE SHEETS LIVE)
 # ============================================================================
 def main():
     """Главная функция приложения"""
@@ -12866,21 +12879,20 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
+
     st.title(APP_NAME)
     st.caption(f"Версия {APP_VERSION} | {APP_DESCRIPTION}")
-    
+
     # ====================================================================
     # 🆕 v100.13: АВТО-ПЕРЕКЛЮЧЕНИЕ НА РАЗДЕЛ ЮНИТ-ЭКОНОМИКИ
     # ====================================================================
-    # Если пользователь нажал кнопку "📊 Перейти к расчёту юнит-экономики"
-    # в разделе загрузки данных — автоматически переключаемся туда
     if st.session_state.get('auto_switch_to_ue'):
         st.session_state['auto_switch_to_ue'] = False
         st.session_state['main_navigation'] = "📊 Юнит-экономика"
         st.rerun()
-    
+
     # ====================================================================
-    # 🧭 НАВИГАЦИЯ
+    # 🧭 НАВИГАЦИЯ (v100.14 — + GOOGLE SHEETS)
     # ====================================================================
     st.sidebar.title("🧭 Навигация")
     section = st.sidebar.radio(
@@ -12890,7 +12902,8 @@ def main():
             "📊 Юнит-экономика",
             "🗂️ Каталог для группировки",
             "📏 Категории с весогабаритами",
-            "🎨 Фото и Инфографика (AI)",  # ✅ ДОБАВЛЕНО
+            "🎨 Фото и Инфографика (AI)",
+            "🌐 Google Таблицы (Live)",       # ← 🆕 НОВЫЙ ПУНКТ v100.14
             "🤖 AI Тарифы",
             "🌐 API Тарифы маркетплейсов",
             "🧠 Умная загрузка тарифов",
@@ -12899,31 +12912,47 @@ def main():
         ],
         key="main_navigation",
     )
-    
+
     # ====================================================================
-    # 🎯 МАРШРУТИЗАЦИЯ РАЗДЕЛОВ
+    # 🎯 МАРШРУТИЗАЦИЯ РАЗДЕЛОВ (v100.14 — + GOOGLE SHEETS)
     # ====================================================================
     if section == "📁 Загрузка данных":
         show_data_upload_interface()
+
     elif section == "📊 Юнит-экономика":
         show_unit_economics_interface()
+
     elif section == "🗂️ Каталог для группировки":
         show_catalog_grouping_interface()
+
     elif section == "📏 Категории с весогабаритами":
         show_category_dimensions_interface()
-    elif section == "🎨 Фото и Инфографика (AI)":  # ✅ ДОБАВЛЕНО
-        show_photo_editor_interface()              # ✅ ДОБАВЛЕНО
+
+    elif section == "🎨 Фото и Инфографика (AI)":
+        show_photo_editor_interface()
+
+    elif section == "🌐 Google Таблицы (Live)":   # ← 🆕 НОВЫЙ РОУТ v100.14
+        show_google_sheets_interface()
+
     elif section == "🤖 AI Тарифы":
         show_ai_tariffs_interface()
+
     elif section == "🌐 API Тарифы маркетплейсов":
         show_api_tariffs_interface()
+
     elif section == "🧠 Умная загрузка тарифов":
         show_smart_tariff_interface()
+
     elif section == "📚 История расчётов":
         show_history_interface()
+
     elif section == "⚙️ Настройки":
         show_settings_interface()
-    
+
+    else:
+        st.error(f"❌ Раздел '{section}' не найден")
+        st.info("💡 Попробуйте перезагрузить страницу (F5)")
+
     # ====================================================================
     # 📊 ФУТЕР С ИНФОРМАЦИЕЙ О ВЕРСИИ
     # ====================================================================
