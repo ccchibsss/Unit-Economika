@@ -12562,6 +12562,300 @@ def show_photo_editor_interface():
         else:
             st.info("💡 Загрузите Excel файлы выше для начала пакетной обработки")
 # ============================================================================
+# 🆕 БЛОК 27: GOOGLE SHEETS PRO EXPORTER (LIVE FORMULAS & UPDATES)
+# ============================================================================
+import gspread
+from google.oauth2.service_account import Credentials
+import json
+import re
+
+class GoogleSheetsProManager:
+    """Менеджер для работы с Google Таблицами с живыми формулами"""
+    
+    SCOPES = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    def __init__(self):
+        self.gc = None
+        self.sh = None
+        self.ws_params = None
+        self.ws_input = None
+        self.ws_calc = None
+        
+    def authenticate(self, creds_json: dict):
+        """Авторизация через Service Account JSON"""
+        try:
+            creds = Credentials.from_service_account_info(creds_json, scopes=self.SCOPES)
+            self.gc = gspread.authorize(creds)
+            return True, "✅ Успешная авторизация"
+        except Exception as e:
+            return False, f"❌ Ошибка авторизации: {e}"
+
+    def init_or_open_sheet(self, sheet_url_or_id: str = None, user_email: str = None):
+        """Создает новую таблицу или открывает существующую"""
+        try:
+            if sheet_url_or_id:
+                # Пытаемся открыть по ID или URL
+                if "docs.google.com" in sheet_url_or_id:
+                    sheet_id = sheet_url_or_id.split('/d/')[1].split('/')[0]
+                else:
+                    sheet_id = sheet_url_or_id
+                self.sh = self.gc.open_by_key(sheet_id)
+            else:
+                # Создаем новую
+                self.sh = self.gc.create(f"🚗 Юнит-Экономика PRO {datetime.now().strftime('%Y-%m-%d')}")
+                if user_email:
+                    self.sh.share(user_email, perm_type="user", role="writer")
+            
+            # Инициализация листов
+            self._setup_worksheets()
+            return True, f"✅ Таблица готова: {self.sh.url}"
+        except Exception as e:
+            return False, f"❌ Ошибка доступа к таблице: {e}"
+
+    def _setup_worksheets(self):
+        """Создает или находит нужные листы"""
+        sheet_names = ["⚙️ Параметры", "📥 Входные", "📊 Расчёт"]
+        for name in sheet_names:
+            try:
+                ws = self.sh.worksheet(name)
+            except gspread.exceptions.WorksheetNotFound:
+                ws = self.sh.add_worksheet(title=name, rows=5000, cols=30)
+            
+            if name == "⚙️ Параметры": self.ws_params = ws
+            elif name == "📥 Входные": self.ws_input = ws
+            elif name == "📊 Расчёт": self.ws_calc = ws
+
+    def push_tariffs_to_sheet(self, unit_economics):
+        """Обновляет ТОЛЬКО лист с тарифами (не трогая формулы!)"""
+        configs = unit_economics._configs
+        
+        # Заголовки
+        headers = ['Ключ (МП|Режим)', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг', 
+                   'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты', 'Посл. миля', 'Подписка']
+        self.ws_params.update('A1:L1', [headers])
+        
+        data_rows = []
+        modes = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
+        
+        for mp_name, config in configs.items():
+            for mode in modes:
+                key = f"{mp_name}|{mode}"
+                base_rate = config.commission_rate
+                mode_mult = config.mode_multipliers.get(mode, 1.0)
+                
+                data_rows.append([
+                    key, mp_name, mode, 
+                    base_rate * mode_mult, config.logistics_base, config.logistics_per_kg,
+                    config.logistics_per_liter, config.storage_per_day, config.acquiring_fee,
+                    config.return_fee, config.last_mile_fee, config.subscription_fee
+                ])
+        
+        # Очищаем старые данные и записываем новые (сохраняя структуру)
+        self.ws_params.batch_clear(['A2:L1000'])
+        if data_rows:
+            self.ws_params.update('A2', data_rows)
+            
+        return len(data_rows)
+
+    def append_products_to_sheet(self, df: pd.DataFrame, metadata: dict):
+        """Добавляет новые товары во 'Входные' и генерирует формулы в 'Расчёт'"""
+        if df.empty:
+            return 0
+            
+        # 1. Определяем, с какой строки начинать (чтобы не затереть старые)
+        last_input_row = len(self.ws_input.get_all_values())
+        start_row = last_input_row + 1 if last_input_row > 1 else 2
+        
+        # 2. Подготовка данных для листа "📥 Входные"
+        input_data = []
+        for _, row in df.iterrows():
+            input_data.append([
+                str(row.get('Артикул', '')),
+                str(row.get('Бренд', '')),
+                str(row.get('marketplace', metadata.get('marketplace', 'Ozon'))),
+                str(row.get('operation_mode', metadata.get('mode', 'FBS'))),
+                str(row.get('category', '')).lower().replace(' ', '_'),
+                float(row.get('price', 0)),
+                float(row.get('cost', 0)),
+                float(row.get('weight', 0)),
+                float(row.get('length', 0)),
+                float(row.get('width', 0)),
+                float(row.get('height', 0))
+            ])
+            
+        # 3. Запись в "📥 Входные"
+        self.ws_input.update(f'A{start_row}', input_data)
+        
+        # 4. Генерация и запись ЖИВЫХ ФОРМУЛ в "📊 Расчёт"
+        calc_formulas = []
+        params_range = "'⚙️ Параметры'!$A$2:$L$5000"
+        
+        for i in range(len(input_data)):
+            r = start_row + i
+            # Ссылки на лист "Входные"
+            in_mp = f"'📥 Входные'!C{r}"
+            in_mode = f"'📥 Входные'!D{r}"
+            in_price = f"'📥 Входные'!F{r}"
+            in_cost = f"'📥 Входные'!G{r}"
+            in_weight = f"'📥 Входные'!H{r}"
+            in_vol = f"('📥 Входные'!I{r}*'📥 Входные'!J{r}*'📥 Входные'!K{r})/1000"
+            
+            lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
+            
+            # Массив формул для одной строки
+            row_formulas = [
+                f"='📥 Входные'!A{r}", # Артикул
+                f"={in_mp}",            # МП
+                f"={in_price}",         # Цена
+                f"={in_cost}",          # Себестоимость
+                f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}", # Комиссия
+                f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+{in_vol}*VLOOKUP({lookup_key},{params_range},7,FALSE)", # Логистика
+                f"={in_vol}*VLOOKUP({lookup_key},{params_range},8,FALSE)*30", # Хранение
+                f"=SUM(E{r}:G{r})+{in_cost}", # Итого расходов
+                f"={in_price}-H{r}",    # ПРИБЫЛЬ
+                f"=IF({in_price}>0,I{r}/{in_price},0)", # Маржа %
+                f"=IF({in_cost}>0,I{r}/{in_cost},0)"  # ROI %
+            ]
+            calc_formulas.append(row_formulas)
+            
+        # Записываем формулы (gspread сам поймет, что это формулы, если они начинаются с '=')
+        self.ws_calc.update(f'A{start_row}', calc_formulas)
+        
+        return len(input_data)
+
+    def get_sheet_url(self):
+        return self.sh.url if self.sh else None
+
+
+# ============================================================================
+# 🎨 UI ДЛЯ GOOGLE ТАБЛИЦ
+# ============================================================================
+def show_google_sheets_interface():
+    """🌐 Интерфейс экспорта и обновления Google Таблиц"""
+    st.header("🌐 Google Таблицы (Live Formulas)")
+    st.info("""
+    🚀 **Экспорт в Google Таблицы с живыми формулами**
+    1. Данные и формулы выгружаются напрямую.
+    2. При обновлении тарифов пересчет происходит **автоматически** в самой таблице.
+    3. Новые товары добавляются без потери старых данных и формул.
+    """)
+    
+    # Инициализация менеджера
+    if 'gsheets_manager' not in st.session_state:
+        st.session_state.gsheets_manager = GoogleSheetsProManager()
+    manager = st.session_state.gsheets_manager
+    
+    # === ШАГ 1: АВТОРИЗАЦИЯ ===
+    st.subheader("🔑 Шаг 1: Авторизация Google Cloud")
+    creds_file = st.file_uploader(
+        "Загрузите `credentials.json` (Service Account)", 
+        type=['json'], 
+        key="gs_creds",
+        help="Скачайте JSON ключ в Google Cloud Console (IAM & Admin -> Service Accounts)"
+    )
+    
+    user_email = st.text_input("Ваш Email (для доступа к таблице)", placeholder="your@email.com")
+    
+    if creds_file and st.button("🔐 Авторизоваться", key="gs_auth"):
+        with st.spinner("Подключение к Google..."):
+            creds_json = json.load(creds_file)
+            success, msg = manager.authenticate(creds_json)
+            if success:
+                st.success(msg)
+                st.session_state.gs_authenticated = True
+                st.rerun()
+            else:
+                st.error(msg)
+
+    if not st.session_state.get('gs_authenticated'):
+        st.warning("⚠️ Требуется авторизация. [Инструкция по получению credentials.json](https://docs.gspread.org/en/latest/oauth2.html#for-bots-using-service-account)")
+        return
+
+    st.divider()
+    
+    # === ШАГ 2: ПРИВЯЗКА ТАБЛИЦЫ ===
+    st.subheader("📎 Шаг 2: Привязка Google Таблицы")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        sheet_url = st.text_input("URL существующей таблицы (или оставьте пустым для создания новой)")
+    with col2:
+        if st.button("🔗 Подключить / Создать", key="gs_connect"):
+            with st.spinner("Настройка листов..."):
+                success, msg = manager.init_or_open_sheet(sheet_url, user_email)
+                if success:
+                    st.success(msg)
+                    st.session_state.gs_sheet_url = manager.get_sheet_url()
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    if not st.session_state.get('gs_sheet_url'):
+        st.info("💡 Создайте новую таблицу или вставьте URL существующей.")
+        return
+
+    st.success(f"📊 **Рабочая таблица:** [Открыть]({st.session_state.gs_sheet_url})")
+    st.divider()
+    
+    # === ШАГ 3: ДЕЙСТВИЯ ===
+    st.subheader("🚀 Шаг 3: Управление данными и тарифами")
+    
+    unit_economics = get_marketplace_unit_economics()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("#### 💾 Выгрузка каталога")
+        if st.button("📤 Выгрузить текущий каталог", use_container_width=True, key="gs_push_catalog"):
+            if 'uploaded_data' in st.session_state and not st.session_state.uploaded_data.empty:
+                with st.spinner("Генерация формул и выгрузка..."):
+                    try:
+                        # Сначала пушим тарифы
+                        manager.push_tariffs_to_sheet(unit_economics)
+                        # Потом товары
+                        df = st.session_state.uploaded_data
+                        count = manager.append_products_to_sheet(df, {'marketplace': 'Ozon', 'mode': 'FBS'})
+                        st.success(f"✅ Выгружено {count} товаров с живыми формулами!")
+                    except Exception as e:
+                        st.error(f"Ошибка: {e}")
+            else:
+                st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
+
+    with col2:
+        st.markdown("#### 🔄 Обновление тарифов")
+        if st.button("💹 Обновить тарифы в таблице", use_container_width=True, key="gs_update_tariffs"):
+            with st.spinner("Обновление листа '⚙️ Параметры'..."):
+                try:
+                    count = manager.push_tariffs_to_sheet(unit_economics)
+                    st.success(f"✅ Тарифы обновлены ({count} строк). Формулы в таблице пересчитаются автоматически!")
+                except Exception as e:
+                    st.error(f"Ошибка: {e}")
+
+    with col3:
+        st.markdown("#### ➕ Добавление новых товаров")
+        if st.button("📈 Дописать новые товары", use_container_width=True, key="gs_append_new"):
+            if 'ue_parallel_results' in st.session_state and not st.session_state.ue_parallel_results.empty:
+                with st.spinner("Добавление строк без затирания старых..."):
+                    try:
+                        df = st.session_state.ue_parallel_results
+                        count = manager.append_products_to_sheet(df, {'marketplace': 'Ozon', 'mode': 'FBS'})
+                        st.success(f"✅ Добавлено {count} новых строк с формулами!")
+                    except Exception as e:
+                        st.error(f"Ошибка: {e}")
+            else:
+                st.warning("⚠️ Нет новых результатов расчёта для добавления.")
+
+    st.divider()
+    st.markdown("### 🧠 Как это работает?")
+    st.markdown("""
+    - **Лист «⚙️ Параметры»**: Хранит все комиссии, логистику и тарифы.
+    - **Лист «📥 Входные»**: Хранит сырые данные (Цены, Вес, Габариты).
+    - **Лист «📊 Расчёт»**: Содержит **живые формулы** (`VLOOKUP`, `SUM`, `IF`), которые тянут данные из первых двух листов.
+    - **Обновление тарифов**: Когда вы нажимаете "Обновить тарифы", код меняет цифры *только* на листе «⚙️ Параметры». Google Таблица мгновенно пересчитывает всю прибыль и маржу на листе «📊 Расчёт».
+    """)
+# ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.13 + ФОТО-РЕДАКТОР)
 # ============================================================================
 def main():
