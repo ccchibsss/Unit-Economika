@@ -12575,7 +12575,7 @@ def show_photo_editor_interface():
         else:
             st.info("💡 Загрузите Excel файлы выше для начала пакетной обработки")
 
- # ============================================================================
+# ============================================================================
 # 🆕 БЛОК 27: GOOGLE SHEETS PRO (LIVE FORMULAS + OAUTH БЕЗ JSON)
 # ============================================================================
 # ✅ v100.15: Полная PRO-структура (11 листов как в Excel)
@@ -12583,7 +12583,7 @@ def show_photo_editor_interface():
 # ✅ Живые формулы, форматирование, графики, KPI
 # ============================================================================
 import gspread
-from gspread.utils import ValueInputOption, FormatType
+from gspread.utils import ValueInputOption
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.auth.transport.requests import Request as GoogleRequest
