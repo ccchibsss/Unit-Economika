@@ -13583,6 +13583,142 @@ class GoogleSheetsProManager:
     
     def get_sheet_url(self) -> Optional[str]:
         return self.sh.url if self.sh else None
+
+
+# ============================================================================
+# 🆕 БЛОК 27.5: UI ИНТЕРФЕЙС ДЛЯ GOOGLE SHEETS PRO (Live Formulas)
+# ============================================================================
+def show_google_sheets_interface():
+    """🌐 Интерфейс экспорта в Google Таблицы с живыми формулами и форматированием"""
+    st.header("🌐 Google Таблицы (Live Formulas & Analytics)")
+    st.info("""
+    🚀 **СУПЕР-ЭКСПОРТ В GOOGLE SHEETS**
+    Этот инструмент создает полноценную аналитическую базу из **11 связанных листов**:
+    1. 📊 Дашборд (KPI и графики)
+    2. ⚙️ Параметры (живые тарифы МП, редактируемые)
+    3. 📥 Входные (ваши данные, можно менять прямо в таблице)
+    4. 📊 Расчёт (**живые формулы VLOOKUP**, пересчитываются при изменении Входных!)
+    5. 🏪 Сравнение МП, 📂 Категории, 📈 Прогноз, 🎯 Чувствительность, 🏆 Топ, 💡 Рекомендации, 📋 Сводка.
+    
+    💡 *Измените цену на листе "Входные" — и вся юнит-экономика пересчитается мгновенно!*
+    """)
+
+    # 1. Проверка наличия рассчитанных данных
+    if 'ue_parallel_results' not in st.session_state or st.session_state.ue_parallel_results is None or st.session_state.ue_parallel_results.empty:
+        st.warning("⚠️ **Сначала рассчитайте юнит-экономику!**\n\nПерейдите в раздел **📊 Юнит-экономика** → **📦 Весь каталог (из файла)**, загрузите данные и нажмите 'Рассчитать'. После этого вернитесь сюда.")
+        return
+
+    df = st.session_state.ue_parallel_results
+    metadata = st.session_state.get('ue_parallel_metadata', {})
+    unit_economics = get_marketplace_unit_economics()
+
+    st.success(f"✅ Найдено {len(df):,} рассчитанных записей, готовых к экспорту.")
+
+    # 2. Инициализация менеджера
+    gs_manager = GoogleSheetsProManager()
+
+    # 3. Выбор способа авторизации
+    st.subheader("🔐 Шаг 1: Авторизация в Google")
+    auth_method = st.radio(
+        "Выберите способ подключения:",
+        ["OAuth Токен (без JSON-файла)", "Service Account (JSON-ключ)"],
+        horizontal=True,
+        key="gs_auth_method"
+    )
+
+    is_authenticated = False
+
+    if auth_method == "OAuth Токен (без JSON-файла)":
+        st.markdown("##### 🔑 Через OAuth Access Token")
+        st.caption("Вставьте действующий Access Token от Google API. (Можно получить через Google OAuth Playground с правами `spreadsheets` и `drive`)")
+        access_token = st.text_input("Access Token", type="password", key="gs_oauth_token_input", placeholder="ya29.a0AfH6SMB...")
+        
+        if st.button("✅ Авторизоваться по токену", type="primary"):
+            if not access_token:
+                st.error("Введите токен")
+            else:
+                with st.spinner("Проверка токена..."):
+                    success, msg = gs_manager.authenticate_oauth_token(access_token)
+                    if success:
+                        st.success(msg)
+                        is_authenticated = True
+                    else:
+                        st.error(msg)
+    else:
+        st.markdown("##### 📄 Через Service Account JSON")
+        st.caption("Скопируйте и вставьте всё содержимое JSON-файла ключа сервисного аккаунта Google Cloud.")
+        creds_json_str = st.text_area("JSON Credentials", height=150, key="gs_json_creds_input", placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  ...')
+        
+        if st.button("✅ Авторизоваться по JSON", type="primary"):
+            if not creds_json_str:
+                st.error("Вставьте JSON")
+            else:
+                with st.spinner("Проверка JSON..."):
+                    try:
+                        creds_dict = json.loads(creds_json_str)
+                        success, msg = gs_manager.authenticate_service_account(creds_dict)
+                        if success:
+                            st.success(msg)
+                            is_authenticated = True
+                        else:
+                            st.error(msg)
+                    except json.JSONDecodeError:
+                        st.error("❌ Некорректный формат JSON. Проверьте скобки и кавычки.")
+
+    # 4. Процесс экспорта (если авторизация успешна)
+    if is_authenticated:
+        st.divider()
+        st.subheader("🚀 Шаг 2: Генерация PRO-таблицы")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            sheet_url = st.text_input(
+                "🔗 URL или ID существующей таблицы (оставьте пустым, чтобы создать новую)", 
+                key="gs_sheet_url_input",
+                placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms/edit"
+            )
+        with col2:
+            user_email = st.text_input(
+                "📧 Дать доступ (email)", 
+                key="gs_share_email_input",
+                placeholder="your@email.com",
+                help="Необязательно. Ваш email, чтобы сразу открыть таблицу."
+            )
+
+        if st.button("🚀 СОЗДАТЬ / ОБНОВИТЬ ТАБЛИЦУ С ФОРМУЛАМИ", type="primary", use_container_width=True):
+            with st.spinner("🔄 Идет магия: создание 11 листов, настройка формул VLOOKUP, условного форматирования и графиков... (10-20 сек)"):
+                try:
+                    # 1. Инициализация или открытие
+                    success_init, msg_init = gs_manager.init_or_open_sheet(sheet_url if sheet_url else None, user_email if user_email else None)
+                    
+                    if success_init:
+                        # 2. Генерация полной PRO-структуры с формулами
+                        success_gen, msg_gen = gs_manager.generate_full_pro(df, unit_economics, metadata)
+                        
+                        if success_gen:
+                            st.balloons()
+                            st.success(f"🎉 **{msg_gen}**")
+                            
+                            # Ссылка на таблицу
+                            final_url = gs_manager.get_sheet_url()
+                            st.markdown(f"### 🔗 [📂 ОТКРЫТЬ GOOGLE ТАБЛИЦУ В НОВОЙ ВКЛАДКЕ]({final_url})")
+                            
+                            st.info("""
+                            💡 **КАК ЭТО РАБОТАЕТ (ПРОВЕРЬТЕ САМИ):**
+                            1. Откройте ссылку выше.
+                            2. Перейдите на лист **📥 Входные**.
+                            3. Измените значение в колонке **Цена** или **Себестоимость** для любого товара.
+                            4. Перейдите на лист **📊 Расчёт** или **📊 Дашборд** — вы увидите, что прибыль, маржа и графики **пересчитались мгновенно** благодаря живым формулам!
+                            """)
+                        else:
+                            st.error(f"❌ Ошибка генерации структуры: {msg_gen}")
+                    else:
+                        st.error(f"❌ Ошибка инициализации таблицы: {msg_init}")
+                        
+                except Exception as e:
+                    st.error(f"❌ Критическая ошибка при экспорте: {str(e)}")
+                    with st.expander("📋 Технические детали ошибки"):
+                        st.code(traceback.format_exc())
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.14 + GOOGLE SHEETS LIVE)
 # ============================================================================
