@@ -12574,300 +12574,1015 @@ def show_photo_editor_interface():
                         st.write(f"• `{res['output_dir']}/` — {res['file']} ({res['success']}/{res['total']})")
         else:
             st.info("💡 Загрузите Excel файлы выше для начала пакетной обработки")
+
+ # ============================================================================
+# 🆕 БЛОК 27: GOOGLE SHEETS PRO (LIVE FORMULAS + OAUTH БЕЗ JSON)
 # ============================================================================
-# 🆕 БЛОК 27: GOOGLE SHEETS PRO EXPORTER (LIVE FORMULAS & UPDATES)
+# ✅ v100.15: Полная PRO-структура (11 листов как в Excel)
+# ✅ Авторизация через OAuth-токен (без JSON-ключа!)
+# ✅ Живые формулы, форматирование, графики, KPI
 # ============================================================================
 import gspread
-from google.oauth2.service_account import Credentials
+from gspread.utils import ValueInputOption, FormatType
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+from google.oauth2.credentials import Credentials as UserCredentials
+from google.auth.transport.requests import Request as GoogleRequest
 import json
 import re
 
 class GoogleSheetsProManager:
-    """Менеджер для работы с Google Таблицами с живыми формулами"""
+    """🚀 PRO-менеджер Google Таблиц с 11 листами и живыми формулами"""
     
     SCOPES = [
         "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/spreadsheets"
+    ]
+    
+    # Цвета (как в PRO Excel)
+    COLORS = {
+        "header_bg": "1B3A5C",
+        "header_fg": "FFFFFF",
+        "section_bg": "2E86AB",
+        "input_bg": "FFF4CC",
+        "param_bg": "E8F4FD",
+        "formula_bg": "DCE6F1",
+        "positive": "C6EFCE",
+        "positive_text": "006100",
+        "negative": "FFC7CE",
+        "negative_text": "9C0006",
+        "warning": "FFEB9C",
+        "total_bg": "D9E2F3",
+        "mp_header": "4472C4",
+    }
+    
+    OPERATION_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
+    
+    SHEETS_STRUCTURE = [
+        ("📊 Дашборд", 50, 10),
+        ("⚙️ Параметры", 500, 20),
+        ("📥 Входные", 5000, 15),
+        ("📊 Расчёт", 5000, 25),
+        ("🏪 Сравнение МП", 50, 12),
+        ("📂 Категории", 100, 10),
+        ("📈 Прогноз", 20, 10),
+        ("🎯 Чувствительность", 20, 12),
+        ("🏆 Топ", 50, 8),
+        ("💡 Рекомендации", 30, 6),
+        ("📋 Сводка", 20, 5),
     ]
     
     def __init__(self):
         self.gc = None
         self.sh = None
-        self.ws_params = None
-        self.ws_input = None
-        self.ws_calc = None
-        
-    def authenticate(self, creds_json: dict):
-        """Авторизация через Service Account JSON"""
+        self.auth_method = None
+        self.ws = {}  # Словарь листов
+    
+    # ====================================================================
+    # 🔐 АВТОРИЗАЦИЯ (ДВА СПОСОБА)
+    # ====================================================================
+    def authenticate_oauth_token(self, access_token: str) -> Tuple[bool, str]:
+        """🔑 Авторизация через OAuth-токен (БЕЗ JSON!)"""
         try:
-            creds = Credentials.from_service_account_info(creds_json, scopes=self.SCOPES)
+            creds = UserCredentials(token=access_token)
+            # Проверяем валидность токена
+            if creds.expired and creds.refresh_token:
+                creds.refresh(GoogleRequest())
             self.gc = gspread.authorize(creds)
-            return True, "✅ Успешная авторизация"
+            # Тестовый запрос
+            self.gc.list_ss_spreadsheet_properties("1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms")
+            self.auth_method = "oauth_token"
+            return True, "✅ Авторизация через OAuth-токен успешна"
         except Exception as e:
-            return False, f"❌ Ошибка авторизации: {e}"
-
-    def init_or_open_sheet(self, sheet_url_or_id: str = None, user_email: str = None):
-        """Создает новую таблицу или открывает существующую"""
+            return False, f"❌ Ошибка OAuth: {e}"
+    
+    def authenticate_service_account(self, creds_json: dict) -> Tuple[bool, str]:
+        """📄 Авторизация через Service Account JSON (старый способ)"""
+        try:
+            creds = ServiceAccountCredentials.from_service_account_info(
+                creds_json, scopes=self.SCOPES
+            )
+            self.gc = gspread.authorize(creds)
+            self.auth_method = "service_account"
+            return True, "✅ Авторизация через Service Account успешна"
+        except Exception as e:
+            return False, f"❌ Ошибка Service Account: {e}"
+    
+    # ====================================================================
+    # 📎 СОЗДАНИЕ / ОТКРЫТИЕ ТАБЛИЦЫ
+    # ====================================================================
+    def init_or_open_sheet(self, sheet_url_or_id: str = None, 
+                           user_email: str = None) -> Tuple[bool, str]:
+        """Создаёт новую PRO-таблицу или открывает существующую"""
         try:
             if sheet_url_or_id:
-                # Пытаемся открыть по ID или URL
                 if "docs.google.com" in sheet_url_or_id:
                     sheet_id = sheet_url_or_id.split('/d/')[1].split('/')[0]
                 else:
                     sheet_id = sheet_url_or_id
                 self.sh = self.gc.open_by_key(sheet_id)
             else:
-                # Создаем новую
-                self.sh = self.gc.create(f"🚗 Юнит-Экономика PRO {datetime.now().strftime('%Y-%m-%d')}")
+                self.sh = self.gc.create(
+                    f"🚗 Юнит-Экономика PRO {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                )
                 if user_email:
                     self.sh.share(user_email, perm_type="user", role="writer")
             
-            # Инициализация листов
-            self._setup_worksheets()
-            return True, f"✅ Таблица готова: {self.sh.url}"
+            # Создаём структуру из 11 листов
+            self._setup_pro_structure()
+            return True, f"✅ PRO-таблица готова: {self.sh.url}"
         except Exception as e:
-            return False, f"❌ Ошибка доступа к таблице: {e}"
-
-    def _setup_worksheets(self):
-        """Создает или находит нужные листы"""
-        sheet_names = ["⚙️ Параметры", "📥 Входные", "📊 Расчёт"]
-        for name in sheet_names:
+            return False, f"❌ Ошибка: {e}"
+    
+    def _setup_pro_structure(self):
+        """Создаёт все 11 PRO-листов"""
+        existing = [ws.title for ws in self.sh.worksheets()]
+        
+        for sheet_name, rows, cols in self.SHEETS_STRUCTURE:
+            if sheet_name in existing:
+                self.ws[sheet_name] = self.sh.worksheet(sheet_name)
+            else:
+                self.ws[sheet_name] = self.sh.add_worksheet(
+                    title=sheet_name, rows=rows, cols=cols
+                )
+        
+        # Удаляем стандартный "Sheet1" если есть
+        if "Sheet1" in existing and len(existing) > 1:
             try:
-                ws = self.sh.worksheet(name)
-            except gspread.exceptions.WorksheetNotFound:
-                ws = self.sh.add_worksheet(title=name, rows=5000, cols=30)
-            
-            if name == "⚙️ Параметры": self.ws_params = ws
-            elif name == "📥 Входные": self.ws_input = ws
-            elif name == "📊 Расчёт": self.ws_calc = ws
-
-    def push_tariffs_to_sheet(self, unit_economics):
-        """Обновляет ТОЛЬКО лист с тарифами (не трогая формулы!)"""
+                self.sh.del_worksheet(self.sh.worksheet("Sheet1"))
+            except Exception:
+                pass
+    
+    # ====================================================================
+    # 🎨 ФОРМАТИРОВАНИЕ
+    # ====================================================================
+    def _apply_header_format(self, ws, row: int, cols: int, 
+                              bg_color: str = None, text_color: str = "FFFFFF"):
+        """Форматирование заголовка"""
+        bg = bg_color or self.COLORS["header_bg"]
+        requests = [{
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": row - 1,
+                    "endRowIndex": row,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": cols
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": {"red": int(bg[0:2], 16)/255,
+                                           "green": int(bg[2:4], 16)/255,
+                                           "blue": int(bg[4:6], 16)/255},
+                        "textFormat": {
+                            "foregroundColor": {"red": int(text_color[0:2], 16)/255,
+                                               "green": int(text_color[2:4], 16)/255,
+                                               "blue": int(text_color[4:6], 16)/255},
+                            "bold": True,
+                            "fontSize": 11
+                        },
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE",
+                        "wrapText": True
+                    }
+                },
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapText)"
+            }
+        }]
+        try:
+            ws.spreadsheet.batch_update({"requests": requests})
+        except Exception:
+            pass
+    
+    def _apply_number_format(self, ws, col_letter: str, start_row: int, 
+                              end_row: int, pattern: str):
+        """Применяет числовой формат к колонке"""
+        col_idx = ord(col_letter.upper()) - ord('A')
+        requests = [{
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": start_row - 1,
+                    "endRowIndex": end_row,
+                    "startColumnIndex": col_idx,
+                    "endColumnIndex": col_idx + 1
+                },
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": pattern}}},
+                "fields": "userEnteredFormat.numberFormat"
+            }
+        }]
+        try:
+            ws.spreadsheet.batch_update({"requests": requests})
+        except Exception:
+            pass
+    
+    def _set_column_widths(self, ws, widths: Dict[str, int]):
+        """Устанавливает ширину колонок"""
+        requests = []
+        for col_letter, width in widths.items():
+            col_idx = ord(col_letter.upper()) - ord('A')
+            requests.append({
+                "updateDimensionProperties": {
+                    "range": {"sheetId": ws.id, "dimension": "COLUMNS",
+                             "startIndex": col_idx, "endIndex": col_idx + 1},
+                    "properties": {"pixelSize": width},
+                    "fields": "pixelSize"
+                }
+            })
+        if requests:
+            try:
+                ws.spreadsheet.batch_update({"requests": requests})
+            except Exception:
+                pass
+    
+    # ====================================================================
+    # ⚙️ ЛИСТ "ПАРАМЕТРЫ" (как в PRO Excel)
+    # ====================================================================
+    def push_parameters_sheet(self, unit_economics):
+        """Заполняет лист ⚙️ Параметры тарифами и глобальными параметрами"""
+        ws = self.ws["⚙️ Параметры"]
+        ws.clear()
+        
+        # Заголовок
+        ws.merge_cells('A1:P1')
+        ws.update('A1', [["⚙️ РАСШИРЕННЫЕ ПАРАМЕТРЫ РАСЧЁТА"]])
+        self._apply_header_format(ws, 1, 16, self.COLORS["header_bg"])
+        
+        ws.merge_cells('A2:P2')
+        ws.update('A2', [["💡 Все параметры редактируемые — изменения применяются ко всем расчётам"]])
+        
+        # === ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ ===
+        ws.merge_cells('A4:P4')
+        ws.update('A4', [["🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ"]])
+        self._apply_header_format(ws, 4, 16, self.COLORS["section_bg"])
+        
+        global_params = [
+            ["Налоговая ставка", 0.06, "Налог от цены продажи"],
+            ["Мин. прибыль (%)", 0.10, "Минимальная целевая прибыль"],
+            ["Дней хранения", 30, "Среднее кол-во дней"],
+            ["ДРР (реклама)", 0.15, "Доля рекламных расходов"],
+            ["Курс USD/RUB", 92.50, "Для импортных товаров"],
+            ["Инфляция %", 0.07, "Годовая инфляция"],
+        ]
+        ws.update('A6', global_params)
+        
+        # Форматирование процентов
+        self._apply_number_format(ws, 'B', 6, 7, "0.00%")
+        self._apply_number_format(ws, 'B', 8, 8, "0")
+        self._apply_number_format(ws, 'B', 9, 10, "0.00%")
+        self._apply_number_format(ws, 'B', 11, 12, "0.00")
+        
+        # === БАЗОВЫЕ ТАРИФЫ ===
+        ws.merge_cells('A14:P14')
+        ws.update('A14', [["📊 БАЗОВЫЕ ТАРИФЫ (ключ = МП|Режим)"]])
+        self._apply_header_format(ws, 14, 16, self.COLORS["section_bg"])
+        
+        headers = [
+            'Ключ', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг',
+            'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты',
+            'Посл. миля', 'Подписка', 'Страховка', 'Упаковка',
+            'Надбавка опасные', 'Источник'
+        ]
+        ws.update('A15', [headers])
+        self._apply_header_format(ws, 15, 16, self.COLORS["mp_header"])
+        
+        # Тарифы
         configs = unit_economics._configs
-        
-        # Заголовки
-        headers = ['Ключ (МП|Режим)', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг', 
-                   'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты', 'Посл. миля', 'Подписка']
-        self.ws_params.update('A1:L1', [headers])
-        
         data_rows = []
-        modes = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
-        
-        for mp_name, config in configs.items():
-            for mode in modes:
+        for mp_name in sorted(configs.keys()):
+            config = configs[mp_name]
+            for mode in self.OPERATION_MODES:
                 key = f"{mp_name}|{mode}"
                 base_rate = config.commission_rate
                 mode_mult = config.mode_multipliers.get(mode, 1.0)
-                
                 data_rows.append([
-                    key, mp_name, mode, 
-                    base_rate * mode_mult, config.logistics_base, config.logistics_per_kg,
-                    config.logistics_per_liter, config.storage_per_day, config.acquiring_fee,
-                    config.return_fee, config.last_mile_fee, config.subscription_fee
+                    key, mp_name, mode,
+                    base_rate * mode_mult,
+                    config.logistics_base,
+                    config.logistics_per_kg,
+                    config.logistics_per_liter,
+                    config.storage_per_day,
+                    config.acquiring_fee,
+                    config.return_fee,
+                    config.last_mile_fee,
+                    config.subscription_fee,
+                    config.insurance_fee,
+                    config.packing_fee,
+                    config.hazardous_surcharge,
+                    config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source)
                 ])
         
-        # Очищаем старые данные и записываем новые (сохраняя структуру)
-        self.ws_params.batch_clear(['A2:L1000'])
         if data_rows:
-            self.ws_params.update('A2', data_rows)
-            
-        return len(data_rows)
-
-    def append_products_to_sheet(self, df: pd.DataFrame, metadata: dict):
-        """Добавляет новые товары во 'Входные' и генерирует формулы в 'Расчёт'"""
-        if df.empty:
-            return 0
-            
-        # 1. Определяем, с какой строки начинать (чтобы не затереть старые)
-        last_input_row = len(self.ws_input.get_all_values())
-        start_row = last_input_row + 1 if last_input_row > 1 else 2
+            ws.update(f'A16', data_rows)
+            # Формат процентов для колонок D, I, J, M, O
+            last_row = 15 + len(data_rows)
+            for col in ['D', 'I', 'J', 'M', 'O']:
+                self._apply_number_format(ws, col, 16, last_row, "0.00%")
+            # Формат денег
+            for col in ['E', 'F', 'G', 'H', 'K', 'L', 'N']:
+                self._apply_number_format(ws, col, 16, last_row, '#,##0.00')
         
-        # 2. Подготовка данных для листа "📥 Входные"
+        # Ширины колонок
+        self._set_column_widths(ws, {
+            'A': 20, 'B': 15, 'C': 12, 'D': 14, 'E': 14, 'F': 14,
+            'G': 14, 'H': 14, 'I': 14, 'J': 14, 'K': 14, 'L': 14,
+            'M': 14, 'N': 14, 'O': 16, 'P': 16
+        })
+        
+        return len(data_rows)
+    
+    # ====================================================================
+    # 📥 ЛИСТ "ВХОДНЫЕ"
+    # ====================================================================
+    def push_input_data(self, df: pd.DataFrame, metadata: dict) -> int:
+        """Заполняет лист 📥 Входные"""
+        ws = self.ws["📥 Входные"]
+        ws.clear()
+        
+        # Заголовок
+        ws.merge_cells('A1:N1')
+        ws.update('A1', [["📥 ВХОДНЫЕ ДАННЫЕ (редактируемые)"]])
+        self._apply_header_format(ws, 1, 14, self.COLORS["header_bg"])
+        
+        ws.merge_cells('A2:N2')
+        ws.update('A2', [["💡 Меняйте значения — все листы пересчитаются автоматически"]])
+        
+        headers = [
+            'Артикул', 'Бренд', 'МП', 'Режим', 'Категория',
+            'Цена', 'Себестоимость', 'Вес, кг',
+            'Длина, см', 'Ширина, см', 'Высота, см',
+            'Объём, л', 'Оплач. вес', 'Наценка %'
+        ]
+        ws.update('A3', [headers])
+        self._apply_header_format(ws, 3, 14, self.COLORS["header_bg"])
+        
+        # Данные
         input_data = []
         for _, row in df.iterrows():
+            length = float(row.get('length', 0) or 0)
+            width = float(row.get('width', 0) or 0)
+            height = float(row.get('height', 0) or 0)
+            weight = float(row.get('weight', 0) or 0)
+            volume = (length * width * height) / 1000 if all([length, width, height]) else 0
+            
             input_data.append([
                 str(row.get('Артикул', '')),
                 str(row.get('Бренд', '')),
                 str(row.get('marketplace', metadata.get('marketplace', 'Ozon'))),
                 str(row.get('operation_mode', metadata.get('mode', 'FBS'))),
                 str(row.get('category', '')).lower().replace(' ', '_'),
-                float(row.get('price', 0)),
-                float(row.get('cost', 0)),
-                float(row.get('weight', 0)),
-                float(row.get('length', 0)),
-                float(row.get('width', 0)),
-                float(row.get('height', 0))
+                float(row.get('price', 0) or 0),
+                float(row.get('cost', 0) or 0),
+                weight,
+                length, width, height,
+                volume,
+                max(weight, volume / 5) if volume > 0 else weight,  # billable weight
+                0
             ])
+        
+        if input_data:
+            ws.update(f'A4', input_data)
+            last_row = 3 + len(input_data)
             
-        # 3. Запись в "📥 Входные"
-        self.ws_input.update(f'A{start_row}', input_data)
+            # Формат денег
+            for col in ['F', 'G']:
+                self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
+            # Формат чисел
+            for col in ['H', 'I', 'J', 'K', 'L', 'M']:
+                self._apply_number_format(ws, col, 4, last_row, '0.00')
         
-        # 4. Генерация и запись ЖИВЫХ ФОРМУЛ в "📊 Расчёт"
-        calc_formulas = []
-        params_range = "'⚙️ Параметры'!$A$2:$L$5000"
+        self._set_column_widths(ws, {
+            'A': 18, 'B': 18, 'C': 15, 'D': 12, 'E': 18,
+            'F': 14, 'G': 14, 'H': 12, 'I': 12, 'J': 12,
+            'K': 12, 'L': 12, 'M': 14, 'N': 12
+        })
         
+        return len(input_data)
+    
+    # ====================================================================
+    # 📊 ЛИСТ "РАСЧЁТ" (ЖИВЫЕ ФОРМУЛЫ)
+    # ====================================================================
+    def generate_calc_formulas(self, total_items: int):
+        """Генерирует живые формулы на листе 📊 Расчёт"""
+        ws = self.ws["📊 Расчёт"]
+        ws.clear()
+        
+        if total_items == 0:
+            return 0
+        
+        # Заголовки
+        ws.merge_cells('A1:W1')
+        ws.update('A1', [["📊 ПОЛНЫЙ РАСЧЁТ ЮНИТ-ЭКОНОМИКИ"]])
+        self._apply_header_format(ws, 1, 23, self.COLORS["header_bg"])
+        
+        ws.merge_cells('A2:W2')
+        ws.update('A2', [["⚠️ Все расчёты автоматические — не редактируйте формулы"]])
+        
+        headers = [
+            'Артикул', 'МП', 'Режим', 'Категория',
+            'Цена', 'Себестоимость', 'Вес', 'Объём',
+            'Комиссия', 'Логистика', 'Хранение',
+            'Эквайринг', 'Посл. миля', 'Возвраты',
+            'Реклама', 'Налог', 'Страховка', 'Упаковка',
+            'ИТОГО расходов', '💰 ПРИБЫЛЬ',
+            'Маржа %', 'ROI %', 'Безубыточность'
+        ]
+        ws.update('A3', [headers])
+        self._apply_header_format(ws, 3, 23, self.COLORS["header_bg"])
+        
+        # Ссылки на Параметры
+        p_tax = "'⚙️ Параметры'!$B$6"
+        p_min_profit = "'⚙️ Параметры'!$B$7"
+        p_ad = "'⚙️ Параметры'!$B$9"
+        p_days = "'⚙️ Параметры'!$B$8"
+        params_range = "'⚙️ Параметры'!$A$16:$P$500"
+        
+        # Генерация формул для каждой строки
+        formulas = []
+        for i in range(total_items):
+            excel_row = 4 + i
+            input_row = 4 + i
+            
+            in_art = f"'📥 Входные'!A{input_row}"
+            in_mp = f"'📥 Входные'!C{input_row}"
+            in_mode = f"'📥 Входные'!D{input_row}"
+            in_cat = f"'📥 Входные'!E{input_row}"
+            in_price = f"'📥 Входные'!F{input_row}"
+            in_cost = f"'📥 Входные'!G{input_row}"
+            in_weight = f"'📥 Входные'!H{input_row}"
+            in_volume = f"'📥 Входные'!L{input_row}"
+            
+            lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
+            
+            row_formulas = [
+                f"={in_art}",                                           # A: Артикул
+                f"={in_mp}",                                            # B: МП
+                f"={in_mode}",                                          # C: Режим
+                f"={in_cat}",                                           # D: Категория
+                f"={in_price}",                                         # E: Цена
+                f"={in_cost}",                                          # F: Себестоимость
+                f"={in_weight}",                                        # G: Вес
+                f"={in_volume}",                                        # H: Объём
+                f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",  # I: Комиссия
+                f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+{in_volume}*VLOOKUP({lookup_key},{params_range},7,FALSE)",  # J: Логистика
+                f"={in_volume}*VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",  # K: Хранение
+                f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",  # L: Эквайринг
+                f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",      # M: Посл. миля
+                f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",  # N: Возвраты
+                f"={in_price}*{p_ad}",                                  # O: Реклама
+                f"={in_price}*{p_tax}",                                 # P: Налог
+                f"=VLOOKUP({lookup_key},{params_range},13,FALSE)*{in_price}",  # Q: Страховка
+                f"=VLOOKUP({lookup_key},{params_range},14,FALSE)",      # R: Упаковка
+                f"={in_cost}+SUM(I{excel_row}:R{excel_row})",           # S: ИТОГО расходов
+                f"={in_price}-S{excel_row}",                            # T: ПРИБЫЛЬ
+                f"=IF({in_price}>0,T{excel_row}/{in_price},0)",         # U: Маржа %
+                f"=IF({in_cost}>0,T{excel_row}/{in_cost},0)",           # V: ROI %
+                f"=T{excel_row}/(1-VLOOKUP({lookup_key},{params_range},4,FALSE)-VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",  # W: Безубыточность
+            ]
+            formulas.append(row_formulas)
+        
+        # Записываем формулы батчем
+        BATCH_SIZE = 500
+        for start_idx in range(0, len(formulas), BATCH_SIZE):
+            batch = formulas[start_idx:start_idx + BATCH_SIZE]
+            end_row = 4 + start_idx + len(batch) - 1
+            try:
+                ws.update(f'A{4 + start_idx}:W{end_row}', batch, 
+                         value_input_option=ValueInputOption.user_entered)
+            except Exception as e:
+                print(f"Ошибка записи формул: {e}")
+        
+        # Форматирование
+        last_row = 3 + total_items
+        for col in ['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'W']:
+            self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
+        for col in ['U', 'V']:
+            self._apply_number_format(ws, col, 4, last_row, '0.00%')
+        
+        # ИТОГО строка
+        total_row = last_row + 2
+        ws.update(f'A{total_row}', [["ИТОГО / СРЕДНЕЕ:"]])
+        for col_idx, col_letter in enumerate(['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T'], start=4):
+            ws.update(f'{chr(64+col_idx)}{total_row}', 
+                     [[f"=SUM({col_letter}4:{col_letter}{last_row})"]])
+        for col_idx, col_letter in enumerate(['U', 'V'], start=20):
+            ws.update(f'{chr(64+col_idx)}{total_row}', 
+                     [[f"=AVERAGE({col_letter}4:{col_letter}{last_row})"]])
+        
+        self._set_column_widths(ws, {
+            'A': 15, 'B': 14, 'C': 10, 'D': 14, 'E': 12, 'F': 12,
+            'G': 10, 'H': 10, 'I': 12, 'J': 12, 'K': 12, 'L': 12,
+            'M': 12, 'N': 12, 'O': 12, 'P': 12, 'Q': 12, 'R': 12,
+            'S': 15, 'T': 15, 'U': 12, 'V': 12, 'W': 14
+        })
+        
+        return total_items
+    
+    # ====================================================================
+    # 📊 ЛИСТ "ДАШБОРД" (KPI)
+    # ====================================================================
+    def generate_dashboard(self, df: pd.DataFrame):
+        """Генерирует лист 📊 Дашборд с KPI"""
+        ws = self.ws["📊 Дашборд"]
+        ws.clear()
+        
+        ws.merge_cells('A1:H1')
+        ws.update('A1', [["🚀 СУПЕР-ДАШБОРД ЮНИТ-ЭКОНОМИКИ"]])
+        self._apply_header_format(ws, 1, 8, self.COLORS["header_bg"])
+        
+        ws.merge_cells('A2:H2')
+        ws.update('A2', [["📊 Ключевые показатели эффективности (KPI)"]])
+        
+        # KPI
+        total_profit = df['profit'].sum() if 'profit' in df.columns else 0
+        avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
+        avg_roi = df['roi'].mean() if 'roi' in df.columns else 0
+        total_revenue = df['price'].sum() if 'price' in df.columns else 0
+        total_expenses = df['total_expenses'].sum() if 'total_expenses' in df.columns else 0
+        unprofitable = (df['profit'] < 0).sum() if 'profit' in df.columns else 0
+        
+        kpis = [
+            ["📦 Всего SKU", len(df), "шт"],
+            ["💰 Общая прибыль", total_profit, "₽"],
+            ["📈 Средняя маржа", avg_margin / 100, "%"],
+            ["📊 Средний ROI", avg_roi / 100, "%"],
+            ["💵 Общая выручка", total_revenue, "₽"],
+            ["💸 Общие расходы", total_expenses, "₽"],
+            ["⚠️ Убыточных SKU", unprofitable, "шт"],
+        ]
+        ws.update('A4', kpis)
+        
+        # Формат
+        self._apply_number_format(ws, 'B', 5, 5, '#,##0.00')
+        self._apply_number_format(ws, 'B', 6, 6, '#,##0.00')
+        self._apply_number_format(ws, 'B', 7, 8, '0.00%')
+        self._apply_number_format(ws, 'B', 9, 10, '#,##0.00')
+        
+        # Прибыль по маркетплейсам
+        if 'marketplace' in df.columns:
+            ws.update('A13', [["🏪 Прибыль по маркетплейсам"]])
+            mp_profit = df.groupby('marketplace')['profit'].sum().sort_values(ascending=False)
+            mp_data = [[mp, profit] for mp, profit in mp_profit.items()]
+            if mp_data:
+                ws.update('A14', [["Маркетплейс", "Прибыль"]] + mp_data)
+        
+        self._set_column_widths(ws, {'A': 25, 'B': 25, 'C': 15})
+    
+    # ====================================================================
+    # 🏪 ЛИСТ "СРАВНЕНИЕ МП"
+    # ====================================================================
+    def generate_marketplace_comparison(self, df: pd.DataFrame):
+        """Генерирует лист 🏪 Сравнение МП"""
+        ws = self.ws["🏪 Сравнение МП"]
+        ws.clear()
+        
+        ws.merge_cells('A1:K1')
+        ws.update('A1', [["🏪 СРАВНИТЕЛЬНЫЙ АНАЛИЗ МАРКЕТПЛЕЙСОВ"]])
+        self._apply_header_format(ws, 1, 11, self.COLORS["header_bg"])
+        
+        headers = ['МП', 'SKU', 'Выручка', 'Расходы', 'Прибыль',
+                   'Ср. прибыль', 'Ср. маржа %', 'ROI %',
+                   'Доля рынка %', 'Эффективность', 'Рейтинг']
+        ws.update('A3', [headers])
+        self._apply_header_format(ws, 3, 11, self.COLORS["header_bg"])
+        
+        if 'marketplace' not in df.columns:
+            return
+        
+        mp_stats = df.groupby('marketplace').agg({
+            'price': 'sum',
+            'total_expenses': 'sum',
+            'profit': ['sum', 'mean'],
+            'margin_percent': 'mean',
+            'roi': 'mean',
+        }).reset_index()
+        mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа', 'ROI']
+        
+        total_profit = mp_stats['Прибыль'].sum()
+        data = []
+        for i, row in mp_stats.iterrows():
+            share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
+            efficiency = (row['Прибыль'] / row['Выручка']) if row['Выручка'] > 0 else 0
+            data.append([
+                row['МП'],
+                f"=COUNTIF('📊 Расчёт'!$B:$B,A{4+i})",
+                row['Выручка'],
+                row['Расходы'],
+                row['Прибыль'],
+                row['Ср. прибыль'],
+                row['Ср. маржа'] / 100,
+                row['ROI'] / 100,
+                share / 100,
+                efficiency,
+                f"=RANK(E{4+i},$E$4:$E${3+len(mp_stats)})"
+            ])
+        
+        if data:
+            ws.update(f'A4', data)
+            last_row = 3 + len(data)
+            for col in ['C', 'D', 'E', 'F']:
+                self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
+            for col in ['G', 'H', 'I', 'J']:
+                self._apply_number_format(ws, col, 4, last_row, '0.00%')
+    
+    # ====================================================================
+    # 📂 ЛИСТ "КАТЕГОРИИ"
+    # ====================================================================
+    def generate_category_analysis(self, df: pd.DataFrame):
+        """Генерирует лист 📂 Категории"""
+        ws = self.ws["📂 Категории"]
+        ws.clear()
+        
+        ws.merge_cells('A1:H1')
+        ws.update('A1', [["📂 АНАЛИЗ ПО КАТЕГОРИЯМ"]])
+        self._apply_header_format(ws, 1, 8, self.COLORS["header_bg"])
+        
+        headers = ['Категория', 'SKU', 'Выручка', 'Прибыль', 'Ср. маржа %',
+                   'Топ товар', 'Прибыль топ', 'Доля %']
+        ws.update('A3', [headers])
+        self._apply_header_format(ws, 3, 8, self.COLORS["header_bg"])
+        
+        if 'category' not in df.columns:
+            return
+        
+        cat_stats = df.groupby('category').agg({
+            'price': 'sum',
+            'profit': 'sum',
+            'margin_percent': 'mean',
+        }).reset_index()
+        cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. маржа']
+        
+        total_profit = cat_stats['Прибыль'].sum()
+        data = []
+        for i, row in cat_stats.iterrows():
+            share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
+            data.append([
+                row['Категория'],
+                f"=COUNTIF('📊 Расчёт'!$D:$D,A{4+i})",
+                row['Выручка'],
+                row['Прибыль'],
+                row['Ср. маржа'] / 100,
+                f"=INDEX('📊 Расчёт'!$A:$A,MATCH(MAX(IF('📊 Расчёт'!$D:$D=A{4+i},'📊 Расчёт'!$T:$T)),'📊 Расчёт'!$T:$T,0))",
+                f"=MAX(IF('📊 Расчёт'!$D:$D=A{4+i},'📊 Расчёт'!$T:$T))",
+                share / 100
+            ])
+        
+        if data:
+            ws.update(f'A4', data)
+    
+    # ====================================================================
+    # 📈 ЛИСТ "ПРОГНОЗ"
+    # ====================================================================
+    def generate_forecast(self, df: pd.DataFrame):
+        """Генерирует лист 📈 Прогноз на 12 месяцев"""
+        ws = self.ws["📈 Прогноз"]
+        ws.clear()
+        
+        ws.merge_cells('A1:G1')
+        ws.update('A1', [["📈 ПРОГНОЗ ПРИБЫЛИ НА 12 МЕСЯЦЕВ"]])
+        self._apply_header_format(ws, 1, 7, self.COLORS["header_bg"])
+        
+        headers = ['Месяц', 'Оптимистичный', 'Базовый', 'Пессимистичный',
+                   'Ср. значение', 'Рост %', 'Тренд']
+        ws.update('A3', [headers])
+        self._apply_header_format(ws, 3, 7, self.COLORS["header_bg"])
+        
+        total_profit = df['profit'].sum() if 'profit' in df.columns else 0
+        base_monthly = total_profit / 12 if total_profit > 0 else 1000
+        growth_rate = 0.05
+        volatility = 0.15
+        seasonal = [0.85, 0.85, 0.95, 1.05, 1.10, 1.15,
+                    1.20, 1.15, 1.10, 1.05, 0.95, 0.90]
+        month_names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
+                       'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+        
+        data = []
+        for i in range(12):
+            month_factor = seasonal[i]
+            trend_factor = (1 + growth_rate) ** (i / 12)
+            base = base_monthly * month_factor * trend_factor
+            optimistic = base * (1 + volatility * 0.5)
+            pessimistic = base * (1 - volatility * 0.3)
+            
+            if i > 0:
+                prev_base = base_monthly * seasonal[i-1] * (1 + growth_rate) ** ((i-1)/12)
+                growth = (base / prev_base - 1) if prev_base > 0 else 0
+                trend = "↑" if growth > 0.02 else "↓" if growth < -0.02 else "→"
+            else:
+                growth = 0
+                trend = "→"
+            
+            data.append([
+                month_names[i], optimistic, base, pessimistic,
+                base, growth, trend
+            ])
+        
+        ws.update(f'A4', data)
+        last_row = 3 + 12
+        for col in ['B', 'C', 'D', 'E']:
+            self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
+        self._apply_number_format(ws, 'F', 4, last_row, '0.00%')
+    
+    # ====================================================================
+    # 🎯 ЛИСТ "ЧУВСТВИТЕЛЬНОСТЬ"
+    # ====================================================================
+    def generate_sensitivity(self, df: pd.DataFrame):
+        """Генерирует лист 🎯 Чувствительность"""
+        ws = self.ws["🎯 Чувствительность"]
+        ws.clear()
+        
+        ws.merge_cells('A1:I1')
+        ws.update('A1', [["🎯 АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ"]])
+        self._apply_header_format(ws, 1, 9, self.COLORS["header_bg"])
+        
+        ws.merge_cells('A2:I2')
+        ws.update('A2', [["Как изменяется прибыль при изменении ключевых параметров"]])
+        
+        avg_price = df['price'].mean() if 'price' in df.columns else 1000
+        avg_cost = df['cost'].mean() if 'cost' in df.columns else 500
+        
+        ws.update('A4', [["Параметр", "Текущее", "-20%", "-10%", "0%", "+10%", "+20%"]])
+        self._apply_header_format(ws, 4, 7, self.COLORS["header_bg"])
+        
+        scenarios = [
+            ["Цена продажи", avg_price],
+            ["Себестоимость", avg_cost],
+            ["Комиссия МП", 0.15],
+            ["Логистика", 100],
+            ["Реклама (ДРР)", 0.15],
+        ]
+        
+        data = []
+        for param_name, base_value in scenarios:
+            row_data = [param_name, base_value]
+            for change in [-0.20, -0.10, 0, 0.10, 0.20]:
+                row_data.append(base_value * (1 + change))
+            data.append(row_data)
+        
+        ws.update(f'A5', data)
+    
+    # ====================================================================
+    # 🏆 ЛИСТ "ТОП"
+    # ====================================================================
+    def generate_top(self, df: pd.DataFrame):
+        """Генерирует лист 🏆 Топ прибыльных/убыточных"""
+        ws = self.ws["🏆 Топ"]
+        ws.clear()
+        
+        ws.merge_cells('A1:F1')
+        ws.update('A1', [["🏆 ТОП-10 ПРИБЫЛЬНЫХ И УБЫТОЧНЫХ"]])
+        self._apply_header_format(ws, 1, 6, self.COLORS["header_bg"])
+        
+        ws.update('A3', [["ТОП-10 ПРИБЫЛЬНЫХ"]])
+        ws.update('A4', [["№", "Артикул", "МП", "Прибыль", "Маржа %", "Рекомендация"]])
+        self._apply_header_format(ws, 4, 6, self.COLORS["header_bg"])
+        
+        if 'profit' in df.columns and 'Артикул' in df.columns:
+            top_df = df.nlargest(10, 'profit')
+            data = []
+            for i, (_, row) in enumerate(top_df.iterrows()):
+                data.append([
+                    i + 1,
+                    row.get('Артикул', ''),
+                    row.get('marketplace', ''),
+                    row.get('profit', 0),
+                    row.get('margin_percent', 0) / 100,
+                    "✅ Лидер"
+                ])
+            if data:
+                ws.update(f'A5', data)
+        
+        bottom_start = 18
+        ws.update(f'A{bottom_start}', [["ТОП-10 УБЫТОЧНЫХ"]])
+        ws.update(f'A{bottom_start+1}', [["№", "Артикул", "МП", "Прибыль", "Маржа %", "Рекомендация"]])
+        self._apply_header_format(ws, bottom_start+1, 6, self.COLORS["header_bg"])
+        
+        if 'profit' in df.columns:
+            bottom_df = df.nsmallest(10, 'profit')
+            data = []
+            for i, (_, row) in enumerate(bottom_df.iterrows()):
+                data.append([
+                    i + 1,
+                    row.get('Артикул', ''),
+                    row.get('marketplace', ''),
+                    row.get('profit', 0),
+                    row.get('margin_percent', 0) / 100,
+                    "⚠️ Требует внимания"
+                ])
+            if data:
+                ws.update(f'A{bottom_start+2}', data)
+    
+    # ====================================================================
+    # 💡 ЛИСТ "РЕКОМЕНДАЦИИ"
+    # ====================================================================
+    def generate_recommendations(self, df: pd.DataFrame):
+        """Генерирует лист 💡 Рекомендации"""
+        ws = self.ws["💡 Рекомендации"]
+        ws.clear()
+        
+        ws.merge_cells('A1:D1')
+        ws.update('A1', [["💡 АВТОМАТИЧЕСКИЕ РЕКОМЕНДАЦИИ"]])
+        self._apply_header_format(ws, 1, 4, self.COLORS["header_bg"])
+        
+        ws.merge_cells('A2:D2')
+        ws.update('A2', [["Система анализирует данные и предлагает оптимальные решения"]])
+        
+        row = 4
+        recommendations = []
+        
+        if 'marketplace' in df.columns and 'profit' in df.columns:
+            best_mp = df.groupby('marketplace')['profit'].sum().idxmax()
+            recommendations.append(["🏪 Лучший маркетплейс", 
+                                    f"✅ Рекомендуется использовать {best_mp} — он приносит максимальную прибыль"])
+        
+        if 'operation_mode' in df.columns and 'profit' in df.columns:
+            best_mode = df.groupby('operation_mode')['profit'].sum().idxmax()
+            recommendations.append(["📦 Оптимальный режим", 
+                                    f"✅ Режим {best_mode} показывает лучшие результаты"])
+        
+        avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
+        if avg_margin < 15:
+            recommendations.append(["💰 Ценовая политика", 
+                                    "⚠️ Средняя маржа ниже 15%. Рекомендуется пересмотреть цены"])
+        
+        if 'profit' in df.columns:
+            unprofitable = (df['profit'] < 0).sum()
+            if unprofitable > 0:
+                recommendations.append(["⚠️ Убыточные товары", 
+                                        f"⚠️ {unprofitable} товаров убыточны. Рекомендуется провести аудит"])
+        
+        if recommendations:
+            ws.update(f'A{row}', recommendations)
+    
+    # ====================================================================
+    # 📋 ЛИСТ "СВОДКА"
+    # ====================================================================
+    def generate_summary(self, df: pd.DataFrame, metadata: dict):
+        """Генерирует лист 📋 Сводка"""
+        ws = self.ws["📋 Сводка"]
+        ws.clear()
+        
+        ws.merge_cells('A1:C1')
+        ws.update('A1', [["📋 СВОДКА ЭКСПОРТА"]])
+        self._apply_header_format(ws, 1, 3, self.COLORS["header_bg"])
+        
+        summary = [
+            ["📅 Дата экспорта", datetime.now().strftime('%d.%m.%Y %H:%M:%S')],
+            ["📦 Всего товаров", len(df)],
+            ["🏪 Маркетплейсы", ", ".join(metadata.get('marketplaces', ['Ozon']))],
+            ["📊 Режимы", ", ".join(metadata.get('modes', ['FBS']))],
+            ["💰 Общая прибыль", f"{df['profit'].sum():,.0f} ₽" if 'profit' in df.columns else "Н/Д"],
+            ["📈 Средняя маржа", f"{df['margin_percent'].mean():.1f}%" if 'margin_percent' in df.columns else "Н/Д"],
+            ["⚙️ Версия", "PRO v100.15 (Google Sheets)"],
+        ]
+        ws.update('A3', summary)
+    
+    # ====================================================================
+    # 🚀 ГЛАВНЫЙ МЕТОД: ПОЛНАЯ ГЕНЕРАЦИЯ PRO-ТАБЛИЦЫ
+    # ====================================================================
+    def generate_full_pro(self, df: pd.DataFrame, unit_economics, metadata: dict) -> Tuple[bool, str]:
+        """🚀 Генерирует полную PRO-структуру из 11 листов"""
+        try:
+            # 1. Параметры (тарифы)
+            self.push_parameters_sheet(unit_economics)
+            
+            # 2. Входные данные
+            total_items = self.push_input_data(df, metadata)
+            
+            # 3. Расчёт с живыми формулами
+            self.generate_calc_formulas(total_items)
+            
+            # 4. Дашборд
+            self.generate_dashboard(df)
+            
+            # 5. Сравнение МП
+            self.generate_marketplace_comparison(df)
+            
+            # 6. Категории
+            self.generate_category_analysis(df)
+            
+            # 7. Прогноз
+            self.generate_forecast(df)
+            
+            # 8. Чувствительность
+            self.generate_sensitivity(df)
+            
+            # 9. Топ
+            self.generate_top(df)
+            
+            # 10. Рекомендации
+            self.generate_recommendations(df)
+            
+            # 11. Сводка
+            self.generate_summary(df, metadata)
+            
+            return True, f"✅ PRO-таблица создана: {total_items} товаров, 11 листов"
+        except Exception as e:
+            return False, f"❌ Ошибка генерации: {e}"
+    
+    # ====================================================================
+    # 🔄 ОБНОВЛЕНИЕ ТОЛЬКО ТАРИФОВ (без пересоздания)
+    # ====================================================================
+    def update_tariffs_only(self, unit_economics) -> int:
+        """Обновляет ТОЛЬКО лист ⚙️ Параметры (формулы пересчитаются автоматически)"""
+        return self.push_parameters_sheet(unit_economics)
+    
+    # ====================================================================
+    # ➕ ДОБАВЛЕНИЕ НОВЫХ ТОВАРОВ (без затирания старых)
+    # ====================================================================
+    def append_new_products(self, df: pd.DataFrame, metadata: dict) -> int:
+        """Добавляет новые товары в существующую таблицу"""
+        if df.empty:
+            return 0
+        
+        ws_input = self.ws["📥 Входные"]
+        last_row = len(ws_input.get_all_values())
+        start_row = max(2, last_row + 1)
+        
+        # Добавляем данные во Входные
+        input_data = []
+        for _, row in df.iterrows():
+            length = float(row.get('length', 0) or 0)
+            width = float(row.get('width', 0) or 0)
+            height = float(row.get('height', 0) or 0)
+            weight = float(row.get('weight', 0) or 0)
+            volume = (length * width * height) / 1000 if all([length, width, height]) else 0
+            
+            input_data.append([
+                str(row.get('Артикул', '')),
+                str(row.get('Бренд', '')),
+                str(row.get('marketplace', metadata.get('marketplace', 'Ozon'))),
+                str(row.get('operation_mode', metadata.get('mode', 'FBS'))),
+                str(row.get('category', '')).lower().replace(' ', '_'),
+                float(row.get('price', 0) or 0),
+                float(row.get('cost', 0) or 0),
+                weight, length, width, height,
+                volume,
+                max(weight, volume / 5) if volume > 0 else weight,
+                0
+            ])
+        
+        ws_input.update(f'A{start_row}', input_data)
+        
+        # Добавляем формулы в Расчёт
+        ws_calc = self.ws["📊 Расчёт"]
+        calc_last_row = len(ws_calc.get_all_values())
+        calc_start_row = max(4, calc_last_row + 1)
+        
+        p_tax = "'⚙️ Параметры'!$B$6"
+        p_ad = "'⚙️ Параметры'!$B$9"
+        p_days = "'⚙️ Параметры'!$B$8"
+        params_range = "'⚙️ Параметры'!$A$16:$P$500"
+        
+        formulas = []
         for i in range(len(input_data)):
             r = start_row + i
-            # Ссылки на лист "Входные"
+            calc_r = calc_start_row + i
+            
             in_mp = f"'📥 Входные'!C{r}"
             in_mode = f"'📥 Входные'!D{r}"
             in_price = f"'📥 Входные'!F{r}"
             in_cost = f"'📥 Входные'!G{r}"
             in_weight = f"'📥 Входные'!H{r}"
-            in_vol = f"('📥 Входные'!I{r}*'📥 Входные'!J{r}*'📥 Входные'!K{r})/1000"
-            
+            in_volume = f"'📥 Входные'!L{r}"
             lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
             
-            # Массив формул для одной строки
-            row_formulas = [
-                f"='📥 Входные'!A{r}", # Артикул
-                f"={in_mp}",            # МП
-                f"={in_price}",         # Цена
-                f"={in_cost}",          # Себестоимость
-                f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}", # Комиссия
-                f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+{in_vol}*VLOOKUP({lookup_key},{params_range},7,FALSE)", # Логистика
-                f"={in_vol}*VLOOKUP({lookup_key},{params_range},8,FALSE)*30", # Хранение
-                f"=SUM(E{r}:G{r})+{in_cost}", # Итого расходов
-                f"={in_price}-H{r}",    # ПРИБЫЛЬ
-                f"=IF({in_price}>0,I{r}/{in_price},0)", # Маржа %
-                f"=IF({in_cost}>0,I{r}/{in_cost},0)"  # ROI %
-            ]
-            calc_formulas.append(row_formulas)
-            
-        # Записываем формулы (gspread сам поймет, что это формулы, если они начинаются с '=')
-        self.ws_calc.update(f'A{start_row}', calc_formulas)
+            formulas.append([
+                f"='📥 Входные'!A{r}",
+                f"={in_mp}",
+                f"={in_mode}",
+                f"='📥 Входные'!E{r}",
+                f"={in_price}",
+                f"={in_cost}",
+                f"={in_weight}",
+                f"={in_volume}",
+                f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",
+                f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+{in_volume}*VLOOKUP({lookup_key},{params_range},7,FALSE)",
+                f"={in_volume}*VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",
+                f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",
+                f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",
+                f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",
+                f"={in_price}*{p_ad}",
+                f"={in_price}*{p_tax}",
+                f"=VLOOKUP({lookup_key},{params_range},13,FALSE)*{in_price}",
+                f"=VLOOKUP({lookup_key},{params_range},14,FALSE)",
+                f"={in_cost}+SUM(I{calc_r}:R{calc_r})",
+                f"={in_price}-S{calc_r}",
+                f"=IF({in_price}>0,T{calc_r}/{in_price},0)",
+                f"=IF({in_cost}>0,T{calc_r}/{in_cost},0)",
+                f"=T{calc_r}/(1-VLOOKUP({lookup_key},{params_range},4,FALSE)-VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",
+            ])
+        
+        try:
+            ws_calc.update(f'A{calc_start_row}:W{calc_start_row + len(formulas) - 1}', 
+                          formulas, value_input_option=ValueInputOption.user_entered)
+        except Exception as e:
+            print(f"Ошибка добавления формул: {e}")
         
         return len(input_data)
-
-    def get_sheet_url(self):
+    
+    def get_sheet_url(self) -> Optional[str]:
         return self.sh.url if self.sh else None
-
-
-# ============================================================================
-# 🎨 UI ДЛЯ GOOGLE ТАБЛИЦ
-# ============================================================================
-def show_google_sheets_interface():
-    """🌐 Интерфейс экспорта и обновления Google Таблиц"""
-    st.header("🌐 Google Таблицы (Live Formulas)")
-    st.info("""
-    🚀 **Экспорт в Google Таблицы с живыми формулами**
-    1. Данные и формулы выгружаются напрямую.
-    2. При обновлении тарифов пересчет происходит **автоматически** в самой таблице.
-    3. Новые товары добавляются без потери старых данных и формул.
-    """)
-    
-    # Инициализация менеджера
-    if 'gsheets_manager' not in st.session_state:
-        st.session_state.gsheets_manager = GoogleSheetsProManager()
-    manager = st.session_state.gsheets_manager
-    
-    # === ШАГ 1: АВТОРИЗАЦИЯ ===
-    st.subheader("🔑 Шаг 1: Авторизация Google Cloud")
-    creds_file = st.file_uploader(
-        "Загрузите `credentials.json` (Service Account)", 
-        type=['json'], 
-        key="gs_creds",
-        help="Скачайте JSON ключ в Google Cloud Console (IAM & Admin -> Service Accounts)"
-    )
-    
-    user_email = st.text_input("Ваш Email (для доступа к таблице)", placeholder="your@email.com")
-    
-    if creds_file and st.button("🔐 Авторизоваться", key="gs_auth"):
-        with st.spinner("Подключение к Google..."):
-            creds_json = json.load(creds_file)
-            success, msg = manager.authenticate(creds_json)
-            if success:
-                st.success(msg)
-                st.session_state.gs_authenticated = True
-                st.rerun()
-            else:
-                st.error(msg)
-
-    if not st.session_state.get('gs_authenticated'):
-        st.warning("⚠️ Требуется авторизация. [Инструкция по получению credentials.json](https://docs.gspread.org/en/latest/oauth2.html#for-bots-using-service-account)")
-        return
-
-    st.divider()
-    
-    # === ШАГ 2: ПРИВЯЗКА ТАБЛИЦЫ ===
-    st.subheader("📎 Шаг 2: Привязка Google Таблицы")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        sheet_url = st.text_input("URL существующей таблицы (или оставьте пустым для создания новой)")
-    with col2:
-        if st.button("🔗 Подключить / Создать", key="gs_connect"):
-            with st.spinner("Настройка листов..."):
-                success, msg = manager.init_or_open_sheet(sheet_url, user_email)
-                if success:
-                    st.success(msg)
-                    st.session_state.gs_sheet_url = manager.get_sheet_url()
-                    st.rerun()
-                else:
-                    st.error(msg)
-
-    if not st.session_state.get('gs_sheet_url'):
-        st.info("💡 Создайте новую таблицу или вставьте URL существующей.")
-        return
-
-    st.success(f"📊 **Рабочая таблица:** [Открыть]({st.session_state.gs_sheet_url})")
-    st.divider()
-    
-    # === ШАГ 3: ДЕЙСТВИЯ ===
-    st.subheader("🚀 Шаг 3: Управление данными и тарифами")
-    
-    unit_economics = get_marketplace_unit_economics()
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("#### 💾 Выгрузка каталога")
-        if st.button("📤 Выгрузить текущий каталог", use_container_width=True, key="gs_push_catalog"):
-            if 'uploaded_data' in st.session_state and not st.session_state.uploaded_data.empty:
-                with st.spinner("Генерация формул и выгрузка..."):
-                    try:
-                        # Сначала пушим тарифы
-                        manager.push_tariffs_to_sheet(unit_economics)
-                        # Потом товары
-                        df = st.session_state.uploaded_data
-                        count = manager.append_products_to_sheet(df, {'marketplace': 'Ozon', 'mode': 'FBS'})
-                        st.success(f"✅ Выгружено {count} товаров с живыми формулами!")
-                    except Exception as e:
-                        st.error(f"Ошибка: {e}")
-            else:
-                st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
-
-    with col2:
-        st.markdown("#### 🔄 Обновление тарифов")
-        if st.button("💹 Обновить тарифы в таблице", use_container_width=True, key="gs_update_tariffs"):
-            with st.spinner("Обновление листа '⚙️ Параметры'..."):
-                try:
-                    count = manager.push_tariffs_to_sheet(unit_economics)
-                    st.success(f"✅ Тарифы обновлены ({count} строк). Формулы в таблице пересчитаются автоматически!")
-                except Exception as e:
-                    st.error(f"Ошибка: {e}")
-
-    with col3:
-        st.markdown("#### ➕ Добавление новых товаров")
-        if st.button("📈 Дописать новые товары", use_container_width=True, key="gs_append_new"):
-            if 'ue_parallel_results' in st.session_state and not st.session_state.ue_parallel_results.empty:
-                with st.spinner("Добавление строк без затирания старых..."):
-                    try:
-                        df = st.session_state.ue_parallel_results
-                        count = manager.append_products_to_sheet(df, {'marketplace': 'Ozon', 'mode': 'FBS'})
-                        st.success(f"✅ Добавлено {count} новых строк с формулами!")
-                    except Exception as e:
-                        st.error(f"Ошибка: {e}")
-            else:
-                st.warning("⚠️ Нет новых результатов расчёта для добавления.")
-
-    st.divider()
-    st.markdown("### 🧠 Как это работает?")
-    st.markdown("""
-    - **Лист «⚙️ Параметры»**: Хранит все комиссии, логистику и тарифы.
-    - **Лист «📥 Входные»**: Хранит сырые данные (Цены, Вес, Габариты).
-    - **Лист «📊 Расчёт»**: Содержит **живые формулы** (`VLOOKUP`, `SUM`, `IF`), которые тянут данные из первых двух листов.
-    - **Обновление тарифов**: Когда вы нажимаете "Обновить тарифы", код меняет цифры *только* на листе «⚙️ Параметры». Google Таблица мгновенно пересчитывает всю прибыль и маржу на листе «📊 Расчёт».
-    """)
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.14 + GOOGLE SHEETS LIVE)
 # ============================================================================
