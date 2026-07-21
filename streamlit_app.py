@@ -5116,15 +5116,12 @@ class HighVolumeAutoPartsCatalog:
     def __init__(self):
         self.data_dir = Path("./auto_parts_data")
         self.data_dir.mkdir(exist_ok=True)
-        
         self.cloud_config = self.load_cloud_config()
         self.price_rules = self.load_price_rules()
         self.exclusion_rules = self.load_exclusion_rules()
         self.category_mapping = self.load_category_mapping()
-        
         self.db_path = self.data_dir / "catalog.duckdb"
         self.conn = duckdb.connect(database=str(self.db_path))
-        
         if not self._tables_exist():
             self.setup_database()
         else:
@@ -5411,29 +5408,29 @@ class HighVolumeAutoPartsCatalog:
         try:
             matched = name_lower.str.extract(combined_regex, 0)
             return pl.when(matched.is_not_null() & (matched != "")) \
-                     .then(matched) \
-                     .otherwise(pl.lit('Разное')) \
-                     .alias('category')
+                .then(matched) \
+                .otherwise(pl.lit('Разное')) \
+                .alias('category')
         except Exception as e:
             logger.warning(f"Ошибка regex-категоризации: {e}. Fallback.")
-        categorization_expr = pl.when(pl.lit(False)).then(pl.lit(None))
-        for key, category in self.category_mapping.items():
-            categorization_expr = categorization_expr.when(
-                name_lower.str.contains(key.lower())
-            ).then(pl.lit(category))
-        for category, pattern in categories_map.items():
-            categorization_expr = categorization_expr.when(
-                name_lower.str.contains(pattern, literal=False)
-            ).then(pl.lit(category))
-        return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
+            categorization_expr = pl.when(pl.lit(False)).then(pl.lit(None))
+            for key, category in self.category_mapping.items():
+                categorization_expr = categorization_expr.when(
+                    name_lower.str.contains(key.lower())
+                ).then(pl.lit(category))
+            for category, pattern in categories_map.items():
+                categorization_expr = categorization_expr.when(
+                    name_lower.str.contains(pattern, literal=False)
+                ).then(pl.lit(category))
+            return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
 
     # ====================================================================
     # РАСЧЁТ ОПЛАЧИВАЕМОГО ВЕСА
     # ====================================================================
     @staticmethod
     def calculate_billable_weight(weight_kg: float, length_cm: float,
-                                  width_cm: float, height_cm: float,
-                                  volumetric_coeff: float = 5000.0) -> float:
+                                   width_cm: float, height_cm: float,
+                                   volumetric_coeff: float = 5000.0) -> float:
         if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
             return weight_kg
         volumetric_weight = (length_cm * width_cm * height_cm) / volumetric_coeff
@@ -5447,7 +5444,6 @@ class HighVolumeAutoPartsCatalog:
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
         """🆕 v100.41: Конвертация Series с защитой от pl.Date/pl.Datetime"""
-        # 🆕 ИСПРАВЛЕНИЕ: Если calamine распарсил колонку как Дату, конвертируем в сериальный номер Excel
         if series.dtype in [pl.Date, pl.Datetime]:
             try:
                 base = pl.datetime(1899, 12, 30)
@@ -5627,14 +5623,15 @@ class HighVolumeAutoPartsCatalog:
             df = df.rename(column_mapping)
         except Exception as e:
             logger.error(f"Ошибка при rename: {e}")
-            for old_name, new_name in column_mapping.items():
-                try:
-                    if new_name not in df.columns:
-                        df = df.rename({old_name: new_name})
-                    else:
-                        logger.warning(f"Колонка {new_name} уже существует, пропускаем {old_name}")
-                except Exception as e2:
-                    logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
+        for old_name, new_name in column_mapping.items():
+            try:
+                if new_name not in df.columns:
+                    df = df.rename({old_name: new_name})
+                else:
+                    logger.warning(f"Колонка {new_name} уже существует, пропускаем {old_name}")
+            except Exception as e2:
+                logger.warning(f"Не удалось переименовать {old_name} → {new_name}: {e2}")
+
         if len(df.columns) != len(set(df.columns)):
             logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
             seen = set()
@@ -5646,10 +5643,11 @@ class HighVolumeAutoPartsCatalog:
                 else:
                     logger.warning(f"Удаляем дубликат колонки: {col}")
             df = df.select(cols_to_keep)
+
         for col in ['artikul', 'brand', 'oe_number']:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
-        
+
         # 🆕 v100.41: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
@@ -5677,6 +5675,7 @@ class HighVolumeAutoPartsCatalog:
                             df = df.with_columns(pl.lit(0.0).cast(pl.Float64).alias(col))
                         except Exception:
                             pass
+
         key_cols = [col for col in ['oe_number', 'artikul', 'brand'] if col in df.columns]
         if key_cols:
             df = df.unique(subset=key_cols, keep='first')
@@ -5728,13 +5727,10 @@ class HighVolumeAutoPartsCatalog:
         if not self.validate_dataframe(df, table_name):
             logger.error(f"❌ Данные не прошли валидацию для таблицы {table_name}")
             return
-        
         df = df.unique(keep='first')
         total_rows = len(df)
-        
         # 🆕 ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
         CHUNK_SIZE = 10_000 if table_name == 'parts' else 50_000
-        
         try:
             target_cols_result = self.conn.execute(
                 f"SELECT column_name FROM information_schema.columns WHERE table_name='{table_name}'"
@@ -5743,26 +5739,21 @@ class HighVolumeAutoPartsCatalog:
         except Exception as e:
             logger.error(f"Ошибка получения структуры таблицы {table_name}: {e}")
             return
-        
         available_cols = [col for col in target_cols if col in df.columns]
         if not available_cols:
             logger.error(f"Нет совпадающих колонок для таблицы {table_name}")
             return
-        
         df = df.select(available_cols)
         cols_str = ", ".join([f'"{c}"' for c in available_cols])
         pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
-        
         num_chunks = (total_rows + CHUNK_SIZE - 1) // CHUNK_SIZE
         logger.info(f"📦 UPSERT {table_name}: {total_rows:,} строк → {num_chunks} чанков по {CHUNK_SIZE:,}")
-        
         total_upserted = 0
         for chunk_idx in range(num_chunks):
             start_idx = chunk_idx * CHUNK_SIZE
             end_idx = min((chunk_idx + 1) * CHUNK_SIZE, total_rows)
             chunk_df = df.slice(start_idx, end_idx - start_idx)
             temp_view_name = f"temp_{table_name}_{int(time.time())}_{chunk_idx}_{os.getpid()}"
-            
             try:
                 try:
                     pdf = chunk_df.to_pandas()
@@ -5775,17 +5766,14 @@ class HighVolumeAutoPartsCatalog:
                     except Exception as e2:
                         logger.error(f"Не удалось зарегистрировать временное представление: {e2}")
                         continue
-                
                 with self.db_transaction():
                     delete_sql = f"DELETE FROM {table_name} t USING {temp_view_name} s WHERE {pk_conditions}"
                     self.conn.execute(delete_sql)
                     insert_sql = f"INSERT INTO {table_name} ({cols_str}) SELECT {cols_str} FROM {temp_view_name}"
                     self.conn.execute(insert_sql)
-                
                 chunk_size = end_idx - start_idx
                 total_upserted += chunk_size
                 logger.info(f"✅ Чанк {chunk_idx + 1}/{num_chunks}: +{chunk_size:,} строк (всего: {total_upserted:,}/{total_rows:,})")
-                
             except Exception as e:
                 logger.error(f"Ошибка при UPSERT чанка {chunk_idx + 1}/{num_chunks} в таблицу {table_name}: {e}")
                 st.error(f"Ошибка при записи чанка {chunk_idx + 1} в таблицу {table_name}. Детали в логе.")
@@ -5804,7 +5792,6 @@ class HighVolumeAutoPartsCatalog:
                     gc.collect()
                 except Exception:
                     pass
-        
         logger.info(f"✅ Успешно upsert {total_upserted:,} из {total_rows:,} записей в таблицу {table_name}")
 
     def upsert_prices(self, price_df: pl.DataFrame):
@@ -5888,7 +5875,6 @@ class HighVolumeAutoPartsCatalog:
                 step_counter = 0
                 total_records = 0
                 unique_artikuls = set()
-
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"🔄 ({step_counter}/{num_steps}) Параллельная подготовка данных...")
@@ -5921,7 +5907,6 @@ class HighVolumeAutoPartsCatalog:
                                 cross_from_oe = data
                             else:
                                 prepared[key] = data
-
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"🚀 ({step_counter}/{num_steps}) Загрузка в БД...")
@@ -5947,7 +5932,6 @@ class HighVolumeAutoPartsCatalog:
                     self._upsert_prices(prepared['prices'])
                     total_records += len(prepared['prices'])
                     status.write(f"✅ Сохранено {len(prepared['prices']):,} ценовых записей")
-
                 step_counter += 1
                 progress_bar.progress(min(step_counter / num_steps, 1.0))
                 status.update(label=f"📦 ({step_counter}/{num_steps}) Сборка данных по артикулам...")
@@ -5971,7 +5955,6 @@ class HighVolumeAutoPartsCatalog:
                         parts_df = pl.DataFrame()
                 else:
                     parts_df = pl.DataFrame()
-
                 if parts_df is not None and not parts_df.is_empty():
                     status.write("🔄 Обогащение данных артикулов...")
                     for ftype in file_priority:
@@ -6094,7 +6077,6 @@ class HighVolumeAutoPartsCatalog:
                     self.upsert_data('parts', parts_df, ['artikul_norm', 'brand_norm'])
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
-                    
                     # 🆕 v100.41: Освобождаем память после тяжёлой таблицы
                     del parts_df
                     gc.collect()
@@ -6103,7 +6085,6 @@ class HighVolumeAutoPartsCatalog:
                             pl.free_memory()
                         except Exception:
                             pass
-
                 unique_count = len(unique_artikuls)
                 if unique_count > 0:
                     status.write(f"📊 Уникальных артикулов в каталоге: {unique_count:,}")
@@ -6239,50 +6220,50 @@ class HighVolumeAutoPartsCatalog:
             ("Категория товара", 'COALESCE(r.representative_category, r.analog_representative_category) AS "Категория товара"'),
             ("Кратность", 'r.multiplicity AS "Кратность"'),
             ("Длинна", """
-COALESCE(
-    NULLIF(ROUND(CAST(r.length AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.oe_length AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.analog_length AS DOUBLE), 2), 0),
-    0.0
-) AS "Длинна"
-"""),
+                COALESCE(
+                    NULLIF(ROUND(CAST(r.length AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.oe_length AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.analog_length AS DOUBLE), 2), 0),
+                    0.0
+                ) AS "Длинна"
+            """),
             ("Ширина", """
-COALESCE(
-    NULLIF(ROUND(CAST(r.width AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.oe_width AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.analog_width AS DOUBLE), 2), 0),
-    0.0
-) AS "Ширина"
-"""),
+                COALESCE(
+                    NULLIF(ROUND(CAST(r.width AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.oe_width AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.analog_width AS DOUBLE), 2), 0),
+                    0.0
+                ) AS "Ширина"
+            """),
             ("Высота", """
-COALESCE(
-    NULLIF(ROUND(CAST(r.height AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.oe_height AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.analog_height AS DOUBLE), 2), 0),
-    0.0
-) AS "Высота"
-"""),
+                COALESCE(
+                    NULLIF(ROUND(CAST(r.height AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.oe_height AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.analog_height AS DOUBLE), 2), 0),
+                    0.0
+                ) AS "Высота"
+            """),
             ("Вес", """
-COALESCE(
-    NULLIF(ROUND(CAST(r.weight AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.oe_weight AS DOUBLE), 2), 0),
-    NULLIF(ROUND(CAST(r.analog_weight AS DOUBLE), 2), 0),
-    0.0
-) AS "Вес"
-"""),
+                COALESCE(
+                    NULLIF(ROUND(CAST(r.weight AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.oe_weight AS DOUBLE), 2), 0),
+                    NULLIF(ROUND(CAST(r.analog_weight AS DOUBLE), 2), 0),
+                    0.0
+                ) AS "Вес"
+            """),
             ("Длинна/Ширина/Высота", """
-COALESCE(
-    CASE 
-        WHEN r.dimensions_str IS NULL OR r.dimensions_str = '' OR UPPER(TRIM(r.dimensions_str)) = 'XX'
-        THEN NULL
-        ELSE r.dimensions_str
-    END,
-    r.analog_dimensions_str,
-    CAST(COALESCE(NULLIF(ROUND(CAST(r.length AS DOUBLE), 2), 0), 0) AS VARCHAR) || 'x' ||
-    CAST(COALESCE(NULLIF(ROUND(CAST(r.width AS DOUBLE), 2), 0), 0) AS VARCHAR) || 'x' ||
-    CAST(COALESCE(NULLIF(ROUND(CAST(r.height AS DOUBLE), 2), 0), 0) AS VARCHAR)
-) AS "Длинна/Ширина/Высота"
-"""),
+                COALESCE(
+                    CASE
+                        WHEN r.dimensions_str IS NULL OR r.dimensions_str = '' OR UPPER(TRIM(r.dimensions_str)) = 'XX'
+                        THEN NULL
+                        ELSE r.dimensions_str
+                    END,
+                    r.analog_dimensions_str,
+                    CAST(COALESCE(NULLIF(ROUND(CAST(r.length AS DOUBLE), 2), 0), 0) AS VARCHAR) || 'x' ||
+                    CAST(COALESCE(NULLIF(ROUND(CAST(r.width AS DOUBLE), 2), 0), 0) AS VARCHAR) || 'x' ||
+                    CAST(COALESCE(NULLIF(ROUND(CAST(r.height AS DOUBLE), 2), 0), 0) AS VARCHAR)
+                ) AS "Длинна/Ширина/Высота"
+            """),
             ("OE номер", 'r.oe_list AS "OE номер"'),
             ("аналоги", 'r.analog_list AS "аналоги"'),
             ("Ссылка на изображение", 'r.image_url AS "Ссылка на изображение"')
@@ -6293,202 +6274,201 @@ COALESCE(
         if not select_parts:
             select_parts = ['r.artikul AS "Артикул бренда"', 'r.brand AS "Бренд"']
         select_clause = ",\n".join(select_parts)
-
         ctes = f"""
-WITH DescriptionTemplate AS (
-    SELECT CHR(10) || CHR(10) || $${description_text}$$ AS text
-),
-BrandMarkups AS (
-    SELECT brand, markup FROM (
-        {brand_markups_sql}
-    ) AS tmp
-),
-PartDetails AS (
-    SELECT
-        cr.artikul_norm,
-        cr.brand_norm,
-        STRING_AGG(
-            DISTINCT regexp_replace(
-                regexp_replace(o.oe_number, '''', ''),
-                '[^0-9A-Za-zА-Яа-яЁё`\\-\\s]', '', 'g'
-            ), ', '
-        ) AS oe_list,
-        ANY_VALUE(o.name) AS representative_name,
-        ANY_VALUE(o.applicability) AS representative_applicability,
-        ANY_VALUE(o.category) AS representative_category
-    FROM cross_references cr
-    LEFT JOIN oe o ON cr.oe_number_norm = o.oe_number_norm
-    GROUP BY cr.artikul_norm, cr.brand_norm
-),
-AllAnalogs AS (
-    SELECT
-        cr1.artikul_norm,
-        cr1.brand_norm,
-        STRING_AGG(
-            DISTINCT regexp_replace(
-                regexp_replace(p2.artikul, '''', ''),
-                '[^0-9A-Za-zА-Яа-яЁё`\\-\\s]', '', 'g'
-            ), ', '
-        ) AS analog_list
-    FROM cross_references cr1
-    JOIN cross_references cr2 ON cr1.oe_number_norm = cr2.oe_number_norm
-    JOIN parts p2 ON cr2.artikul_norm = p2.artikul_norm AND cr2.brand_norm = p2.brand_norm
-    WHERE (cr1.artikul_norm != p2.artikul_norm OR cr1.brand_norm != p2.brand_norm)
-    GROUP BY cr1.artikul_norm, cr1.brand_norm
-),
-InitialOENumbers AS (
-    SELECT DISTINCT p.artikul_norm, p.brand_norm, cr.oe_number_norm
-    FROM parts p
-    LEFT JOIN cross_references cr ON p.artikul_norm = cr.artikul_norm AND p.brand_norm = cr.brand_norm
-    WHERE cr.oe_number_norm IS NOT NULL
-),
-Level1Analogs AS (
-    SELECT DISTINCT
-        i.artikul_norm AS source_artikul_norm,
-        i.brand_norm AS source_brand_norm,
-        i.oe_number_norm AS source_oe_number_norm,
-        cr2.artikul_norm AS related_artikul_norm,
-        cr2.brand_norm AS related_brand_norm,
-        cr2.oe_number_norm AS related_oe_number_norm
-    FROM InitialOENumbers i
-    JOIN cross_references cr2 ON i.oe_number_norm = cr2.oe_number_norm
-    WHERE NOT (i.artikul_norm = cr2.artikul_norm AND i.brand_norm = cr2.brand_norm)
-),
-Level1OENumbers AS (
-    SELECT DISTINCT
-        l1.source_artikul_norm,
-        l1.source_brand_norm,
-        cr3.oe_number_norm
-    FROM Level1Analogs l1
-    JOIN cross_references cr3 ON l1.related_oe_number_norm = cr3.oe_number_norm
-    WHERE NOT EXISTS (
-        SELECT 1 FROM InitialOENumbers i
-        WHERE i.artikul_norm = l1.source_artikul_norm
-        AND i.brand_norm = l1.source_brand_norm
-        AND i.oe_number_norm = cr3.oe_number_norm
-    )
-),
-Level2Analogs AS (
-    SELECT DISTINCT
-        loe.source_artikul_norm,
-        loe.source_brand_norm,
-        cr4.artikul_norm AS related_artikul_norm,
-        cr4.brand_norm AS related_brand_norm
-    FROM Level1OENumbers loe
-    JOIN cross_references cr4 ON loe.oe_number_norm = cr4.oe_number_norm
-    WHERE NOT (loe.source_artikul_norm = cr4.artikul_norm AND loe.source_brand_norm = cr4.brand_norm)
-),
-AllRelatedParts AS (
-    SELECT source_artikul_norm, source_brand_norm, related_artikul_norm, related_brand_norm
-    FROM Level1Analogs
-    UNION
-    SELECT source_artikul_norm, source_brand_norm, related_artikul_norm, related_brand_norm
-    FROM Level2Analogs
-),
-AggregatedAnalogData AS (
-    SELECT
-        arp.source_artikul_norm AS artikul_norm,
-        arp.source_brand_norm AS brand_norm,
-        ROUND(MAX(CASE WHEN p2.length IS NOT NULL AND p2.length != 0 THEN p2.length ELSE NULL END), 2) AS length,
-        ROUND(MAX(CASE WHEN p2.width IS NOT NULL AND p2.width != 0 THEN p2.width ELSE NULL END), 2) AS width,
-        ROUND(MAX(CASE WHEN p2.height IS NOT NULL AND p2.height != 0 THEN p2.height ELSE NULL END), 2) AS height,
-        ROUND(MAX(CASE WHEN p2.weight IS NOT NULL AND p2.weight != 0 THEN p2.weight ELSE NULL END), 2) AS weight,
-        ANY_VALUE(
-            CASE 
-                WHEN p2.dimensions_str IS NOT NULL AND p2.dimensions_str != '' AND UPPER(TRIM(p2.dimensions_str)) != 'XX'
-                THEN p2.dimensions_str
-                ELSE NULL
-            END
-        ) AS dimensions_str,
-        ROUND(MAX(CASE WHEN p2.length IS NOT NULL AND p2.length != 0 THEN p2.length ELSE NULL END), 2) AS oe_length,
-        ROUND(MAX(CASE WHEN p2.width IS NOT NULL AND p2.width != 0 THEN p2.width ELSE NULL END), 2) AS oe_width,
-        ROUND(MAX(CASE WHEN p2.height IS NOT NULL AND p2.height != 0 THEN p2.height ELSE NULL END), 2) AS oe_height,
-        ROUND(MAX(CASE WHEN p2.weight IS NOT NULL AND p2.weight != 0 THEN p2.weight ELSE NULL END), 2) AS oe_weight,
-        ANY_VALUE(
-            CASE 
-                WHEN pd2.representative_name IS NOT NULL AND pd2.representative_name != ''
-                THEN pd2.representative_name
-                ELSE NULL
-            END
-        ) AS representative_name,
-        ANY_VALUE(
-            CASE 
-                WHEN pd2.representative_applicability IS NOT NULL AND pd2.representative_applicability != ''
-                THEN pd2.representative_applicability
-                ELSE NULL
-            END
-        ) AS representative_applicability,
-        ANY_VALUE(
-            CASE 
-                WHEN pd2.representative_category IS NOT NULL AND pd2.representative_category != ''
-                THEN pd2.representative_category
-                ELSE NULL
-            END
-        ) AS representative_category
-    FROM AllRelatedParts arp
-    JOIN parts p2 ON arp.related_artikul_norm = p2.artikul_norm AND arp.related_brand_norm = p2.brand_norm
-    LEFT JOIN PartDetails pd2 ON p2.artikul_norm = pd2.artikul_norm AND p2.brand_norm = pd2.brand_norm
-    GROUP BY arp.source_artikul_norm, arp.source_brand_norm
-),
-RankedData AS (
-    SELECT
-        p.artikul_norm,
-        p.brand_norm,
-        p.artikul,
-        p.brand,
-        p.description,
-        p.multiplicity,
-        ROUND(CAST(p.length AS DOUBLE), 2) AS length,
-        ROUND(CAST(p.width AS DOUBLE), 2) AS width,
-        ROUND(CAST(p.height AS DOUBLE), 2) AS height,
-        ROUND(CAST(p.weight AS DOUBLE), 2) AS weight,
-        p.dimensions_str,
-        p.image_url,
-        pd.representative_name,
-        pd.representative_applicability,
-        pd.representative_category,
-        pd.oe_list,
-        aa.analog_list,
-        ROUND(CAST(p.length AS DOUBLE), 2) AS oe_length,
-        ROUND(CAST(p.width AS DOUBLE), 2) AS oe_width,
-        ROUND(CAST(p.height AS DOUBLE), 2) AS oe_height,
-        ROUND(CAST(p.weight AS DOUBLE), 2) AS oe_weight,
-        p_analog.length AS analog_length,
-        p_analog.width AS analog_width,
-        p_analog.height AS analog_height,
-        p_analog.weight AS analog_weight,
-        p_analog.dimensions_str AS analog_dimensions_str,
-        p_analog.representative_name AS analog_representative_name,
-        p_analog.representative_applicability AS analog_representative_applicability,
-        p_analog.representative_category AS analog_representative_category,
-        ROW_NUMBER() OVER (
-            PARTITION BY p.artikul_norm, p.brand_norm
-            ORDER BY pd.representative_name DESC NULLS LAST, pd.oe_list DESC NULLS LAST
-        ) AS rn
-    FROM parts p
-    LEFT JOIN PartDetails pd ON p.artikul_norm = pd.artikul_norm AND p.brand_norm = pd.brand_norm
-    LEFT JOIN AllAnalogs aa ON p.artikul_norm = aa.artikul_norm AND p.brand_norm = aa.brand_norm
-    LEFT JOIN AggregatedAnalogData p_analog ON p.artikul_norm = p_analog.artikul_norm AND p.brand_norm = p_analog.brand_norm
-)
-"""
+            WITH DescriptionTemplate AS (
+                SELECT CHR(10) || CHR(10) || $${description_text}$$ AS text
+            ),
+            BrandMarkups AS (
+                SELECT brand, markup FROM (
+                    {brand_markups_sql}
+                ) AS tmp
+            ),
+            PartDetails AS (
+                SELECT
+                    cr.artikul_norm,
+                    cr.brand_norm,
+                    STRING_AGG(
+                        DISTINCT regexp_replace(
+                            regexp_replace(o.oe_number, '''', ''),
+                            '[^0-9A-Za-zА-Яа-яЁё`\\-\\s]', '', 'g'
+                        ), ', '
+                    ) AS oe_list,
+                    ANY_VALUE(o.name) AS representative_name,
+                    ANY_VALUE(o.applicability) AS representative_applicability,
+                    ANY_VALUE(o.category) AS representative_category
+                FROM cross_references cr
+                LEFT JOIN oe o ON cr.oe_number_norm = o.oe_number_norm
+                GROUP BY cr.artikul_norm, cr.brand_norm
+            ),
+            AllAnalogs AS (
+                SELECT
+                    cr1.artikul_norm,
+                    cr1.brand_norm,
+                    STRING_AGG(
+                        DISTINCT regexp_replace(
+                            regexp_replace(p2.artikul, '''', ''),
+                            '[^0-9A-Za-zА-Яа-яЁё`\\-\\s]', '', 'g'
+                        ), ', '
+                    ) AS analog_list
+                FROM cross_references cr1
+                JOIN cross_references cr2 ON cr1.oe_number_norm = cr2.oe_number_norm
+                JOIN parts p2 ON cr2.artikul_norm = p2.artikul_norm AND cr2.brand_norm = p2.brand_norm
+                WHERE (cr1.artikul_norm != p2.artikul_norm OR cr1.brand_norm != p2.brand_norm)
+                GROUP BY cr1.artikul_norm, cr1.brand_norm
+            ),
+            InitialOENumbers AS (
+                SELECT DISTINCT p.artikul_norm, p.brand_norm, cr.oe_number_norm
+                FROM parts p
+                LEFT JOIN cross_references cr ON p.artikul_norm = cr.artikul_norm AND p.brand_norm = cr.brand_norm
+                WHERE cr.oe_number_norm IS NOT NULL
+            ),
+            Level1Analogs AS (
+                SELECT DISTINCT
+                    i.artikul_norm AS source_artikul_norm,
+                    i.brand_norm AS source_brand_norm,
+                    i.oe_number_norm AS source_oe_number_norm,
+                    cr2.artikul_norm AS related_artikul_norm,
+                    cr2.brand_norm AS related_brand_norm,
+                    cr2.oe_number_norm AS related_oe_number_norm
+                FROM InitialOENumbers i
+                JOIN cross_references cr2 ON i.oe_number_norm = cr2.oe_number_norm
+                WHERE NOT (i.artikul_norm = cr2.artikul_norm AND i.brand_norm = cr2.brand_norm)
+            ),
+            Level1OENumbers AS (
+                SELECT DISTINCT
+                    l1.source_artikul_norm,
+                    l1.source_brand_norm,
+                    cr3.oe_number_norm
+                FROM Level1Analogs l1
+                JOIN cross_references cr3 ON l1.related_oe_number_norm = cr3.oe_number_norm
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM InitialOENumbers i
+                    WHERE i.artikul_norm = l1.source_artikul_norm
+                      AND i.brand_norm = l1.source_brand_norm
+                      AND i.oe_number_norm = cr3.oe_number_norm
+                )
+            ),
+            Level2Analogs AS (
+                SELECT DISTINCT
+                    loe.source_artikul_norm,
+                    loe.source_brand_norm,
+                    cr4.artikul_norm AS related_artikul_norm,
+                    cr4.brand_norm AS related_brand_norm
+                FROM Level1OENumbers loe
+                JOIN cross_references cr4 ON loe.oe_number_norm = cr4.oe_number_norm
+                WHERE NOT (loe.source_artikul_norm = cr4.artikul_norm AND loe.source_brand_norm = cr4.brand_norm)
+            ),
+            AllRelatedParts AS (
+                SELECT source_artikul_norm, source_brand_norm, related_artikul_norm, related_brand_norm
+                FROM Level1Analogs
+                UNION
+                SELECT source_artikul_norm, source_brand_norm, related_artikul_norm, related_brand_norm
+                FROM Level2Analogs
+            ),
+            AggregatedAnalogData AS (
+                SELECT
+                    arp.source_artikul_norm AS artikul_norm,
+                    arp.source_brand_norm AS brand_norm,
+                    ROUND(MAX(CASE WHEN p2.length IS NOT NULL AND p2.length != 0 THEN p2.length ELSE NULL END), 2) AS length,
+                    ROUND(MAX(CASE WHEN p2.width IS NOT NULL AND p2.width != 0 THEN p2.width ELSE NULL END), 2) AS width,
+                    ROUND(MAX(CASE WHEN p2.height IS NOT NULL AND p2.height != 0 THEN p2.height ELSE NULL END), 2) AS height,
+                    ROUND(MAX(CASE WHEN p2.weight IS NOT NULL AND p2.weight != 0 THEN p2.weight ELSE NULL END), 2) AS weight,
+                    ANY_VALUE(
+                        CASE
+                            WHEN p2.dimensions_str IS NOT NULL AND p2.dimensions_str != '' AND UPPER(TRIM(p2.dimensions_str)) != 'XX'
+                            THEN p2.dimensions_str
+                            ELSE NULL
+                        END
+                    ) AS dimensions_str,
+                    ROUND(MAX(CASE WHEN p2.length IS NOT NULL AND p2.length != 0 THEN p2.length ELSE NULL END), 2) AS oe_length,
+                    ROUND(MAX(CASE WHEN p2.width IS NOT NULL AND p2.width != 0 THEN p2.width ELSE NULL END), 2) AS oe_width,
+                    ROUND(MAX(CASE WHEN p2.height IS NOT NULL AND p2.height != 0 THEN p2.height ELSE NULL END), 2) AS oe_height,
+                    ROUND(MAX(CASE WHEN p2.weight IS NOT NULL AND p2.weight != 0 THEN p2.weight ELSE NULL END), 2) AS oe_weight,
+                    ANY_VALUE(
+                        CASE
+                            WHEN pd2.representative_name IS NOT NULL AND pd2.representative_name != ''
+                            THEN pd2.representative_name
+                            ELSE NULL
+                        END
+                    ) AS representative_name,
+                    ANY_VALUE(
+                        CASE
+                            WHEN pd2.representative_applicability IS NOT NULL AND pd2.representative_applicability != ''
+                            THEN pd2.representative_applicability
+                            ELSE NULL
+                        END
+                    ) AS representative_applicability,
+                    ANY_VALUE(
+                        CASE
+                            WHEN pd2.representative_category IS NOT NULL AND pd2.representative_category != ''
+                            THEN pd2.representative_category
+                            ELSE NULL
+                        END
+                    ) AS representative_category
+                FROM AllRelatedParts arp
+                JOIN parts p2 ON arp.related_artikul_norm = p2.artikul_norm AND arp.related_brand_norm = p2.brand_norm
+                LEFT JOIN PartDetails pd2 ON p2.artikul_norm = pd2.artikul_norm AND p2.brand_norm = pd2.brand_norm
+                GROUP BY arp.source_artikul_norm, arp.source_brand_norm
+            ),
+            RankedData AS (
+                SELECT
+                    p.artikul_norm,
+                    p.brand_norm,
+                    p.artikul,
+                    p.brand,
+                    p.description,
+                    p.multiplicity,
+                    ROUND(CAST(p.length AS DOUBLE), 2) AS length,
+                    ROUND(CAST(p.width AS DOUBLE), 2) AS width,
+                    ROUND(CAST(p.height AS DOUBLE), 2) AS height,
+                    ROUND(CAST(p.weight AS DOUBLE), 2) AS weight,
+                    p.dimensions_str,
+                    p.image_url,
+                    pd.representative_name,
+                    pd.representative_applicability,
+                    pd.representative_category,
+                    pd.oe_list,
+                    aa.analog_list,
+                    ROUND(CAST(p.length AS DOUBLE), 2) AS oe_length,
+                    ROUND(CAST(p.width AS DOUBLE), 2) AS oe_width,
+                    ROUND(CAST(p.height AS DOUBLE), 2) AS oe_height,
+                    ROUND(CAST(p.weight AS DOUBLE), 2) AS oe_weight,
+                    p_analog.length AS analog_length,
+                    p_analog.width AS analog_width,
+                    p_analog.height AS analog_height,
+                    p_analog.weight AS analog_weight,
+                    p_analog.dimensions_str AS analog_dimensions_str,
+                    p_analog.representative_name AS analog_representative_name,
+                    p_analog.representative_applicability AS analog_representative_applicability,
+                    p_analog.representative_category AS analog_representative_category,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY p.artikul_norm, p.brand_norm
+                        ORDER BY pd.representative_name DESC NULLS LAST, pd.oe_list DESC NULLS LAST
+                    ) AS rn
+                FROM parts p
+                LEFT JOIN PartDetails pd ON p.artikul_norm = pd.artikul_norm AND p.brand_norm = pd.brand_norm
+                LEFT JOIN AllAnalogs aa ON p.artikul_norm = aa.artikul_norm AND p.brand_norm = aa.brand_norm
+                LEFT JOIN AggregatedAnalogData p_analog ON p.artikul_norm = p_analog.artikul_norm AND p.brand_norm = p_analog.brand_norm
+            )
+        """
         price_join = """
-LEFT JOIN prices pr ON r.artikul_norm = pr.artikul_norm AND r.brand_norm = pr.brand_norm
-LEFT JOIN BrandMarkups brm ON r.brand = brm.brand
-""" if include_prices else ""
+            LEFT JOIN prices pr ON r.artikul_norm = pr.artikul_norm AND r.brand_norm = pr.brand_norm
+            LEFT JOIN BrandMarkups brm ON r.brand = brm.brand
+        """ if include_prices else ""
         query = f"""
-{ctes}
-SELECT
-    {select_clause}
-FROM RankedData r
-CROSS JOIN DescriptionTemplate dt
-{price_join}
-WHERE r.rn = 1
-ORDER BY r.brand, r.artikul
-"""
+            {ctes}
+            SELECT
+                {select_clause}
+            FROM RankedData r
+            CROSS JOIN DescriptionTemplate dt
+            {price_join}
+            WHERE r.rn = 1
+            ORDER BY r.brand, r.artikul
+        """
         return "\n".join([line.rstrip() for line in query.strip().splitlines()])
 
     def export_to_csv_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
-                                include_prices: bool = True, apply_markup: bool = True) -> bool:
+                                 include_prices: bool = True, apply_markup: bool = True) -> bool:
         total = self.conn.execute(
             "SELECT count(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
         if total == 0:
@@ -6532,7 +6512,7 @@ ORDER BY r.brand, r.artikul
     # 🆕 v100.41: ЭКСПОРТ EXCEL (ИСПРАВЛЕНО ОТОБРАЖЕНИЕ ДАТ)
     # ====================================================================
     def export_to_excel_optimized(self, output_path: str, selected_columns: Optional[List[str]] = None,
-                                  include_prices: bool = True, apply_markup: bool = True) -> bool:
+                                   include_prices: bool = True, apply_markup: bool = True) -> bool:
         total = self.conn.execute(
             "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)").fetchone()[0]
         if total == 0:
@@ -6551,7 +6531,6 @@ ORDER BY r.brand, r.artikul
                     except Exception as e2:
                         logger.error(f"Ошибка arrow fallback: {e2}")
                         df = pd.read_sql(query, self.conn)
-                
                 dimension_cols = ["Длинна", "Ширина", "Высота", "Вес"]
                 # 🆕 ИСПРАВЛЕНИЕ: Принудительный сброс типа datetime в float
                 for col in dimension_cols:
@@ -6560,10 +6539,8 @@ ORDER BY r.brand, r.artikul
                             df[col] = 0.0
                         else:
                             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round(2)
-                
                 if "Длинна/Ширина/Высота" in df.columns:
                     df["Длинна/Ширина/Высота"] = df["Длинна/Ширина/Высота"].astype(str).replace({r'^nan$': '', r'^None$': ''}, regex=True)
-                
                 if len(df) <= EXCEL_ROW_LIMIT:
                     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                         df.to_excel(writer, index=False, sheet_name='Данные')
@@ -6592,7 +6569,7 @@ ORDER BY r.brand, r.artikul
                 return False
 
     def export_to_parquet(self, output_path: str, selected_columns: Optional[List[str]] = None,
-                          include_prices: bool = True, apply_markup: bool = True) -> bool:
+                           include_prices: bool = True, apply_markup: bool = True) -> bool:
         try:
             with self.timer("Экспорт Parquet"):
                 query = self.build_export_query(selected_columns, include_prices, apply_markup)
@@ -6745,11 +6722,11 @@ ORDER BY r.brand, r.artikul
                     step=0.1,
                     key=f"markup_{selected_brand}"
                 )
-            if st.button("Сохранить наценку", key=f"save_{selected_brand}"):
-                brand_markups[selected_brand] = brand_markup / 100
-                self.price_rules['brand_markups'] = brand_markups
-                self.save_price_rules()
-                st.success(f"✅ Наценка для {selected_brand} сохранена")
+                if st.button("Сохранить наценку", key=f"save_{selected_brand}"):
+                    brand_markups[selected_brand] = brand_markup / 100
+                    self.price_rules['brand_markups'] = brand_markups
+                    self.save_price_rules()
+                    st.success(f"✅ Наценка для {selected_brand} сохранена")
         st.subheader("Ограничения по ценам")
         col1, col2 = st.columns(2)
         with col1:
@@ -6776,7 +6753,9 @@ ORDER BY r.brand, r.artikul
             cleaned = [line.strip() for line in new_exclusions.splitlines() if line.strip()]
             if len(cleaned) != len(set(cleaned)):
                 st.warning("Обнаружены дублирующие записи. Они будут автоматически удалены.")
-            self.exclusion_rules = list(dict.fromkeys(cleaned))
+                self.exclusion_rules = list(dict.fromkeys(cleaned))
+            else:
+                self.exclusion_rules = cleaned
             self.save_exclusion_rules()
             st.success("✅ Правила исключения сохранены")
 
@@ -6855,8 +6834,8 @@ ORDER BY r.brand, r.artikul
         with st.spinner("Синхронизация..."):
             time.sleep(1.5)
             st.success("База успешно отправлена")
-        self.cloud_config['last_sync'] = int(time.time())
-        self.save_cloud_config()
+            self.cloud_config['last_sync'] = int(time.time())
+            self.save_cloud_config()
 
     def show_statistics(self):
         st.header("📈 Статистика")
@@ -7767,7 +7746,7 @@ def show_data_upload_interface():
             key="download_template"
         )
 # ============================================================================
-# 🆕 БЛОК 14: СУПЕР-PRO ЭКСПОРТЕР ЮНИТ-ЭКОНОМИКИ v2.0 (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# 🆕 БЛОК 14: СУПЕР-PRO ЭКСПОРТЕР ЮНИТ-ЭКОНОМИКИ v2.0 (v100.15)
 # ============================================================================
 # 🆕 v100.10: МАКСИМАЛЬНО ИНФОРМАТИВНЫЙ ШАБЛОН
 # ✅ 10+ листов с полной аналитикой
@@ -7780,6 +7759,10 @@ def show_data_upload_interface():
 # ✅ ИСПРАВЛЕНИЯ v100.11:
 # - Вынесены магические числа в константы класса
 # - Улучшена читаемость формул Excel
+# ✅ УЛУЧШЕНИЯ v100.15:
+# - Добавлены 4 колонки валидации габаритов на лист "📥 Входные"
+# - Условное форматирование (подсветка 🟢🟡🔴) для колонки "Соответствие габаритам"
+# - Автоопределение наличия колонок валидации в DataFrame
 # ============================================================================
 class SuperProExcelExporter:
     """
@@ -7792,7 +7775,7 @@ class SuperProExcelExporter:
     AD_ROW = 9  # Строка с ДРР
     DAYS_ROW = 7  # Строка с днями хранения
     CURRENCY_ROW = 10  # Строка с курсом валют
-    
+
     COLORS = {
         "header_bg": "1B3A5C",
         "header_fg": "FFFFFF",
@@ -7811,12 +7794,29 @@ class SuperProExcelExporter:
         "mp_header": "4472C4",
         "gradient_start": "E8F4FD",
         "gradient_end": "B4C6E7",
+        # 🆕 v100.15: Цвета для подсветки валидации габаритов
+        "validation_match": "C6EFCE",
+        "validation_match_text": "006100",
+        "validation_warn": "FFEB9C",
+        "validation_warn_text": "9C6500",
+        "validation_bad": "FFC7CE",
+        "validation_bad_text": "9C0006",
+        "validation_neutral": "E2EFDA",
+        "validation_neutral_text": "375623",
     }
-    
+
     OPERATION_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
     SEASONS = ["winter", "spring", "summer", "autumn"]
     SEASON_NAMES = {"winter": "❄️ Зима", "spring": "🌱 Весна", "summer": "☀️ Лето", "autumn": "🍂 Осень"}
-    
+
+    # 🆕 v100.15: Колонки валидации габаритов
+    VALIDATION_COLUMNS = [
+        'Эталон категории',
+        'Соответствие габаритам',
+        'Макс. отклонение %',
+        'Детали отклонений'
+    ]
+
     def __init__(self, unit_economics=None):
         self.formats = {}
         self.unit_economics = unit_economics
@@ -7826,23 +7826,21 @@ class SuperProExcelExporter:
         self._global_min_profit_row = None
         self._input_start_row = 4
         self._total_rows = 0
-    
+
     def _get_configs(self):
         """Гарантированное получение конфигураций маркетплейсов"""
         if self.unit_economics and hasattr(self.unit_economics, '_configs'):
             configs = self.unit_economics._configs
             if configs:
                 return configs
-        
         try:
             unit_econ = get_marketplace_unit_economics()
             if unit_econ and hasattr(unit_econ, '_configs'):
                 return unit_econ._configs
         except Exception:
             pass
-        
         return get_marketplace_configs_2026()
-    
+
     def _init_formats(self, workbook):
         """Создание всех форматов ячеек"""
         self.formats = {
@@ -7970,8 +7968,33 @@ class SuperProExcelExporter:
                 'bold': True, 'font_size': 12,
                 'align': 'center', 'valign': 'vcenter'
             }),
+            # 🆕 v100.15: Форматы для подсветки валидации габаритов
+            'validation_match': workbook.add_format({
+                'bg_color': self.COLORS["validation_match"],
+                'font_color': self.COLORS["validation_match_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
+            'validation_warn': workbook.add_format({
+                'bg_color': self.COLORS["validation_warn"],
+                'font_color': self.COLORS["validation_warn_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
+            'validation_bad': workbook.add_format({
+                'bg_color': self.COLORS["validation_bad"],
+                'font_color': self.COLORS["validation_bad_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
+            'validation_neutral': workbook.add_format({
+                'bg_color': self.COLORS["validation_neutral"],
+                'font_color': self.COLORS["validation_neutral_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
         }
-    
+
+    def _get_existing_validation_columns(self, df: pd.DataFrame) -> List[str]:
+        """🆕 v100.15: Определяет, какие колонки валидации есть в DataFrame"""
+        return [col for col in self.VALIDATION_COLUMNS if col in df.columns]
+
     def export_super_pro(self, df: pd.DataFrame, output_path: str, metadata: Dict = None) -> bool:
         """
         🚀 СУПЕР-ПРО экспорт с 10+ листами аналитики
@@ -7980,12 +8003,11 @@ class SuperProExcelExporter:
             if not XLSXWRITER_AVAILABLE:
                 logger.error("❌ xlsxwriter не установлен!")
                 return False
-            
+
             self._total_rows = len(df)
-            
             workbook = xlsxwriter.Workbook(output_path, {'nan_inf_to_errors': True})
             self._init_formats(workbook)
-            
+
             # Создаем все листы
             self._write_dashboard_super(workbook, df, metadata)
             self._write_parameters_super(workbook, metadata)
@@ -7998,7 +8020,7 @@ class SuperProExcelExporter:
             self._write_top_analytics(workbook, df)
             self._write_recommendations(workbook, df)
             self._write_export_summary(workbook, df, metadata)
-            
+
             workbook.close()
             logger.info(f"✅ СУПЕР-ПРО файл сохранён: {output_path}")
             return True
@@ -8006,27 +8028,25 @@ class SuperProExcelExporter:
             logger.error(f"❌ Ошибка СУПЕР-ПРО экспорта: {e}")
             logger.error(traceback.format_exc())
             return False
-    
+
     def _write_dashboard_super(self, workbook, df: pd.DataFrame, metadata: Dict):
         """📊 СУПЕР-ДАШБОРД с расширенными KPI"""
         ws = workbook.add_worksheet("📊 Дашборд")
-        
         ws.merge_range('A1:G1', "🚀 СУПЕР-ДАШБОРД ЮНИТ-ЭКОНОМИКИ",
                        self.formats['header_title'])
         ws.set_row(0, 40)
-        
         ws.merge_range('A2:G2',
                        "📊 Ключевые показатели эффективности (KPI) в реальном времени",
                        self.formats['info'])
         ws.set_row(1, 25)
-        
+
         total_profit = df['profit'].sum() if 'profit' in df.columns else 0
         avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
         avg_roi = df['roi'].mean() if 'roi' in df.columns else 0
         total_revenue = df['price'].sum() if 'price' in df.columns else 0
         total_expenses = df['total_expenses'].sum() if 'total_expenses' in df.columns else 0
         unprofitable = (df['profit'] < 0).sum() if 'profit' in df.columns else 0
-        
+
         kpis = [
             ("📦 Всего SKU", f"{len(df):,}", "kpi_neutral_int"),
             ("💰 Общая прибыль", f"{total_profit:,.0f} ₽",
@@ -8037,7 +8057,7 @@ class SuperProExcelExporter:
             ("💸 Общие расходы", f"{total_expenses:,.0f} ₽", "kpi_neutral_money"),
             ("⚠️ Убыточных SKU", f"{unprofitable}", "kpi_neutral_int"),
         ]
-        
+
         row = 3
         for i, (label, value, fmt) in enumerate(kpis):
             col = (i % 4) * 2
@@ -8045,20 +8065,18 @@ class SuperProExcelExporter:
             ws.write(row, col + 1, value, self.formats[fmt])
             if i % 4 == 3:
                 row += 1
-        
+
         if 'marketplace' in df.columns and 'profit' in df.columns:
             mp_profit = df.groupby('marketplace')['profit'].sum().sort_values(ascending=False)
-            
             if not mp_profit.empty:
                 chart_row = row + 3
                 ws.write(chart_row, 0, "🏪 Прибыль по маркетплейсам",
                          self.formats['chart_title'])
-                
                 data_start_row = chart_row + 1
                 for i, (mp, profit) in enumerate(mp_profit.items()):
                     ws.write(data_start_row + i, 0, mp, self.formats['default'])
                     ws.write(data_start_row + i, 1, profit, self.formats['money'])
-                
+
                 chart = workbook.add_chart({'type': 'column'})
                 chart.add_series({
                     'name': 'Прибыль по МП',
@@ -8072,35 +8090,31 @@ class SuperProExcelExporter:
                 chart.set_y_axis({'name': 'Прибыль, ₽'})
                 chart.set_size({'width': 720, 'height': 400})
                 ws.insert_chart(chart_row, 2, chart)
-        
+
         ws.set_column('A:A', 25)
         ws.set_column('B:B', 25)
         ws.set_column('C:C', 25)
         ws.set_column('D:D', 25)
-        
         return ws
-    
+
     def _write_parameters_super(self, workbook, metadata: Dict):
         """⚙️ СУПЕР-ПАРАМЕТРЫ с расширенными настройками"""
         ws = workbook.add_worksheet("⚙️ Параметры")
-        
         ws.merge_range('A1:P1', "⚙️ РАСШИРЕННЫЕ ПАРАМЕТРЫ РАСЧЁТА",
                        self.formats['header_title'])
         ws.set_row(0, 30)
-        
         ws.merge_range('A2:P2',
                        "💡 Все параметры редактируемые — изменения применяются ко всем расчётам",
                        self.formats['info'])
-        
+
         if metadata is None:
             metadata = {}
-        
+
         row = 4
-        
         ws.merge_range(row, 0, row, 15, "🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ",
                        self.formats['section_title'])
         row += 1
-        
+
         global_params = [
             ("Налоговая ставка", 0.06, "Налог от цены продажи", "0.00%"),
             ("Мин. прибыль (%)", 0.10, "Минимальная целевая прибыль", "0.00%"),
@@ -8109,7 +8123,7 @@ class SuperProExcelExporter:
             ("Курс USD/RUB", 92.50, "Для импортных товаров", "0.00"),
             ("Инфляция %", 0.07, "Годовая инфляция", "0.00%"),
         ]
-        
+
         for name, value, desc, fmt in global_params:
             ws.write(row, 0, name, self.formats['param_cell'])
             if "Дней" in name:
@@ -8119,36 +8133,31 @@ class SuperProExcelExporter:
             else:
                 ws.write(row, 1, value, self.formats['input_cell'])
             ws.write(row, 2, desc, self.formats['default'])
-            
+
             if "Налоговая" in name:
                 self._global_tax_row = row + 1  # ✅ Excel нумерация с 1
             elif "Мин. прибыль" in name:
                 self._global_min_profit_row = row + 1
-            
             row += 1
-        
+
         row += 2
-        
         ws.merge_range(row, 0, row, 15,
                        "📊 БАЗОВЫЕ ТАРИФЫ (ключ = МП|Режим)",
                        self.formats['section_title'])
         row += 1
-        
+
         headers = [
             'Ключ', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг',
             'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты',
             'Посл. миля', 'Подписка', 'Страховка', 'Упаковка',
             'Надбавка', 'Источник'
         ]
-        
         for col_idx, header in enumerate(headers):
             ws.write(row, col_idx, header, self.formats['mp_header'])
-        
         self._base_rates_start_row = row + 1
         row += 1
-        
+
         configs = self._get_configs()
-        
         if configs:
             for mp_name in sorted(configs.keys()):
                 config = configs[mp_name]
@@ -8157,7 +8166,7 @@ class SuperProExcelExporter:
                     base_rate = config.commission_rate
                     mode_mult = config.mode_multipliers.get(mode, 1.0)
                     effective_rate = base_rate * mode_mult
-                    
+
                     ws.write(row, 0, key, self.formats['param_cell'])
                     ws.write(row, 1, mp_name, self.formats['param_cell'])
                     ws.write(row, 2, mode, self.formats['param_cell'])
@@ -8181,98 +8190,188 @@ class SuperProExcelExporter:
             ws.write(row, 2, "FBS", self.formats['param_cell'])
             ws.write(row, 3, 0.15, self.formats['input_percent'])
             row += 1
-        
+
         self._base_rates_end_row = row
-        
         ws.set_column('A:A', 18)
         ws.set_column('B:C', 14)
         ws.set_column('D:O', 14)
         ws.set_column('P:P', 16)
-        
         return ws
-    
+
+    # =========================================================================
+    # 🆕 v100.15: ЛИСТ "ВХОДНЫЕ" С ВАЛИДАЦИЕЙ ГАБАРИТОВ И ПОДСВЕТКОЙ
+    # =========================================================================
     def _write_input_data(self, workbook, df: pd.DataFrame):
-        """📥 Входные данные с валидацией"""
-        ws = workbook.add_worksheet("📥 Входные")
+        """
+        📥 Входные данные с валидацией габаритов и подсветкой 🆕 v100.15
         
-        ws.merge_range('A1:N1',
+        Если в DataFrame есть колонки валидации габаритов:
+        - 'Эталон категории'
+        - 'Соответствие габаритам'
+        - 'Макс. отклонение %'
+        - 'Детали отклонений'
+        
+        То они добавляются на лист с цветовой подсветкой:
+        🟢 Зелёный — полное соответствие или допустимое отклонение
+        🟡 Жёлтый — значительное отклонение
+        🔴 Красный — критическое расхождение
+        ⚪ Серо-зелёный — категория не найдена
+        """
+        ws = workbook.add_worksheet("📥 Входные")
+
+        # 🆕 v100.15: Определяем наличие колонок валидации
+        existing_validation = self._get_existing_validation_columns(df)
+        total_base_cols = 14
+        total_cols = total_base_cols + len(existing_validation)
+
+        # Определяем последнюю букву колонки
+        if total_cols <= 26:
+            last_col_letter = chr(64 + total_cols)
+        else:
+            last_col_letter = 'N'  # fallback
+
+        ws.merge_range(f'A1:{last_col_letter}1',
                        "📥 ВХОДНЫЕ ДАННЫЕ (редактируемые)",
                        self.formats['header_title'])
         ws.set_row(0, 28)
-        
-        ws.merge_range('A2:N2',
+        ws.merge_range(f'A2:{last_col_letter}2',
                        "💡 Меняйте значения — все листы пересчитаются автоматически",
                        self.formats['info'])
-        
+
+        # Базовые заголовки
         headers = [
             'Артикул', 'Бренд', 'МП', 'Режим', 'Категория',
             'Цена', 'Себест-ть', 'Вес, кг',
             'Длина, см', 'Ширина, см', 'Высота, см',
             'Объём, л', 'Оплач. вес', 'Наценка %'
         ]
-        
+        # 🆕 v100.15: Добавляем колонки валидации
+        headers.extend(existing_validation)
+
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
-        
         ws.set_row(2, 30)
-        
+
+        # Запись данных
         for i, (_, row_data) in enumerate(df.iterrows()):
             excel_row = 3 + i
-            
+
+            # Базовые колонки
             ws.write(excel_row, 0, str(row_data.get('Артикул', '')), self.formats['default'])
             ws.write(excel_row, 1, str(row_data.get('Бренд', '')), self.formats['default'])
             ws.write(excel_row, 2, str(row_data.get('marketplace', 'Ozon')), self.formats['default'])
             ws.write(excel_row, 3, str(row_data.get('operation_mode', 'FBS')), self.formats['default'])
-            
             category = str(row_data.get('category', ''))
             if category:
                 category = category.lower().replace(' ', '_')
             ws.write(excel_row, 4, category, self.formats['default'])
-            
+
             ws.write(excel_row, 5, float(row_data.get('price', 0)), self.formats['input_cell'])
             ws.write(excel_row, 6, float(row_data.get('cost', 0)), self.formats['input_cell'])
             ws.write(excel_row, 7, float(row_data.get('weight', 0)), self.formats['input_cell_int'])
             ws.write(excel_row, 8, float(row_data.get('length', 0)), self.formats['input_cell_int'])
             ws.write(excel_row, 9, float(row_data.get('width', 0)), self.formats['input_cell_int'])
             ws.write(excel_row, 10, float(row_data.get('height', 0)), self.formats['input_cell_int'])
-            
+
             volume = (float(row_data.get('length', 0)) *
                       float(row_data.get('width', 0)) *
                       float(row_data.get('height', 0))) / 1000
             ws.write(excel_row, 11, volume, self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 12,
                              f"=MAX(G{excel_row+1}, L{excel_row+1}/5000)",
                              self.formats['formula_cell'])
-            
             ws.write(excel_row, 13, 0, self.formats['input_percent'])
-        
+
+            # 🆕 v100.15: Запись колонок валидации с подсветкой
+            for j, col_name in enumerate(existing_validation):
+                val = row_data.get(col_name, '')
+                col_idx = total_base_cols + j
+
+                if col_name == 'Макс. отклонение %':
+                    try:
+                        ws.write(excel_row, col_idx, float(val) if val else 0.0,
+                                 self.formats['input_cell_int'])
+                    except (ValueError, TypeError):
+                        ws.write(excel_row, col_idx, 0.0, self.formats['input_cell_int'])
+                elif col_name == 'Соответствие габаритам':
+                    # Применяем формат в зависимости от значения
+                    val_str = str(val) if val else ''
+                    if val_str.startswith('✅'):
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_match'])
+                    elif val_str.startswith('⚠️'):
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_warn'])
+                    elif val_str.startswith('❌'):
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_bad'])
+                    elif val_str.startswith('❓') or val_str == '':
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_neutral'])
+                    else:
+                        ws.write(excel_row, col_idx, val_str, self.formats['default'])
+                else:
+                    ws.write(excel_row, col_idx, str(val), self.formats['default'])
+
+        # Настройка ширин колонок
         ws.set_column('A:B', 18)
         ws.set_column('C:D', 15)
         ws.set_column('E:E', 18)
         ws.set_column('F:M', 14)
         ws.set_column('N:N', 14)
-        
+
+        # 🆕 v100.15: Ширины для колонок валидации
+        if existing_validation:
+            ws.set_column(total_base_cols, total_base_cols, 22)        # Эталон категории
+            ws.set_column(total_base_cols + 1, total_base_cols + 1, 26)  # Соответствие
+            ws.set_column(total_base_cols + 2, total_base_cols + 2, 16)  # Отклонение %
+            ws.set_column(total_base_cols + 3, total_base_cols + 3, 30)  # Детали
+
         ws.freeze_panes(3, 0)
-        
+
+        # 🆕 v100.15: УСЛОВНОЕ ФОРМАТИРОВАНИЕ (ПОДСВЕТКА) для колонки "Соответствие"
+        if 'Соответствие габаритам' in existing_validation:
+            match_col_idx = total_base_cols + existing_validation.index('Соответствие габаритам')
+            start_row = 3
+            end_row = 2 + self._total_rows
+
+            # Условное форматирование по началу текста
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '✅',
+                'format': self.formats['validation_match']
+            })
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '⚠️',
+                'format': self.formats['validation_warn']
+            })
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '❌',
+                'format': self.formats['validation_bad']
+            })
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '❓',
+                'format': self.formats['validation_neutral']
+            })
+
         if self._total_rows > 0:
-            ws.autofilter(2, 0, 2 + self._total_rows, 13)
-        
+            ws.autofilter(2, 0, 2 + self._total_rows, total_cols - 1)
         return ws
-    
+
     def _write_calculation_engine(self, workbook, df: pd.DataFrame):
         """📊 ДВИЖОК РАСЧЁТОВ с полной детализацией"""
         ws = workbook.add_worksheet("📊 Расчёт")
-        
         ws.merge_range('A1:W1',
                        "📊 ПОЛНЫЙ РАСЧЁТ ЮНИТ-ЭКОНОМИКИ",
                        self.formats['header_title'])
         ws.set_row(0, 28)
-        
         ws.merge_range('A2:W2',
                        "⚠️ Все расчёты автоматические — не редактируйте формулы",
                        self.formats['warning'])
-        
+
         headers = [
             'Артикул', 'МП', 'Режим', 'Категория',
             'Цена', 'Себест-ть', 'Вес', 'Объём',
@@ -8282,25 +8381,21 @@ class SuperProExcelExporter:
             'ИТОГО расходов', '💰 ПРИБЫЛЬ',
             'Маржа %', 'ROI %', 'Безубыт-ть'
         ]
-        
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
-        
         ws.set_row(2, 35)
-        
+
         # ✅ ИСПРАВЛЕНИЕ v100.11: Используем константы вместо магических чисел
         p_tax = f"'⚙️ Параметры'!$B${self._global_tax_row}"
         min_profit = f"'⚙️ Параметры'!$B${self._global_min_profit_row}"
         p_ad = f"'⚙️ Параметры'!$B${self.AD_ROW}"
         p_days = f"'⚙️ Параметры'!$B${self.DAYS_ROW}"
         p_currency = f"'⚙️ Параметры'!$B${self.CURRENCY_ROW}"
-        
         params_range = f"'⚙️ Параметры'!$A${self._base_rates_start_row}:$P${self._base_rates_end_row}"
-        
+
         for i in range(self._total_rows):
             excel_row = 3 + i
             input_row = 4 + i
-            
             in_art = f"'📥 Входные'!A{input_row}"
             in_mp = f"'📥 Входные'!C{input_row}"
             in_mode = f"'📥 Входные'!D{input_row}"
@@ -8309,9 +8404,8 @@ class SuperProExcelExporter:
             in_cost = f"'📥 Входные'!G{input_row}"
             in_weight = f"'📥 Входные'!H{input_row}"
             in_volume = f"'📥 Входные'!L{input_row}"
-            
             lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
-            
+
             ws.write_formula(excel_row, 0, f"={in_art}", self.formats['default'])
             ws.write_formula(excel_row, 1, f"={in_mp}", self.formats['default'])
             ws.write_formula(excel_row, 2, f"={in_mode}", self.formats['default'])
@@ -8320,89 +8414,72 @@ class SuperProExcelExporter:
             ws.write_formula(excel_row, 5, f"={in_cost}", self.formats['formula_cell'])
             ws.write_formula(excel_row, 6, f"={in_weight}", self.formats['formula_cell'])
             ws.write_formula(excel_row, 7, f"={in_volume}", self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 8,
                              f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 9,
                              f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+"
                              f"{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+"
                              f"{in_volume}*VLOOKUP({lookup_key},{params_range},7,FALSE)",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 10,
                              f"={in_volume}*VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 11,
                              f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 12,
                              f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 13,
                              f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 14,
                              f"={in_price}*{p_ad}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 15,
                              f"={in_price}*{p_tax}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 16,
                              f"=VLOOKUP({lookup_key},{params_range},13,FALSE)*{in_price}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 17,
                              f"=VLOOKUP({lookup_key},{params_range},14,FALSE)",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 18,
                              f"={in_cost}+SUM(I{excel_row+1}:R{excel_row+1})",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 19,
                              f"={in_price}-S{excel_row+1}",
                              self.formats['formula_cell'])
-            
             ws.write_formula(excel_row, 20,
                              f"=IF({in_price}>0,T{excel_row+1}/{in_price},0)",
                              self.formats['formula_percent'])
-            
             ws.write_formula(excel_row, 21,
                              f"=IF({in_cost}>0,T{excel_row+1}/{in_cost},0)",
                              self.formats['formula_percent'])
-            
             ws.write_formula(excel_row, 22,
                              f"=S{excel_row+1}/(1-"
                              f"VLOOKUP({lookup_key},{params_range},4,FALSE)-"
                              f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",
                              self.formats['formula_cell'])
-        
+
         if self._total_rows > 0:
             last_row = 3 + self._total_rows
             profit_range = f"T4:T{last_row}"
-            
             ws.conditional_format(profit_range, {
                 'type': 'cell',
                 'criteria': '>',
                 'value': 0,
                 'format': self.formats['positive']
             })
-            
             ws.conditional_format(profit_range, {
                 'type': 'cell',
                 'criteria': '<',
                 'value': 0,
                 'format': self.formats['negative']
             })
-            
+
             margin_range = f"U4:U{last_row}"
             ws.conditional_format(margin_range, {
                 'type': '3_color_scale',
@@ -8410,55 +8487,47 @@ class SuperProExcelExporter:
                 'mid_color': self.COLORS["warning"],
                 'max_color': self.COLORS["positive"]
             })
-            
+
             total_row = 3 + self._total_rows + 2
             ws.merge_range(total_row, 0, total_row, 2,
                            "ИТОГО / СРЕДНЕЕ:", self.formats['bold_money'])
-            
             last_data_row = 3 + self._total_rows
             for col_idx, col_letter in enumerate(['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']):
                 ws.write_formula(total_row, col_idx + 4,
                                  f"=SUM({col_letter}4:{col_letter}{last_data_row})",
                                  self.formats['bold_money'])
-            
             for col_idx, col_letter in enumerate(['U', 'V'], start=20):
                 ws.write_formula(total_row, col_idx,
                                  f"=AVERAGE({col_letter}4:{col_letter}{last_data_row})",
                                  self.formats['bold_percent'])
-        
+
         widths = {
             'A': 15, 'B': 14, 'C': 10, 'D': 14, 'E': 12, 'F': 12,
             'G': 10, 'H': 10, 'I': 12, 'J': 12, 'K': 12, 'L': 12,
             'M': 12, 'N': 12, 'O': 12, 'P': 12, 'Q': 12, 'R': 12,
             'S': 15, 'T': 15, 'U': 12, 'V': 12, 'W': 14
         }
-        
         for col, width in widths.items():
             ws.set_column(f'{col}:{col}', width)
-        
         ws.freeze_panes(3, 0)
-        
         if self._total_rows > 0:
             ws.autofilter(2, 0, 2 + self._total_rows, 22)
-        
         return ws
-    
+
     def _write_marketplace_comparison(self, workbook, df: pd.DataFrame):
         """🏪 Сравнение маркетплейсов с автоматическими выводами"""
         ws = workbook.add_worksheet("🏪 Сравнение МП")
-        
         ws.merge_range('A1:K1', "🏪 СРАВНИТЕЛЬНЫЙ АНАЛИЗ МАРКЕТПЛЕЙСОВ",
                        self.formats['header_title'])
-        
+
         headers = [
             'МП', 'SKU', 'Выручка', 'Расходы', 'Прибыль',
             'Ср. прибыль', 'Ср. маржа %', 'ROI %',
             'Доля рынка %', 'Эффективность', 'Рейтинг'
         ]
-        
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
-        
+
         if 'marketplace' in df.columns:
             mp_stats = df.groupby('marketplace').agg({
                 'price': 'sum',
@@ -8467,20 +8536,15 @@ class SuperProExcelExporter:
                 'margin_percent': 'mean',
                 'roi': 'mean',
             }).reset_index()
-            
             mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %', 'ROI %']
-            
             total_profit = mp_stats['Прибыль'].sum()
-            
+
             for i, row in mp_stats.iterrows():
                 excel_row = 3 + i
-                
                 ws.write(excel_row, 0, row['МП'], self.formats['bold'])
-                
                 ws.write_formula(excel_row, 1,
                                  f"=COUNTIF('📊 Расчёт'!$B:$B,A{excel_row+1})",
                                  self.formats['default'])
-                
                 ws.write(excel_row, 2, row['Выручка'], self.formats['money'])
                 ws.write(excel_row, 3, row['Расходы'], self.formats['money'])
                 ws.write(excel_row, 4, row['Прибыль'],
@@ -8488,36 +8552,31 @@ class SuperProExcelExporter:
                 ws.write(excel_row, 5, row['Ср. прибыль'], self.formats['money'])
                 ws.write(excel_row, 6, row['Ср. маржа %'], self.formats['formula_percent'])
                 ws.write(excel_row, 7, row['ROI %'], self.formats['formula_percent'])
-                
+
                 share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
                 ws.write(excel_row, 8, share / 100, self.formats['formula_percent'])
-                
                 ws.write_formula(excel_row, 9,
                                  f"=IF(C{excel_row+1}>0,E{excel_row+1}/C{excel_row+1},0)",
                                  self.formats['formula_percent'])
-                
                 ws.write_formula(excel_row, 10,
                                  f"=RANK(E{excel_row+1},$E$4:$E${3+len(mp_stats)})",
                                  self.formats['default'])
-        
+
         ws.set_column('A:K', 16)
         ws.freeze_panes(3, 0)
-        
         return ws
-    
+
     def _write_category_analysis(self, workbook, df: pd.DataFrame):
         """📂 Анализ по категориям - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         ws = workbook.add_worksheet("📂 Категории")
-        
         ws.merge_range('A1:H1', "📂 АНАЛИЗ ПО КАТЕГОРИЯМ",
                        self.formats['header_title'])
-        
+
         headers = ['Категория', 'SKU', 'Выручка', 'Прибыль', 'Ср. маржа %',
                    'Топ товар', 'Прибыль топ', 'Доля %']
-        
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
-        
+
         if 'category' in df.columns:
             # ✅ ИСПРАВЛЕНИЕ: правильная агрегация с 3 колонками
             cat_stats = df.groupby('category').agg({
@@ -8525,83 +8584,68 @@ class SuperProExcelExporter:
                 'profit': 'sum',
                 'margin_percent': 'mean',
             }).reset_index()
-            
             # ✅ ИСПРАВЛЕНИЕ: ровно 4 колонки
             cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. маржа %']
-            
             total_profit = cat_stats['Прибыль'].sum()
-            
+
             for i, row in cat_stats.iterrows():
                 excel_row = 3 + i
-                
                 ws.write(excel_row, 0, row['Категория'], self.formats['bold'])
-                
                 ws.write_formula(excel_row, 1,
                                  f"=COUNTIF('📊 Расчёт'!$D:$D,A{excel_row+1})",
                                  self.formats['default'])
-                
                 ws.write(excel_row, 2, row['Выручка'], self.formats['money'])
                 ws.write(excel_row, 3, row['Прибыль'],
                          self.formats['positive'] if row['Прибыль'] > 0 else self.formats['negative'])
                 ws.write(excel_row, 4, row['Ср. маржа %'], self.formats['formula_percent'])
-                
                 ws.write_formula(excel_row, 5,
                                  f"=INDEX('📊 Расчёт'!$A:$A,MATCH(MAX(IF('📊 Расчёт'!$D:$D=A{excel_row+1},'📊 Расчёт'!$T:$T)),'📊 Расчёт'!$T:$T,0))",
                                  self.formats['default'])
-                
                 ws.write_formula(excel_row, 6,
                                  f"=MAX(IF('📊 Расчёт'!$D:$D=A{excel_row+1},'📊 Расчёт'!$T:$T))",
                                  self.formats['money'])
-                
+
                 share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
                 ws.write(excel_row, 7, share / 100, self.formats['formula_percent'])
-        
+
         ws.set_column('A:H', 16)
         ws.freeze_panes(3, 0)
-        
         return ws
-    
+
     def _write_profit_forecast(self, workbook, df: pd.DataFrame):
         """📈 Прогноз прибыли на 12 месяцев"""
         ws = workbook.add_worksheet("📈 Прогноз")
-        
         ws.merge_range('A1:G1', "📈 ПРОГНОЗ ПРИБЫЛИ НА 12 МЕСЯЦЕВ",
                        self.formats['header_title'])
-        
+
         headers = ['Месяц', 'Оптимистичный', 'Базовый', 'Пессимистичный',
                    'Ср. значение', 'Рост %', 'Тренд']
-        
         for col_idx, header in enumerate(headers):
             ws.write(2, col_idx, header, self.formats['header'])
-        
+
         total_profit = df['profit'].sum() if 'profit' in df.columns else 0
         base_monthly = total_profit / 12 if total_profit > 0 else 1000
-        
         growth_rate = 0.05
         volatility = 0.15
-        
         seasonal = [0.85, 0.85, 0.95, 1.05, 1.10, 1.15,
                     1.20, 1.15, 1.10, 1.05, 0.95, 0.90]
-        
         month_names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
                        'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-        
+
         for i in range(12):
             excel_row = 3 + i
-            
             month_factor = seasonal[i]
             trend_factor = (1 + growth_rate) ** (i / 12)
-            
             base = base_monthly * month_factor * trend_factor
             optimistic = base * (1 + volatility * 0.5)
             pessimistic = base * (1 - volatility * 0.3)
-            
+
             ws.write(excel_row, 0, month_names[i], self.formats['default'])
             ws.write(excel_row, 1, optimistic, self.formats['money'])
             ws.write(excel_row, 2, base, self.formats['money'])
             ws.write(excel_row, 3, pessimistic, self.formats['money'])
             ws.write(excel_row, 4, base, self.formats['money'])
-            
+
             if i > 0:
                 prev_base = base_monthly * seasonal[i-1] * (1 + growth_rate) ** ((i-1)/12)
                 growth = (base / prev_base - 1) if prev_base > 0 else 0
@@ -8611,57 +8655,47 @@ class SuperProExcelExporter:
             else:
                 ws.write(excel_row, 5, 0, self.formats['formula_percent'])
                 ws.write(excel_row, 6, "→", self.formats['default'])
-        
+
         chart = workbook.add_chart({'type': 'line'})
-        
         chart.add_series({
             'name': 'Оптимистичный',
             'categories': f'=📈 Прогноз!$A$4:$A$15',
             'values': f'=📈 Прогноз!$B$4:$B$15',
             'line': {'color': 'green', 'width': 2},
         })
-        
         chart.add_series({
             'name': 'Базовый',
             'categories': f'=📈 Прогноз!$A$4:$A$15',
             'values': f'=📈 Прогноз!$C$4:$C$15',
             'line': {'color': 'blue', 'width': 3},
         })
-        
         chart.add_series({
             'name': 'Пессимистичный',
             'categories': f'=📈 Прогноз!$A$4:$A$15',
             'values': f'=📈 Прогноз!$D$4:$D$15',
             'line': {'color': 'red', 'width': 2, 'dash_type': 'dash'},
         })
-        
         chart.set_title({'name': 'Прогноз прибыли'})
         chart.set_x_axis({'name': 'Месяц'})
         chart.set_y_axis({'name': 'Прибыль, ₽'})
         chart.set_size({'width': 720, 'height': 400})
-        
         ws.insert_chart(16, 0, chart)
-        
         ws.set_column('A:G', 16)
-        
         return ws
-    
+
     def _write_sensitivity_analysis(self, workbook, df: pd.DataFrame):
         """🎯 Анализ чувствительности"""
         ws = workbook.add_worksheet("🎯 Чувствительность")
-        
         ws.merge_range('A1:I1', "🎯 АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ",
                        self.formats['header_title'])
-        
         ws.merge_range('A2:I2',
                        "Как изменяется прибыль при изменении ключевых параметров",
                        self.formats['info'])
-        
+
         avg_price = df['price'].mean() if 'price' in df.columns else 1000
         avg_cost = df['cost'].mean() if 'cost' in df.columns else 500
-        
+
         row = 4
-        
         ws.write(row, 0, "Параметр", self.formats['header'])
         ws.write(row, 1, "Текущее", self.formats['header'])
         ws.write(row, 2, "-20%", self.formats['header'])
@@ -8669,9 +8703,8 @@ class SuperProExcelExporter:
         ws.write(row, 4, "0%", self.formats['header'])
         ws.write(row, 5, "+10%", self.formats['header'])
         ws.write(row, 6, "+20%", self.formats['header'])
-        
         row += 1
-        
+
         scenarios = [
             ("Цена продажи", avg_price),
             ("Себестоимость", avg_cost),
@@ -8679,85 +8712,69 @@ class SuperProExcelExporter:
             ("Логистика", 100),
             ("Реклама (ДРР)", 0.15),
         ]
-        
+
         for param_name, base_value in scenarios:
             ws.write(row, 0, param_name, self.formats['param_cell'])
             ws.write(row, 1, base_value, self.formats['default'])
-            
             for i, change in enumerate([-0.20, -0.10, 0, 0.10, 0.20]):
                 new_value = base_value * (1 + change)
                 ws.write(row, 2 + i, new_value, self.formats['input_cell'])
-            
             row += 1
-        
+
         ws.set_column('A:I', 16)
-        
         return ws
-    
+
     def _write_top_analytics(self, workbook, df: pd.DataFrame):
         """🏆 Топ-аналитика"""
         ws = workbook.add_worksheet("🏆 Топ")
-        
         ws.merge_range('A1:F1', "🏆 ТОП-10 ПРИБЫЛЬНЫХ И УБЫТОЧНЫХ",
                        self.formats['header_title'])
-        
+
         ws.write(2, 0, "ТОП-10 ПРИБЫЛЬНЫХ", self.formats['section_title'])
-        
         headers = ['№', 'Артикул', 'МП', 'Прибыль', 'Маржа %', 'Рекомендация']
-        
         for col_idx, header in enumerate(headers):
             ws.write(3, col_idx, header, self.formats['header'])
-        
+
         if 'profit' in df.columns and 'Артикул' in df.columns:
             top_df = df.nlargest(10, 'profit')
-            
             for i, (_, row) in enumerate(top_df.iterrows()):
                 excel_row = 4 + i
-                
                 ws.write(excel_row, 0, i + 1, self.formats['default'])
                 ws.write(excel_row, 1, row.get('Артикул', ''), self.formats['default'])
                 ws.write(excel_row, 2, row.get('marketplace', ''), self.formats['default'])
                 ws.write(excel_row, 3, row.get('profit', 0), self.formats['positive'])
                 ws.write(excel_row, 4, row.get('margin_percent', 0), self.formats['formula_percent'])
                 ws.write(excel_row, 5, "✅ Лидер", self.formats['info'])
-        
+
         bottom_start = 4 + 10 + 3
-        
         ws.write(bottom_start, 0, "ТОП-10 УБЫТОЧНЫХ", self.formats['section_title'])
-        
         for col_idx, header in enumerate(headers):
             ws.write(bottom_start + 1, col_idx, header, self.formats['header'])
-        
+
         if 'profit' in df.columns:
             bottom_df = df.nsmallest(10, 'profit')
-            
             for i, (_, row) in enumerate(bottom_df.iterrows()):
                 excel_row = bottom_start + 2 + i
-                
                 ws.write(excel_row, 0, i + 1, self.formats['default'])
                 ws.write(excel_row, 1, row.get('Артикул', ''), self.formats['default'])
                 ws.write(excel_row, 2, row.get('marketplace', ''), self.formats['default'])
                 ws.write(excel_row, 3, row.get('profit', 0), self.formats['negative'])
                 ws.write(excel_row, 4, row.get('margin_percent', 0), self.formats['formula_percent'])
                 ws.write(excel_row, 5, "⚠️ Требует внимания", self.formats['warning_cell'])
-        
+
         ws.set_column('A:F', 16)
-        
         return ws
-    
+
     def _write_recommendations(self, workbook, df: pd.DataFrame):
         """💡 Автоматические рекомендации"""
         ws = workbook.add_worksheet("💡 Рекомендации")
-        
         ws.merge_range('A1:D1', "💡 АВТОМАТИЧЕСКИЕ РЕКОМЕНДАЦИИ",
                        self.formats['header_title'])
-        
         ws.merge_range('A2:D2',
                        "Система анализирует данные и предлагает оптимальные решения",
                        self.formats['info'])
-        
+
         row = 4
-        
         if 'marketplace' in df.columns and 'profit' in df.columns:
             best_mp = df.groupby('marketplace')['profit'].sum().idxmax()
             ws.write(row, 0, "🏪 Лучший маркетплейс", self.formats['bold'])
@@ -8765,7 +8782,7 @@ class SuperProExcelExporter:
                            f"✅ Рекомендуется использовать {best_mp} — он приносит максимальную прибыль",
                            self.formats['info'])
             row += 2
-        
+
         if 'operation_mode' in df.columns and 'profit' in df.columns:
             best_mode = df.groupby('operation_mode')['profit'].sum().idxmax()
             ws.write(row, 0, "📦 Оптимальный режим", self.formats['bold'])
@@ -8773,7 +8790,7 @@ class SuperProExcelExporter:
                            f"✅ Режим {best_mode} показывает лучшие результаты",
                            self.formats['info'])
             row += 2
-        
+
         avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
         if avg_margin < 15:
             ws.write(row, 0, "💰 Ценовая политика", self.formats['bold'])
@@ -8781,7 +8798,7 @@ class SuperProExcelExporter:
                            "⚠️ Средняя маржа ниже 15%. Рекомендуется пересмотреть цены",
                            self.formats['warning_cell'])
             row += 2
-        
+
         if 'profit' in df.columns:
             unprofitable = (df['profit'] < 0).sum()
             if unprofitable > 0:
@@ -8790,10 +8807,9 @@ class SuperProExcelExporter:
                                f"⚠️ {unprofitable} товаров убыточны. Рекомендуется провести аудит",
                                self.formats['warning_cell'])
                 row += 2
-        
+
         if 'total_expenses' in df.columns and 'price' in df.columns:
             expense_ratio = (df['total_expenses'].sum() / df['price'].sum() * 100) if df['price'].sum() > 0 else 0
-            
             if expense_ratio > 70:
                 ws.write(row, 0, "📉 Оптимизация расходов", self.formats['bold'])
                 ws.merge_range(row, 1, row, 3,
@@ -8804,21 +8820,18 @@ class SuperProExcelExporter:
                 ws.merge_range(row, 1, row, 3,
                                f"✅ Расходы составляют {expense_ratio:.1f}% от выручки — хороший показатель",
                                self.formats['info'])
-        
+
         ws.set_column('A:A', 25)
         ws.set_column('B:D', 30)
-        
         return ws
-    
+
     def _write_export_summary(self, workbook, df: pd.DataFrame, metadata: Dict):
         """📋 Сводка экспорта"""
         ws = workbook.add_worksheet("📋 Сводка")
-        
         ws.merge_range('A1:C1', "📋 СВОДКА ЭКСПОРТА",
                        self.formats['header_title'])
-        
+
         row = 3
-        
         summary = [
             ("📅 Дата экспорта", datetime.now().strftime('%d.%m.%Y %H:%M:%S')),
             ("📦 Всего товаров", f"{len(df):,}"),
@@ -8826,17 +8839,16 @@ class SuperProExcelExporter:
             ("📊 Режимы", ", ".join(metadata.get('modes', ['FBS'])) if metadata else "FBS"),
             ("💰 Общая прибыль", f"{df['profit'].sum():,.0f} ₽" if 'profit' in df.columns else "Н/Д"),
             ("📈 Средняя маржа", f"{df['margin_percent'].mean():.1f}%" if 'margin_percent' in df.columns else "Н/Д"),
-            ("⚙️ Версия", "SUPER-PRO v2.0"),
+            ("⚙️ Версия", "SUPER-PRO v2.0 (v100.15)"),
         ]
-        
+
         for label, value in summary:
             ws.write(row, 0, label, self.formats['param_cell'])
             ws.write(row, 1, value, self.formats['default'])
             row += 1
-        
+
         ws.set_column('A:A', 30)
         ws.set_column('B:B', 40)
-        
         return ws
 # ============================================================================
 # 🆕 БЛОК 15: UI ФУНКЦИИ - ЮНИТ-ЭКОНОМИКА (v100.6 - УЛУЧШЕННАЯ)
@@ -9073,49 +9085,49 @@ def show_single_product_calculation():
             
             st_dataframe_compat(pd.DataFrame(expenses_data), key="ue_expenses_table")
 # ============================================================================
-# 🆕 БЛОК 16: UI ФУНКЦИИ - ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ (v100.6 - С PRO ЭКСПОРТОМ)
+# 🆕 БЛОК 16: UI ФУНКЦИИ - ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ (v100.15 - С ВАЛИДАЦИЕЙ ГАБАРИТОВ)
 # ============================================================================
 # ✅ ИСПРАВЛЕНИЯ v100.11:
 # 1. Магическое число 10000 вынесено в константу WARNING_THRESHOLD
 # 2. Все st.experimental_rerun() заменены на st.rerun()
 # 3. Улучшена обработка ошибок при экспорте
+# ✅ ИСПРАВЛЕНИЯ v100.15:
+# 1. Добавлена валидация габаритов против эталонов категорий
+# 2. Добавлены 4 новые колонки в results_df
+# 3. UI для настройки порога отклонения
 # ============================================================================
-
 # ✅ ИСПРАВЛЕНИЕ v100.11: Константа вместо магического числа
 WARNING_THRESHOLD = 10_000
-
 
 def show_catalog_calculation_parallel():
     """
     📦 ПАРАЛЛЕЛЬНЫЙ РАСЧЕТ ПО КАТАЛОГУ
     Оптимизирован для 350K+ товаров с живыми формулами Excel
+    🆕 v100.15: С валидацией габаритов против эталонов категорий
     """
     st.subheader("📦 Параллельный расчет по каталогу")
-    
+
     if st.session_state.get('uploaded_data') is None:
         st.warning("⚠️ Сначала загрузите данные в разделе '📁 Загрузка данных'")
         return
-    
-    df = st.session_state.uploaded_data.copy()
-    
-    st.info("""
-📋 **ИНСТРУКЦИЯ:**
-1. Убедитесь, что данные загружены
-2. Выберите маркетплейсы для расчета
-3. Укажите режим работы
-4. **Система автоматически определит колонки**
-5. Для больших каталогов (>1000 товаров) используется параллельный расчет
-6. Нажмите "Рассчитать"
 
-🆕 **v100.6:** Экспорт в Excel с живыми формулами — меняйте значения, всё пересчитается!
-""")
-    
+    df = st.session_state.uploaded_data.copy()
+
+    st.info("""
+    📋 **ИНСТРУКЦИЯ:**
+    1. Убедитесь, что данные загружены
+    2. Выберите маркетплейсы для расчета
+    3. Укажите режим работы
+    4. **Система автоматически определит колонки**
+    5. Для больших каталогов (>1000 товаров) используется параллельный расчет
+    6. Нажмите "Рассчитать"
+    🆕 **v100.15:** Добавлена валидация габаритов против эталонов категорий с подсветкой в Excel/Google Sheets!
+    """)
+
     unit_economics = get_marketplace_unit_economics()
-    
+
     st.subheader("⚙️ Параметры расчета")
-    
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         available_marketplaces = list(unit_economics._configs.keys())
         selected_marketplaces = st.multiselect(
@@ -9125,18 +9137,15 @@ def show_catalog_calculation_parallel():
             key="ue_parallel_marketplaces",
             help="Выберите один или несколько маркетплейсов"
         )
-        
         if not selected_marketplaces:
             st.warning("⚠️ Выберите хотя бы один маркетплейс")
             return
-    
     with col2:
         operation_mode = st.selectbox(
             "📦 Режим работы",
             ["FBY", "FBS", "FBO", "DBS", "FBP"],
             key="ue_parallel_mode"
         )
-        
         days_in_storage = st.number_input(
             "📦 Дней хранения",
             min_value=1,
@@ -9145,7 +9154,6 @@ def show_catalog_calculation_parallel():
             step=1,
             key="ue_parallel_days"
         )
-    
     with col3:
         apply_markup = st.checkbox("💰 Применить наценку", value=False, key="ue_parallel_markup")
         if apply_markup:
@@ -9159,76 +9167,64 @@ def show_catalog_calculation_parallel():
             )
         else:
             markup_percent = 0.0
-        
-        use_seasonal = st.checkbox("🌤 Учесть сезонность", value=True, key="ue_parallel_seasonal")
-        
-        use_parallel = st.checkbox("🚀 Параллельный расчет", value=True, key="ue_parallel_enabled")
-        if use_parallel:
-            max_workers = st.number_input(
-                "🧵 Потоков",
-                min_value=1,
-                max_value=16,
-                value=min(4, os.cpu_count() or 2),
-                step=1,
-                key="ue_parallel_workers"
-            )
-        else:
-            max_workers = 1
-    
+
+    use_seasonal = st.checkbox("🌤 Учесть сезонность", value=True, key="ue_parallel_seasonal")
+    use_parallel = st.checkbox("🚀 Параллельный расчет", value=True, key="ue_parallel_enabled")
+    if use_parallel:
+        max_workers = st.number_input(
+            "🧵 Потоков",
+            min_value=1,
+            max_value=16,
+            value=min(4, os.cpu_count() or 2),
+            step=1,
+            key="ue_parallel_workers"
+        )
+    else:
+        max_workers = 1
+
     st.subheader("📋 Определение колонок в данных")
-    
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
         article_col = st.selectbox("Артикул", options=df.columns, key="ue_parallel_article")
-    
     with col2:
         price_options = [col for col in df.columns if any(w in str(col).lower() for w in ['цена', 'price', 'стоимость'])]
         if not price_options:
             price_options = list(df.columns)
         price_col = st.selectbox("Цена продажи", options=price_options, key="ue_parallel_price")
-    
     with col3:
         cost_options = [col for col in df.columns if any(w in str(col).lower() for w in ['себестоимость', 'cost', 'закупочная'])]
         if not cost_options:
             cost_options = list(df.columns)
         cost_col = st.selectbox("Себестоимость", options=cost_options, key="ue_parallel_cost")
-    
     with col4:
         category_options = [col for col in df.columns if any(w in str(col).lower() for w in ['категория', 'category', 'группа'])]
         category_options = ['Не выбрано'] + list(category_options)
         category_col = st.selectbox("Категория (опционально)", options=category_options, key="ue_parallel_category")
-    
+
     st.subheader("📏 Габариты")
-    
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
         length_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['длина', 'length', 'длинна', 'l'])]
         length_col = st.selectbox("Длина (см)", options=length_options, key="ue_parallel_length")
-    
     with col2:
         width_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['ширина', 'width', 'w'])]
         width_col = st.selectbox("Ширина (см)", options=width_options, key="ue_parallel_width")
-    
     with col3:
         height_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['высота', 'height', 'h'])]
         height_col = st.selectbox("Высота (см)", options=height_options, key="ue_parallel_height")
-    
     with col4:
         weight_options = ['Не выбрано'] + [col for col in df.columns if any(w in str(col).lower() for w in ['вес', 'weight', 'масса', 'кг'])]
         weight_col = st.selectbox("Вес (кг)", options=weight_options, key="ue_parallel_weight")
-    
+
     if st.button("🚀 Рассчитать юнит-экономику", type="primary", key="ue_parallel_calc"):
         total_items = len(df) * len(selected_marketplaces)
-        
         # ✅ ИСПРАВЛЕНИЕ v100.11: Используем константу вместо магического числа
         if total_items > WARNING_THRESHOLD:
             st.warning(f"⚠️ Будет выполнено {total_items:,} расчетов. Это может занять несколько минут.")
-        
+
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
+
         with st.spinner("Расчет юнит-экономики..."):
             try:
                 category_col_name = category_col if category_col != 'Не выбрано' else None
@@ -9236,11 +9232,11 @@ def show_catalog_calculation_parallel():
                 width_col_name = width_col if width_col != 'Не выбрано' else None
                 height_col_name = height_col if height_col != 'Не выбрано' else None
                 weight_col_name = weight_col if weight_col != 'Не выбрано' else None
-                
+
                 def progress_callback(progress):
                     progress_bar.progress(progress)
                     status_text.text(f"🔄 Обработано: {int(progress * 100)}%")
-                
+
                 results_df = unit_economics.calculate_for_catalog_batch(
                     df=df,
                     price_col=price_col,
@@ -9259,14 +9255,55 @@ def show_catalog_calculation_parallel():
                     max_workers=max_workers if use_parallel else 1,
                     progress_callback=progress_callback if total_items > 1000 else None
                 )
-                
+
                 progress_bar.progress(1.0)
                 status_text.text("✅ Расчет завершен!")
-                
+
                 if results_df.empty:
                     st.error("❌ Не удалось рассчитать юнит-экономику ни для одного товара")
                     return
-                
+
+                # ====================================================================
+                # 🆕 v100.15: ДОБАВЛЕНИЕ КОЛОНОК "СООТВЕТСТВИЕ КАТЕГОРИЯМ"
+                # ====================================================================
+                dim_validation_enabled = False
+                dim_tolerance = 20.0
+
+                if 'category_dimensions_db' in st.session_state:
+                    cat_db = st.session_state.category_dimensions_db
+                    if cat_db.get_all_categories():
+                        dim_validation_enabled = True
+                        st.divider()
+                        st.subheader("📏 Валидация габаритов против категорий")
+                        st.info(f"""
+                        ✅ В базе найдено **{len(cat_db.get_all_categories())}** категорий с эталонными габаритами.
+                        Система добавит 4 новые колонки с подсветкой:
+                        🟢 **Зелёный** — отклонение ≤ порога
+                        🟡 **Жёлтый** — умеренное отклонение
+                        🔴 **Красный** — критическое расхождение
+                        """)
+
+                        dim_tolerance = st.slider(
+                            "🎯 Допустимое отклонение (%)",
+                            min_value=5, max_value=100, value=20, step=5,
+                            key="dim_tolerance_calc"
+                        )
+
+                        try:
+                            results_df = validate_catalog_dimensions_vs_categories(
+                                results_df, tolerance_percent=float(dim_tolerance)
+                            )
+                            match_count = (results_df['Соответствие габаритам'].str.startswith('✅')).sum()
+                            warn_count = (results_df['Соответствие габаритам'].str.startswith('⚠️')).sum()
+                            bad_count = (results_df['Соответствие габаритам'].str.startswith('❌')).sum()
+                            st.success(
+                                f"✅ Добавлены колонки соответствия. "
+                                f"Распределение: {match_count} 🟢, {warn_count} 🟡, {bad_count} 🔴"
+                            )
+                        except Exception as val_err:
+                            st.warning(f"⚠️ Ошибка валидации: {val_err}")
+                            dim_validation_enabled = False
+
                 st.session_state.ue_parallel_results = results_df
                 st.session_state.ue_parallel_metadata = {
                     'marketplaces': selected_marketplaces,
@@ -9274,75 +9311,103 @@ def show_catalog_calculation_parallel():
                     'days_in_storage': days_in_storage,
                     'seasonal': use_seasonal,
                     'total_items': len(results_df),
+                    'dim_validation_enabled': dim_validation_enabled,
+                    'dim_tolerance': dim_tolerance,
                 }
-                
+
                 st.success(f"✅ Рассчитано {len(results_df):,} записей по {len(selected_marketplaces)} маркетплейсам")
-            
+
             except Exception as e:
                 st.error(f"❌ Ошибка при расчете: {str(e)}")
                 with st.expander("📋 Подробности ошибки", expanded=True):
                     st.code(traceback.format_exc())
                 return
-    
+
     if 'ue_parallel_results' in st.session_state and st.session_state.ue_parallel_results is not None:
         results_df = st.session_state.ue_parallel_results
         metadata = st.session_state.get('ue_parallel_metadata', {})
-        
+
+        # ====================================================================
+        # 🆕 v100.15: UI ПЕРЕСЧЁТ ВАЛИДАЦИИ ПРИ ИЗМЕНЕНИИ ПОРОГА
+        # ====================================================================
+        if metadata.get('dim_validation_enabled'):
+            st.divider()
+            st.subheader("📏 Настройки валидации габаритов")
+            new_tolerance = st.slider(
+                "🎯 Допустимое отклонение (%)",
+                min_value=5, max_value=100,
+                value=int(metadata.get('dim_tolerance', 20)),
+                step=5, key="dim_tolerance_ui"
+            )
+            if new_tolerance != metadata.get('dim_tolerance'):
+                st.session_state.dim_tolerance = new_tolerance
+                try:
+                    results_df = validate_catalog_dimensions_vs_categories(
+                        results_df, tolerance_percent=float(new_tolerance)
+                    )
+                    st.session_state.ue_parallel_results = results_df
+                    metadata['dim_tolerance'] = new_tolerance
+                    st.session_state.ue_parallel_metadata = metadata
+                    st.rerun()
+                except Exception as val_err:
+                    st.warning(f"⚠️ Ошибка пересчёта: {val_err}")
+
+            match_count = (results_df['Соответствие габаритам'].str.startswith('✅')).sum()
+            warn_count = (results_df['Соответствие габаритам'].str.startswith('⚠️')).sum()
+            bad_count = (results_df['Соответствие габаритам'].str.startswith('❌')).sum()
+            st.success(
+                f"✅ Статус соответствия: "
+                f"{match_count} 🟢, {warn_count} 🟡, {bad_count} 🔴"
+            )
+
         st.subheader("📊 Сводная статистика")
-        
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
             total_profit = results_df['profit'].sum()
             st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
-        
         with col2:
             avg_profit = results_df['profit'].mean()
             st.metric("📈 Средняя прибыль", f"{avg_profit:.2f} ₽")
-        
         with col3:
             avg_margin = results_df['margin_percent'].mean()
             st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
-        
         with col4:
             try:
                 best_mp = results_df.groupby('marketplace')['profit'].sum().idxmax()
                 st.metric("🏆 Лучший МП", best_mp)
             except Exception:
                 st.metric("🏆 Лучший МП", "Н/Д")
-        
+
         st.subheader("📋 Результаты расчета")
-        
         display_cols = ['Артикул', 'marketplace', 'price', 'profit', 'margin_percent',
-                       'recommended_min_price', 'tax_amount', 'breakeven_price']
+                        'recommended_min_price', 'tax_amount', 'breakeven_price']
+
+        # 🆕 v100.15: Добавляем колонки соответствия, если они есть
+        for extra_col in ['Эталон категории', 'Соответствие габаритам',
+                          'Макс. отклонение %', 'Детали отклонений']:
+            if extra_col in results_df.columns:
+                display_cols.append(extra_col)
+
         available_display = [col for col in display_cols if col in results_df.columns]
-        
         if available_display:
             st_dataframe_compat(results_df[available_display].head(100))
-        
+
         st.subheader("📤 Экспорт результатов")
-        
         st.info("""
-🆕 **v100.6: Три варианта экспорта:**
+        🆕 **v100.15: Три варианта экспорта:**
+        🟢 **Excel PRO с формулами** — живые формулы, можно редактировать входные данные, всё пересчитается
+        🔵 **Excel базовый** — статические значения, быстрее для очень больших файлов
+        ⚪ **CSV** — универсальный формат для импорта в другие системы
+        """)
 
-🟢 **Excel PRO с формулами** — живые формулы, можно редактировать входные данные, всё пересчитается
-
-🔵 **Excel базовый** — статические значения, быстрее для очень больших файлов
-
-⚪ **CSV** — универсальный формат для импорта в другие системы
-""")
-        
         export_col1, export_col2, export_col3 = st.columns(3)
-        
         with export_col1:
             st.markdown("#### 🟢 Excel PRO (с формулами)")
             st.caption("✅ Живые формулы\n✅ Редактируемые параметры\n✅ Пересчёт при изменении")
-            
             if st.button("📥 Экспорт PRO", type="primary", key="ue_parallel_export_excel_pro", use_container_width=True):
                 try:
                     with st.spinner("Генерация отчёта с живыми формулами..."):
                         output_path = TEMP_DIR / f"unit_economics_PRO_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                        
                         export_metadata = {
                             'marketplaces': metadata.get('marketplaces', []),
                             'operation_mode': metadata.get('operation_mode', 'FBS'),
@@ -9350,9 +9415,10 @@ def show_catalog_calculation_parallel():
                             'seasonal': metadata.get('seasonal', True),
                             'tariff_source': 'Актуальные тарифы 2026',
                             'total_items': len(results_df),
+                            'dim_validation_enabled': metadata.get('dim_validation_enabled', False),
+                            'dim_tolerance': metadata.get('dim_tolerance', 20.0),
                         }
-                        
-                        # ✅ ИСПРАВЛЕНИЕ: Используем SuperProExcelExporter вместо FormulaExcelExporter
+                        # ✅ ИСПРАВЛЕНИЕ: Используем SuperProExcelExporter
                         try:
                             from streamlit_app import SuperProExcelExporter
                             exporter = SuperProExcelExporter(unit_economics=unit_economics)
@@ -9363,22 +9429,19 @@ def show_catalog_calculation_parallel():
                             # Fallback: используем базовый pandas экспорт
                             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                                 results_df.to_excel(writer, index=False, sheet_name='Результаты')
-                                
                                 if 'marketplace' in results_df.columns:
                                     mp_summary = results_df.groupby('marketplace').agg({
                                         'profit': ['sum', 'mean', 'count'],
                                         'margin_percent': 'mean',
                                     }).reset_index()
                                     mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
-                                                         'Кол-во SKU', 'Средняя маржа %']
+                                                          'Кол-во SKU', 'Средняя маржа %']
                                     mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
-                            
                             success = True
-                        
+
                         if success and output_path.exists():
                             with open(output_path, "rb") as f:
                                 file_bytes = f.read()
-                            
                             st.download_button(
                                 label="⬇️ Скачать PRO-отчёт",
                                 data=file_bytes,
@@ -9390,23 +9453,19 @@ def show_catalog_calculation_parallel():
                             st.success("✅ PRO-отчёт готов! Откройте в Excel — все формулы работают")
                         else:
                             st.error("❌ Ошибка генерации отчёта")
-                
                 except Exception as e:
                     st.error(f"❌ Ошибка: {str(e)}")
                     logger.error(f"Ошибка PRO-экспорта: {traceback.format_exc()}")
-        
+
         with export_col2:
             st.markdown("#### 🔵 Excel (базовый)")
             st.caption("⚡ Быстрее для 350K+\n📊 Статические значения\n📋 Простой формат")
-            
             if st.button("📥 Экспорт Excel", key="ue_parallel_export_excel", use_container_width=True):
                 try:
                     with st.spinner("Генерация Excel файла..."):
                         output = io.BytesIO()
-                        
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
                             results_df.to_excel(writer, index=False, sheet_name='Результаты')
-                            
                             if 'marketplace' in results_df.columns:
                                 mp_summary = results_df.groupby('marketplace').agg({
                                     'profit': ['sum', 'mean', 'count'],
@@ -9414,11 +9473,9 @@ def show_catalog_calculation_parallel():
                                     'price': 'mean'
                                 }).reset_index()
                                 mp_summary.columns = ['Маркетплейс', 'Общая прибыль', 'Средняя прибыль',
-                                                     'Кол-во SKU', 'Средняя маржа %', 'Средняя цена']
+                                                      'Кол-во SKU', 'Средняя маржа %', 'Средняя цена']
                                 mp_summary.to_excel(writer, index=False, sheet_name='Сводка по МП')
-                        
                         output.seek(0)
-                        
                         st.download_button(
                             label="⬇️ Скачать Excel",
                             data=output,
@@ -9428,19 +9485,16 @@ def show_catalog_calculation_parallel():
                             use_container_width=True
                         )
                         st.success("✅ Excel файл готов!")
-                
                 except Exception as e:
                     st.error(f"❌ Ошибка: {str(e)}")
-        
+
         with export_col3:
             st.markdown("#### ⚪ CSV")
             st.caption("🌍 Универсальный формат\n📦 Для импорта в 1С\n🔧 Для других систем")
-            
             if st.button("📥 Экспорт CSV", key="ue_parallel_export_csv", use_container_width=True):
                 try:
                     with st.spinner("Генерация CSV файла..."):
                         csv_data = results_df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-                        
                         st.download_button(
                             label="⬇️ Скачать CSV",
                             data=csv_data.encode('utf-8-sig'),
@@ -9450,14 +9504,11 @@ def show_catalog_calculation_parallel():
                             use_container_width=True
                         )
                         st.success("✅ CSV файл готов!")
-                
                 except Exception as e:
                     st.error(f"❌ Ошибка: {str(e)}")
-        
+
         st.divider()
-        
         col_clear1, col_clear2 = st.columns([3, 1])
-        
         with col_clear2:
             if st.button("🗑️ Очистить результаты", key="ue_parallel_clear"):
                 for key in ['ue_parallel_results', 'ue_parallel_metadata']:
@@ -9466,322 +9517,1114 @@ def show_catalog_calculation_parallel():
                 st.success("✅ Результаты очищены")
                 # ✅ ИСПРАВЛЕНИЕ v100.11: st.rerun() вместо st.experimental_rerun()
                 st.rerun()
-    
     else:
         st.info("ℹ️ Нажмите кнопку '🚀 Рассчитать юнит-экономику' для начала расчета")
 
 # ============================================================================
-# БЛОК 17: UI функции каталога (ПОЛНАЯ ВЕРСИЯ v100.5.8)
+# 🆕 БЛОК 14: СУПЕР-PRO ЭКСПОРТЕР ЮНИТ-ЭКОНОМИКИ v2.0 (v100.15)
 # ============================================================================
-# ✅ ИСПРАВЛЕНИЯ v100.5.8:
-# 1. Исправлен пустой label в st.radio() - добавлен текст "🧭 Выберите подраздел:"
-# 2. Исправлен конфликт с главным меню (убраны все st.sidebar)
-# 3. Исправлена ошибка чтения Excel через calamine (убраны неподдерживаемые параметры)
-# 4. Все подразделы теперь видны и доступны
-# 5. 🆕 v100.5.8: Исправлено расширение файла при экспорте (Excel → .xlsx)
+# 🆕 v100.10: МАКСИМАЛЬНО ИНФОРМАТИВНЫЙ ШАБЛОН
+# ✅ 10+ листов с полной аналитикой
+# ✅ Автоматические диаграммы и графики
+# ✅ Динамические KPI и дашборды
+# ✅ Сравнение маркетплейсов в реальном времени
+# ✅ Прогноз прибыли на 12 месяцев
+# ✅ Анализ чувствительности
+# ✅ Рекомендации по оптимизации
+# ✅ ИСПРАВЛЕНИЯ v100.11:
+# - Вынесены магические числа в константы класса
+# - Улучшена читаемость формул Excel
+# ✅ УЛУЧШЕНИЯ v100.15:
+# - Добавлены 4 колонки валидации габаритов на лист "📥 Входные"
+# - Условное форматирование (подсветка 🟢🟡🔴) для колонки "Соответствие габаритам"
+# - Автоопределение наличия колонок валидации в DataFrame
 # ============================================================================
-def show_catalog_grouping_interface():
+class SuperProExcelExporter:
     """
-    🗂️ РАЗДЕЛ 3: КАТАЛОГ ДЛЯ ГРУППИРОВКИ
-    High-Volume каталог с поддержкой 10M+ записей
+    🚀 СУПЕР-ПРО ЭКСПОРТ ЮНИТ-ЭКОНОМИКИ v2.0
+    Максимально информативный шаблон с живыми формулами и аналитикой
     """
-    st.header("🗂️ Шаг 3: Каталог для группировки")
-    st.info("""
-    📋 **О РАЗДЕЛЕ:**
-    Этот раздел предназначен для работы с большими каталогами товаров.
-    
-    **Возможности:**
-    - ✅ Загрузка каталогов до 10 миллионов записей
-    - ✅ Автоматическая группировка по категориям
-    - ✅ Интеллектуальный парсинг размеров "20x15x10"
-    - ✅ Поиск и фильтрация товаров
-    - ✅ Экспорт в Excel, CSV, Parquet
-    - ✅ Статистика и аналитика
-    """)
-    
-    if not (POLARS_AVAILABLE and DUCKDB_AVAILABLE):
-        st.warning("⚠️ Для работы с большими каталогами установите: `pip install polars duckdb`")
-        return
-    
-    if 'high_volume_catalog' not in st.session_state:
-        st.session_state.high_volume_catalog = get_high_volume_catalog()
-    
-    catalog = st.session_state.high_volume_catalog
-    
-    if not catalog.conn:
-        st.error("❌ Ошибка подключения к базе данных")
-        return
-    
-    # ✅ ИСПРАВЛЕНИЕ: добавляем текст в label, чтобы не было предупреждения
-    st.markdown("### 🧭 Выберите подраздел:")
-    option = st.radio(
-        "🧭 Выберите подраздел:",  # ✅ НЕ ПУСТОЙ LABEL
-        [
-            "📥 Загрузка данных",
-            "🔍 Поиск и фильтрация",
-            "📊 Статистика",
-            "📤 Экспорт",
-            "🔧 Управление"
-        ],
-        horizontal=True,
-        key="catalog_menu_main",
-        label_visibility="collapsed"  # Скрываем label, но он не пустой
-    )
-    
-    st.markdown("---")
-    
-    # Отображаем выбранный подраздел
-    if option == "📥 Загрузка данных":
-        show_catalog_upload(catalog)
-    elif option == "🔍 Поиск и фильтрация":
-        show_catalog_search(catalog)
-    elif option == "📊 Статистика":
-        show_catalog_statistics(catalog)
-    elif option == "📤 Экспорт":
-        show_catalog_export(catalog)
-    elif option == "🔧 Управление":
-        show_catalog_management(catalog)
+    # ✅ ИСПРАВЛЕНИЕ v100.11: Вынесены магические числа в константы
+    TAX_ROW_OFFSET = 5  # Строка с налоговой ставкой (4-я строка данных + 1)
+    MIN_PROFIT_ROW_OFFSET = 6  # Строка с мин. прибылью
+    AD_ROW = 9  # Строка с ДРР
+    DAYS_ROW = 7  # Строка с днями хранения
+    CURRENCY_ROW = 10  # Строка с курсом валют
 
-
-def show_catalog_upload(catalog):
-    """Загрузка данных в каталог"""
-    st.subheader("📥 Загрузка данных")
-    st.info("""
-    📋 **ТРЕБОВАНИЯ К ФАЙЛАМ:**
-    - **Основные данные (OE):** `oe_number`, `artikul`, `brand`, `name`, `applicability`
-    - **Кросс-ссылки:** `oe_number`, `artikul`, `brand`
-    - **Штрих-коды:** `artikul`, `brand`, `barcode`, `multiplicity`
-    - **Габариты:** `artikul`, `brand`, `length`, `width`, `height`, `weight`, `dimensions_str`
-    - **Изображения:** `artikul`, `brand`, `image_url`
-    - **Цены:** `artikul`, `brand`, `price`, `currency`
-    """)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        oe_file = st.file_uploader("📋 Основные данные (OE)", type=['xlsx'], key="hv_oe")
-        cross_file = st.file_uploader("🔗 Кросс-ссылки", type=['xlsx'], key="hv_cross")
-        barcode_file = st.file_uploader("📊 Штрих-коды", type=['xlsx'], key="hv_barcode")
-    with col2:
-        dims_file = st.file_uploader("📏 Габариты", type=['xlsx'], key="hv_dims")
-        images_file = st.file_uploader("🖼️ Изображения", type=['xlsx'], key="hv_images")
-        prices_file = st.file_uploader("💰 Цены", type=['xlsx'], key="hv_prices")
-    
-    uploaded_files = {
-        'oe': oe_file, 'cross': cross_file, 'barcode': barcode_file,
-        'dimensions': dims_file, 'images': images_file, 'prices': prices_file
+    COLORS = {
+        "header_bg": "1B3A5C",
+        "header_fg": "FFFFFF",
+        "section_bg": "2E86AB",
+        "input_bg": "FFF4CC",
+        "param_bg": "E8F4FD",
+        "formula_bg": "DCE6F1",
+        "positive": "C6EFCE",
+        "positive_text": "006100",
+        "negative": "FFC7CE",
+        "negative_text": "9C0006",
+        "warning": "FFEB9C",
+        "warning_text": "9C6500",
+        "total_bg": "D9E2F3",
+        "border": "B4C6E7",
+        "mp_header": "4472C4",
+        "gradient_start": "E8F4FD",
+        "gradient_end": "B4C6E7",
+        # 🆕 v100.15: Цвета для подсветки валидации габаритов
+        "validation_match": "C6EFCE",
+        "validation_match_text": "006100",
+        "validation_warn": "FFEB9C",
+        "validation_warn_text": "9C6500",
+        "validation_bad": "FFC7CE",
+        "validation_bad_text": "9C0006",
+        "validation_neutral": "E2EFDA",
+        "validation_neutral_text": "375623",
     }
-    
-    if st.button("🚀 Обработать и загрузить", key="hv_load"):
-        saved_paths = {}
-        for key, file in uploaded_files.items():
-            if file:
-                path = catalog.data_dir / f"{key}_{int(time.time())}.xlsx"
-                with open(path, "wb") as f:
-                    f.write(file.getbuffer())
-                saved_paths[key] = str(path)
-        
-        if saved_paths:
-            with st.spinner("Обработка файлов..."):
-                dataframes = catalog.merge_all_data_parallel(saved_paths)
-            
-            with st.spinner("Загрузка данных в базу..."):
-                catalog.process_and_load_data(dataframes)
-            
-            st.success("✅ Данные успешно загружены!")
-        else:
-            st.warning("⚠️ Загрузите хотя бы один файл")
 
+    OPERATION_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
+    SEASONS = ["winter", "spring", "summer", "autumn"]
+    SEASON_NAMES = {"winter": "❄️ Зима", "spring": "🌱 Весна", "summer": "☀️ Лето", "autumn": "🍂 Осень"}
 
-def show_catalog_search(catalog):
-    """🔍 Поиск и фильтрация в каталоге"""
-    st.subheader("🔍 Поиск и фильтрация")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        search_artikul = st.text_input("🔢 Артикул", key="search_artikul")
-        search_brand = st.text_input("🏷️ Бренд", key="search_brand")
-    with col2:
-        search_oe = st.text_input("🔗 OE номер", key="search_oe")
-        search_category = st.text_input("📂 Категория", key="search_category")
-    
-    if st.button("🔍 Найти", key="catalog_search"):
-        query_parts = []
-        params = []
-        
-        if search_artikul:
-            query_parts.append("artikul LIKE ?")
-            params.append(f"%{search_artikul}%")
-        if search_brand:
-            query_parts.append("brand LIKE ?")
-            params.append(f"%{search_brand}%")
-        if search_oe:
-            query_parts.append("""
-                artikul_norm IN (
-                    SELECT artikul_norm FROM cross_references
-                    WHERE oe_number_norm LIKE ?
-                )
-            """)
-            params.append(f"%{search_oe}%")
-        if search_category:
-            query_parts.append("category LIKE ?")
-            params.append(f"%{search_category}%")
-        
-        if query_parts:
-            where_clause = " AND ".join(query_parts)
-            query = f"SELECT * FROM parts WHERE {where_clause} LIMIT 100"
-            
-            try:
-                df = catalog.conn.execute(query, params).df()
-                st_dataframe_compat(df)
-            except duckdb.Error as e:
-                st.error(f"❌ Ошибка поиска: {e}")
-        else:
-            st.warning("⚠️ Введите хотя бы один критерий поиска")
+    # 🆕 v100.15: Колонки валидации габаритов
+    VALIDATION_COLUMNS = [
+        'Эталон категории',
+        'Соответствие габаритам',
+        'Макс. отклонение %',
+        'Детали отклонений'
+    ]
 
+    def __init__(self, unit_economics=None):
+        self.formats = {}
+        self.unit_economics = unit_economics
+        self._base_rates_start_row = None
+        self._base_rates_end_row = None
+        self._global_tax_row = None
+        self._global_min_profit_row = None
+        self._input_start_row = 4
+        self._total_rows = 0
 
-def show_catalog_statistics(catalog):
-    """📊 Статистика каталога"""
-    st.subheader("📊 Статистика каталога")
-    stats = catalog.get_statistics()
-    
-    if stats:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📦 Уникальных товаров", f"{stats.get('unique_parts', 0):,}")
-        with col2:
-            st.metric("🏷️ Брендов", f"{stats.get('brands', 0):,}")
-        with col3:
-            st.metric("💰 Средняя цена", f"{stats.get('avg_price', 0):.2f} ₽")
-        
-        if 'category_stats' in stats and not stats['category_stats'].empty:
-            st.subheader("📊 Распределение по категориям")
-            st_dataframe_compat(stats['category_stats'])
-        
-        if 'top_brands' in stats and not stats['top_brands'].empty:
-            st.subheader("🏆 Топ 10 брендов")
-            st_dataframe_compat(stats['top_brands'])
-    else:
-        st.info("ℹ️ Нет данных для статистики. Загрузите данные в каталог.")
+    def _get_configs(self):
+        """Гарантированное получение конфигураций маркетплейсов"""
+        if self.unit_economics and hasattr(self.unit_economics, '_configs'):
+            configs = self.unit_economics._configs
+            if configs:
+                return configs
+        try:
+            unit_econ = get_marketplace_unit_economics()
+            if unit_econ and hasattr(unit_econ, '_configs'):
+                return unit_econ._configs
+        except Exception:
+            pass
+        return get_marketplace_configs_2026()
 
-
-def show_catalog_export(catalog):
-    """📤 Экспорт каталога"""
-    st.subheader("📤 Экспорт каталога")
-    total = catalog.conn.execute(
-        "SELECT COUNT(*) FROM (SELECT DISTINCT artikul_norm, brand_norm FROM parts)"
-    ).fetchone()[0]
-    
-    st.info(f"📊 Всего записей: {total:,}")
-    
-    if total == 0:
-        st.warning("⚠️ Нет данных для экспорта")
-        return
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        format_choice = st.radio("📁 Формат файла", ["CSV", "Excel", "Parquet"])
-        selected_columns = st.multiselect("📋 Выберите колонки для экспорта", [
-            "Артикул бренда", "Бренд", "Наименование", "Применимость", "Описание",
-            "Категория товара", "Кратность", "Длинна", "Ширина", "Высота", "Вес",
-            "Длинна/Ширина/Высота", "OE номер", "аналоги", "Ссылка на изображение", "Цена", "Валюта"
-        ])
-    
-    with col2:
-        include_prices = st.checkbox("💰 Включить цены", value=True)
-        apply_markup = st.checkbox("📈 Применить наценку", value=True, disabled=not include_prices)
-    
-    st.markdown("---")
-    st.caption("💡 Если не выбраны колонки - экспортируются все")
-    
-    if st.button("🚀 Экспортировать", type="primary", key="catalog_export_btn"):
-        # 🆕 ИСПРАВЛЕНИЕ v100.5.8: Маппинг формата к расширению файла
-        format_extensions = {
-            "CSV": "csv",
-            "Excel": "xlsx",      # ← Правильное расширение для Excel
-            "Parquet": "parquet"
+    def _init_formats(self, workbook):
+        """Создание всех форматов ячеек"""
+        self.formats = {
+            'header': workbook.add_format({
+                'bold': True, 'font_color': 'white',
+                'bg_color': self.COLORS["header_bg"],
+                'border': 1, 'align': 'center', 'valign': 'vcenter',
+                'text_wrap': True, 'font_size': 11
+            }),
+            'header_title': workbook.add_format({
+                'bold': True, 'font_size': 16, 'font_color': 'white',
+                'bg_color': self.COLORS["header_bg"],
+                'align': 'center', 'valign': 'vcenter', 'border': 1
+            }),
+            'section_title': workbook.add_format({
+                'bold': True, 'font_size': 13, 'font_color': 'white',
+                'bg_color': self.COLORS["section_bg"],
+                'align': 'left', 'valign': 'vcenter', 'border': 1
+            }),
+            'mp_header': workbook.add_format({
+                'bold': True, 'font_color': 'white',
+                'bg_color': self.COLORS["mp_header"],
+                'border': 1, 'align': 'center', 'valign': 'vcenter',
+                'text_wrap': True
+            }),
+            'input_cell': workbook.add_format({
+                'bg_color': self.COLORS["input_bg"],
+                'border': 1, 'num_format': '#,##0.00'
+            }),
+            'input_cell_int': workbook.add_format({
+                'bg_color': self.COLORS["input_bg"],
+                'border': 1, 'num_format': '0.00'
+            }),
+            'input_percent': workbook.add_format({
+                'bg_color': self.COLORS["input_bg"],
+                'border': 1, 'num_format': '0.00%'
+            }),
+            'param_cell': workbook.add_format({
+                'bold': True, 'bg_color': self.COLORS["param_bg"],
+                'border': 1, 'valign': 'vcenter'
+            }),
+            'param_value': workbook.add_format({
+                'bold': True, 'font_size': 11,
+                'bg_color': self.COLORS["input_bg"],
+                'border': 1
+            }),
+            'formula_cell': workbook.add_format({
+                'bg_color': self.COLORS["formula_bg"],
+                'border': 1, 'num_format': '#,##0.00 ₽'
+            }),
+            'formula_percent': workbook.add_format({
+                'bg_color': self.COLORS["formula_bg"],
+                'border': 1, 'num_format': '0.00%'
+            }),
+            'money': workbook.add_format({
+                'border': 1, 'num_format': '#,##0.00 ₽'
+            }),
+            'money_bold': workbook.add_format({
+                'bold': True, 'border': 1, 'num_format': '#,##0.00 ₽'
+            }),
+            'bold': workbook.add_format({'bold': True, 'border': 1}),
+            'bold_money': workbook.add_format({
+                'bold': True, 'font_size': 11,
+                'bg_color': self.COLORS["total_bg"],
+                'border': 1, 'num_format': '#,##0.00 ₽'
+            }),
+            'bold_percent': workbook.add_format({
+                'bold': True, 'font_size': 11,
+                'bg_color': self.COLORS["total_bg"],
+                'border': 1, 'num_format': '0.00%'
+            }),
+            'positive': workbook.add_format({
+                'bg_color': self.COLORS["positive"],
+                'font_color': self.COLORS["positive_text"],
+                'bold': True, 'border': 1
+            }),
+            'negative': workbook.add_format({
+                'bg_color': self.COLORS["negative"],
+                'font_color': self.COLORS["negative_text"],
+                'bold': True, 'border': 1
+            }),
+            'warning_cell': workbook.add_format({
+                'bg_color': self.COLORS["warning"],
+                'font_color': self.COLORS["warning_text"],
+                'bold': True, 'border': 1
+            }),
+            'info': workbook.add_format({
+                'italic': True, 'font_color': self.COLORS["positive_text"],
+                'bg_color': self.COLORS["positive"], 'border': 1
+            }),
+            'warning': workbook.add_format({
+                'italic': True, 'font_color': self.COLORS["negative_text"],
+                'bg_color': self.COLORS["warning"], 'border': 1
+            }),
+            'default': workbook.add_format({'border': 1}),
+            'kpi_label': workbook.add_format({
+                'bold': True, 'font_size': 12, 'border': 1,
+                'valign': 'vcenter', 'bg_color': self.COLORS["param_bg"]
+            }),
+            'kpi_positive_money': workbook.add_format({
+                'bold': True, 'font_size': 14, 'border': 1,
+                'bg_color': self.COLORS["positive"],
+                'font_color': self.COLORS["positive_text"],
+                'num_format': '#,##0.00 ₽'
+            }),
+            'kpi_negative_money': workbook.add_format({
+                'bold': True, 'font_size': 14, 'border': 1,
+                'bg_color': self.COLORS["negative"],
+                'font_color': self.COLORS["negative_text"],
+                'num_format': '#,##0.00 ₽'
+            }),
+            'kpi_neutral_money': workbook.add_format({
+                'bold': True, 'font_size': 14, 'border': 1,
+                'num_format': '#,##0.00 ₽'
+            }),
+            'kpi_neutral_percent': workbook.add_format({
+                'bold': True, 'font_size': 14, 'border': 1,
+                'num_format': '0.00%'
+            }),
+            'kpi_neutral_int': workbook.add_format({
+                'bold': True, 'font_size': 14, 'border': 1,
+                'num_format': '#,##0'
+            }),
+            'chart_title': workbook.add_format({
+                'bold': True, 'font_size': 12,
+                'align': 'center', 'valign': 'vcenter'
+            }),
+            # 🆕 v100.15: Форматы для подсветки валидации габаритов
+            'validation_match': workbook.add_format({
+                'bg_color': self.COLORS["validation_match"],
+                'font_color': self.COLORS["validation_match_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
+            'validation_warn': workbook.add_format({
+                'bg_color': self.COLORS["validation_warn"],
+                'font_color': self.COLORS["validation_warn_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
+            'validation_bad': workbook.add_format({
+                'bg_color': self.COLORS["validation_bad"],
+                'font_color': self.COLORS["validation_bad_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
+            'validation_neutral': workbook.add_format({
+                'bg_color': self.COLORS["validation_neutral"],
+                'font_color': self.COLORS["validation_neutral_text"],
+                'bold': True, 'border': 1, 'align': 'center'
+            }),
         }
-        ext = format_extensions.get(format_choice, format_choice.lower())
-        output_path = catalog.data_dir / f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-        
-        with st.spinner(f"Генерация файла {format_choice}..."):
-            if format_choice == "CSV":
-                success = catalog.export_to_csv_optimized(
-                    str(output_path),
-                    selected_columns if selected_columns else None,
-                    include_prices,
-                    apply_markup
-                )
-            elif format_choice == "Excel":
-                success = catalog.export_to_excel_optimized(
-                    str(output_path),
-                    selected_columns if selected_columns else None,
-                    include_prices,
-                    apply_markup
-                )
-            elif format_choice == "Parquet":
-                success = catalog.export_to_parquet(
-                    str(output_path),
-                    selected_columns if selected_columns else None,
-                    include_prices,
-                    apply_markup
-                )
+
+    def _get_existing_validation_columns(self, df: pd.DataFrame) -> List[str]:
+        """🆕 v100.15: Определяет, какие колонки валидации есть в DataFrame"""
+        return [col for col in self.VALIDATION_COLUMNS if col in df.columns]
+
+    def export_super_pro(self, df: pd.DataFrame, output_path: str, metadata: Dict = None) -> bool:
+        """
+        🚀 СУПЕР-ПРО экспорт с 10+ листами аналитики
+        """
+        try:
+            if not XLSXWRITER_AVAILABLE:
+                logger.error("❌ xlsxwriter не установлен!")
+                return False
+
+            self._total_rows = len(df)
+            workbook = xlsxwriter.Workbook(output_path, {'nan_inf_to_errors': True})
+            self._init_formats(workbook)
+
+            # Создаем все листы
+            self._write_dashboard_super(workbook, df, metadata)
+            self._write_parameters_super(workbook, metadata)
+            self._write_input_data(workbook, df)
+            self._write_calculation_engine(workbook, df)
+            self._write_marketplace_comparison(workbook, df)
+            self._write_category_analysis(workbook, df)
+            self._write_profit_forecast(workbook, df)
+            self._write_sensitivity_analysis(workbook, df)
+            self._write_top_analytics(workbook, df)
+            self._write_recommendations(workbook, df)
+            self._write_export_summary(workbook, df, metadata)
+
+            workbook.close()
+            logger.info(f"✅ СУПЕР-ПРО файл сохранён: {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка СУПЕР-ПРО экспорта: {e}")
+            logger.error(traceback.format_exc())
+            return False
+
+    def _write_dashboard_super(self, workbook, df: pd.DataFrame, metadata: Dict):
+        """📊 СУПЕР-ДАШБОРД с расширенными KPI"""
+        ws = workbook.add_worksheet("📊 Дашборд")
+        ws.merge_range('A1:G1', "🚀 СУПЕР-ДАШБОРД ЮНИТ-ЭКОНОМИКИ",
+                       self.formats['header_title'])
+        ws.set_row(0, 40)
+        ws.merge_range('A2:G2',
+                       "📊 Ключевые показатели эффективности (KPI) в реальном времени",
+                       self.formats['info'])
+        ws.set_row(1, 25)
+
+        total_profit = df['profit'].sum() if 'profit' in df.columns else 0
+        avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
+        avg_roi = df['roi'].mean() if 'roi' in df.columns else 0
+        total_revenue = df['price'].sum() if 'price' in df.columns else 0
+        total_expenses = df['total_expenses'].sum() if 'total_expenses' in df.columns else 0
+        unprofitable = (df['profit'] < 0).sum() if 'profit' in df.columns else 0
+
+        kpis = [
+            ("📦 Всего SKU", f"{len(df):,}", "kpi_neutral_int"),
+            ("💰 Общая прибыль", f"{total_profit:,.0f} ₽",
+             "kpi_positive_money" if total_profit > 0 else "kpi_negative_money"),
+            ("📈 Средняя маржа", f"{avg_margin:.1f}%", "kpi_neutral_percent"),
+            ("📊 Средний ROI", f"{avg_roi:.1f}%", "kpi_neutral_percent"),
+            ("💵 Общая выручка", f"{total_revenue:,.0f} ₽", "kpi_neutral_money"),
+            ("💸 Общие расходы", f"{total_expenses:,.0f} ₽", "kpi_neutral_money"),
+            ("⚠️ Убыточных SKU", f"{unprofitable}", "kpi_neutral_int"),
+        ]
+
+        row = 3
+        for i, (label, value, fmt) in enumerate(kpis):
+            col = (i % 4) * 2
+            ws.write(row, col, label, self.formats['kpi_label'])
+            ws.write(row, col + 1, value, self.formats[fmt])
+            if i % 4 == 3:
+                row += 1
+
+        if 'marketplace' in df.columns and 'profit' in df.columns:
+            mp_profit = df.groupby('marketplace')['profit'].sum().sort_values(ascending=False)
+            if not mp_profit.empty:
+                chart_row = row + 3
+                ws.write(chart_row, 0, "🏪 Прибыль по маркетплейсам",
+                         self.formats['chart_title'])
+                data_start_row = chart_row + 1
+                for i, (mp, profit) in enumerate(mp_profit.items()):
+                    ws.write(data_start_row + i, 0, mp, self.formats['default'])
+                    ws.write(data_start_row + i, 1, profit, self.formats['money'])
+
+                chart = workbook.add_chart({'type': 'column'})
+                chart.add_series({
+                    'name': 'Прибыль по МП',
+                    'categories': f'=📊 Дашборд!$A${data_start_row+1}:$A${data_start_row+len(mp_profit)}',
+                    'values': f'=📊 Дашборд!$B${data_start_row+1}:$B${data_start_row+len(mp_profit)}',
+                    'fill': {'color': self.COLORS["section_bg"]},
+                    'border': {'color': self.COLORS["header_bg"]},
+                })
+                chart.set_title({'name': 'Прибыль по маркетплейсам'})
+                chart.set_x_axis({'name': 'Маркетплейс'})
+                chart.set_y_axis({'name': 'Прибыль, ₽'})
+                chart.set_size({'width': 720, 'height': 400})
+                ws.insert_chart(chart_row, 2, chart)
+
+        ws.set_column('A:A', 25)
+        ws.set_column('B:B', 25)
+        ws.set_column('C:C', 25)
+        ws.set_column('D:D', 25)
+        return ws
+
+    def _write_parameters_super(self, workbook, metadata: Dict):
+        """⚙️ СУПЕР-ПАРАМЕТРЫ с расширенными настройками"""
+        ws = workbook.add_worksheet("⚙️ Параметры")
+        ws.merge_range('A1:P1', "⚙️ РАСШИРЕННЫЕ ПАРАМЕТРЫ РАСЧЁТА",
+                       self.formats['header_title'])
+        ws.set_row(0, 30)
+        ws.merge_range('A2:P2',
+                       "💡 Все параметры редактируемые — изменения применяются ко всем расчётам",
+                       self.formats['info'])
+
+        if metadata is None:
+            metadata = {}
+
+        row = 4
+        ws.merge_range(row, 0, row, 15, "🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ",
+                       self.formats['section_title'])
+        row += 1
+
+        global_params = [
+            ("Налоговая ставка", 0.06, "Налог от цены продажи", "0.00%"),
+            ("Мин. прибыль (%)", 0.10, "Минимальная целевая прибыль", "0.00%"),
+            ("Дней хранения", 30, "Среднее кол-во дней", "0"),
+            ("ДРР (реклама)", 0.15, "Доля рекламных расходов", "0.00%"),
+            ("Курс USD/RUB", 92.50, "Для импортных товаров", "0.00"),
+            ("Инфляция %", 0.07, "Годовая инфляция", "0.00%"),
+        ]
+
+        for name, value, desc, fmt in global_params:
+            ws.write(row, 0, name, self.formats['param_cell'])
+            if "Дней" in name:
+                ws.write(row, 1, value, self.formats['input_cell_int'])
+            elif "%" in fmt:
+                ws.write(row, 1, value, self.formats['input_percent'])
             else:
-                st.warning("Неподдерживаемый формат")
-                return
-        
-        if success and output_path.exists():
-            with open(output_path, "rb") as f:
-                file_data = f.read()
-            
-            mime_map = {
-                "CSV": "text/csv; charset=utf-8",
-                "Excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "Parquet": "application/octet-stream"
-            }
-            mime_type = mime_map.get(format_choice, "application/octet-stream")
-            
-            st.download_button(
-                label=f"⬇️ Скачать {format_choice} файл",
-                data=file_data,
-                file_name=output_path.name,
-                mime=mime_type,
-                key="catalog_download"
-            )
-            st.success(f"✅ Файл {output_path.name} готов к скачиванию!")
+                ws.write(row, 1, value, self.formats['input_cell'])
+            ws.write(row, 2, desc, self.formats['default'])
+
+            if "Налоговая" in name:
+                self._global_tax_row = row + 1  # ✅ Excel нумерация с 1
+            elif "Мин. прибыль" in name:
+                self._global_min_profit_row = row + 1
+            row += 1
+
+        row += 2
+        ws.merge_range(row, 0, row, 15,
+                       "📊 БАЗОВЫЕ ТАРИФЫ (ключ = МП|Режим)",
+                       self.formats['section_title'])
+        row += 1
+
+        headers = [
+            'Ключ', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг',
+            'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты',
+            'Посл. миля', 'Подписка', 'Страховка', 'Упаковка',
+            'Надбавка', 'Источник'
+        ]
+        for col_idx, header in enumerate(headers):
+            ws.write(row, col_idx, header, self.formats['mp_header'])
+        self._base_rates_start_row = row + 1
+        row += 1
+
+        configs = self._get_configs()
+        if configs:
+            for mp_name in sorted(configs.keys()):
+                config = configs[mp_name]
+                for mode in self.OPERATION_MODES:
+                    key = f"{mp_name}|{mode}"
+                    base_rate = config.commission_rate
+                    mode_mult = config.mode_multipliers.get(mode, 1.0)
+                    effective_rate = base_rate * mode_mult
+
+                    ws.write(row, 0, key, self.formats['param_cell'])
+                    ws.write(row, 1, mp_name, self.formats['param_cell'])
+                    ws.write(row, 2, mode, self.formats['param_cell'])
+                    ws.write(row, 3, effective_rate, self.formats['input_percent'])
+                    ws.write(row, 4, config.logistics_base, self.formats['input_cell'])
+                    ws.write(row, 5, config.logistics_per_kg, self.formats['input_cell'])
+                    ws.write(row, 6, config.logistics_per_liter, self.formats['input_cell'])
+                    ws.write(row, 7, config.storage_per_day, self.formats['input_cell'])
+                    ws.write(row, 8, config.acquiring_fee, self.formats['input_percent'])
+                    ws.write(row, 9, config.return_fee, self.formats['input_percent'])
+                    ws.write(row, 10, config.last_mile_fee, self.formats['input_cell'])
+                    ws.write(row, 11, config.subscription_fee, self.formats['input_cell'])
+                    ws.write(row, 12, config.insurance_fee, self.formats['input_percent'])
+                    ws.write(row, 13, config.packing_fee, self.formats['input_cell'])
+                    ws.write(row, 14, config.hazardous_surcharge, self.formats['input_percent'])
+                    ws.write(row, 15, config.tariff_source.value, self.formats['default'])
+                    row += 1
         else:
-            st.error("❌ Ошибка при экспорте")
+            ws.write(row, 0, "Ozon|FBS", self.formats['param_cell'])
+            ws.write(row, 1, "Ozon", self.formats['param_cell'])
+            ws.write(row, 2, "FBS", self.formats['param_cell'])
+            ws.write(row, 3, 0.15, self.formats['input_percent'])
+            row += 1
 
+        self._base_rates_end_row = row
+        ws.set_column('A:A', 18)
+        ws.set_column('B:C', 14)
+        ws.set_column('D:O', 14)
+        ws.set_column('P:P', 16)
+        return ws
 
-def show_catalog_management(catalog):
-    """🔧 Управление каталогом"""
-    st.subheader("🔧 Управление каталогом")
-    st.warning("⚠️ Операции необратимы!")
-    
-    management_option = st.radio(
-        "Выберите действие:",
-        [
-            "🏭 Удалить по бренду",
-            "📦 Удалить по артикулу",
-            "💰 Управление ценами",
-            "🚫 Исключения при экспорте",
-            "🗂️ Категории товаров",
-            "☁️ Облачная синхронизация"
-        ],
-        key="catalog_management_option"
-    )
-    
-    if management_option == "🏭 Удалить по бренду":
-        catalog._show_delete_by_brand()
-    elif management_option == "📦 Удалить по артикулу":
-        catalog._show_delete_by_artikul()
-    elif management_option == "💰 Управление ценами":
-        catalog.show_price_settings()
-    elif management_option == "🚫 Исключения при экспорте":
-        catalog.show_exclusion_settings()
-    elif management_option == "🗂️ Категории товаров":
-        catalog.show_category_mapping()
-    elif management_option == "☁️ Облачная синхронизация":
-        catalog.show_cloud_sync()
+    # =========================================================================
+    # 🆕 v100.15: ЛИСТ "ВХОДНЫЕ" С ВАЛИДАЦИЕЙ ГАБАРИТОВ И ПОДСВЕТКОЙ
+    # =========================================================================
+    def _write_input_data(self, workbook, df: pd.DataFrame):
+        """
+        📥 Входные данные с валидацией габаритов и подсветкой 🆕 v100.15
+        
+        Если в DataFrame есть колонки валидации габаритов:
+        - 'Эталон категории'
+        - 'Соответствие габаритам'
+        - 'Макс. отклонение %'
+        - 'Детали отклонений'
+        
+        То они добавляются на лист с цветовой подсветкой:
+        🟢 Зелёный — полное соответствие или допустимое отклонение
+        🟡 Жёлтый — значительное отклонение
+        🔴 Красный — критическое расхождение
+        ⚪ Серо-зелёный — категория не найдена
+        """
+        ws = workbook.add_worksheet("📥 Входные")
+
+        # 🆕 v100.15: Определяем наличие колонок валидации
+        existing_validation = self._get_existing_validation_columns(df)
+        total_base_cols = 14
+        total_cols = total_base_cols + len(existing_validation)
+
+        # Определяем последнюю букву колонки
+        if total_cols <= 26:
+            last_col_letter = chr(64 + total_cols)
+        else:
+            last_col_letter = 'N'  # fallback
+
+        ws.merge_range(f'A1:{last_col_letter}1',
+                       "📥 ВХОДНЫЕ ДАННЫЕ (редактируемые)",
+                       self.formats['header_title'])
+        ws.set_row(0, 28)
+        ws.merge_range(f'A2:{last_col_letter}2',
+                       "💡 Меняйте значения — все листы пересчитаются автоматически",
+                       self.formats['info'])
+
+        # Базовые заголовки
+        headers = [
+            'Артикул', 'Бренд', 'МП', 'Режим', 'Категория',
+            'Цена', 'Себест-ть', 'Вес, кг',
+            'Длина, см', 'Ширина, см', 'Высота, см',
+            'Объём, л', 'Оплач. вес', 'Наценка %'
+        ]
+        # 🆕 v100.15: Добавляем колонки валидации
+        headers.extend(existing_validation)
+
+        for col_idx, header in enumerate(headers):
+            ws.write(2, col_idx, header, self.formats['header'])
+        ws.set_row(2, 30)
+
+        # Запись данных
+        for i, (_, row_data) in enumerate(df.iterrows()):
+            excel_row = 3 + i
+
+            # Базовые колонки
+            ws.write(excel_row, 0, str(row_data.get('Артикул', '')), self.formats['default'])
+            ws.write(excel_row, 1, str(row_data.get('Бренд', '')), self.formats['default'])
+            ws.write(excel_row, 2, str(row_data.get('marketplace', 'Ozon')), self.formats['default'])
+            ws.write(excel_row, 3, str(row_data.get('operation_mode', 'FBS')), self.formats['default'])
+            category = str(row_data.get('category', ''))
+            if category:
+                category = category.lower().replace(' ', '_')
+            ws.write(excel_row, 4, category, self.formats['default'])
+
+            ws.write(excel_row, 5, float(row_data.get('price', 0)), self.formats['input_cell'])
+            ws.write(excel_row, 6, float(row_data.get('cost', 0)), self.formats['input_cell'])
+            ws.write(excel_row, 7, float(row_data.get('weight', 0)), self.formats['input_cell_int'])
+            ws.write(excel_row, 8, float(row_data.get('length', 0)), self.formats['input_cell_int'])
+            ws.write(excel_row, 9, float(row_data.get('width', 0)), self.formats['input_cell_int'])
+            ws.write(excel_row, 10, float(row_data.get('height', 0)), self.formats['input_cell_int'])
+
+            volume = (float(row_data.get('length', 0)) *
+                      float(row_data.get('width', 0)) *
+                      float(row_data.get('height', 0))) / 1000
+            ws.write(excel_row, 11, volume, self.formats['formula_cell'])
+            ws.write_formula(excel_row, 12,
+                             f"=MAX(G{excel_row+1}, L{excel_row+1}/5000)",
+                             self.formats['formula_cell'])
+            ws.write(excel_row, 13, 0, self.formats['input_percent'])
+
+            # 🆕 v100.15: Запись колонок валидации с подсветкой
+            for j, col_name in enumerate(existing_validation):
+                val = row_data.get(col_name, '')
+                col_idx = total_base_cols + j
+
+                if col_name == 'Макс. отклонение %':
+                    try:
+                        ws.write(excel_row, col_idx, float(val) if val else 0.0,
+                                 self.formats['input_cell_int'])
+                    except (ValueError, TypeError):
+                        ws.write(excel_row, col_idx, 0.0, self.formats['input_cell_int'])
+                elif col_name == 'Соответствие габаритам':
+                    # Применяем формат в зависимости от значения
+                    val_str = str(val) if val else ''
+                    if val_str.startswith('✅'):
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_match'])
+                    elif val_str.startswith('⚠️'):
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_warn'])
+                    elif val_str.startswith('❌'):
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_bad'])
+                    elif val_str.startswith('❓') or val_str == '':
+                        ws.write(excel_row, col_idx, val_str, self.formats['validation_neutral'])
+                    else:
+                        ws.write(excel_row, col_idx, val_str, self.formats['default'])
+                else:
+                    ws.write(excel_row, col_idx, str(val), self.formats['default'])
+
+        # Настройка ширин колонок
+        ws.set_column('A:B', 18)
+        ws.set_column('C:D', 15)
+        ws.set_column('E:E', 18)
+        ws.set_column('F:M', 14)
+        ws.set_column('N:N', 14)
+
+        # 🆕 v100.15: Ширины для колонок валидации
+        if existing_validation:
+            ws.set_column(total_base_cols, total_base_cols, 22)        # Эталон категории
+            ws.set_column(total_base_cols + 1, total_base_cols + 1, 26)  # Соответствие
+            ws.set_column(total_base_cols + 2, total_base_cols + 2, 16)  # Отклонение %
+            ws.set_column(total_base_cols + 3, total_base_cols + 3, 30)  # Детали
+
+        ws.freeze_panes(3, 0)
+
+        # 🆕 v100.15: УСЛОВНОЕ ФОРМАТИРОВАНИЕ (ПОДСВЕТКА) для колонки "Соответствие"
+        if 'Соответствие габаритам' in existing_validation:
+            match_col_idx = total_base_cols + existing_validation.index('Соответствие габаритам')
+            start_row = 3
+            end_row = 2 + self._total_rows
+
+            # Условное форматирование по началу текста
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '✅',
+                'format': self.formats['validation_match']
+            })
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '⚠️',
+                'format': self.formats['validation_warn']
+            })
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '❌',
+                'format': self.formats['validation_bad']
+            })
+            ws.conditional_format(start_row, match_col_idx, end_row, match_col_idx, {
+                'type': 'text',
+                'criteria': 'beginning with',
+                'value': '❓',
+                'format': self.formats['validation_neutral']
+            })
+
+        if self._total_rows > 0:
+            ws.autofilter(2, 0, 2 + self._total_rows, total_cols - 1)
+        return ws
+
+    def _write_calculation_engine(self, workbook, df: pd.DataFrame):
+        """📊 ДВИЖОК РАСЧЁТОВ с полной детализацией"""
+        ws = workbook.add_worksheet("📊 Расчёт")
+        ws.merge_range('A1:W1',
+                       "📊 ПОЛНЫЙ РАСЧЁТ ЮНИТ-ЭКОНОМИКИ",
+                       self.formats['header_title'])
+        ws.set_row(0, 28)
+        ws.merge_range('A2:W2',
+                       "⚠️ Все расчёты автоматические — не редактируйте формулы",
+                       self.formats['warning'])
+
+        headers = [
+            'Артикул', 'МП', 'Режим', 'Категория',
+            'Цена', 'Себест-ть', 'Вес', 'Объём',
+            'Комиссия', 'Логистика', 'Хранение',
+            'Эквайринг', 'Посл. миля', 'Возвраты',
+            'Реклама', 'Налог', 'Страховка', 'Упаковка',
+            'ИТОГО расходов', '💰 ПРИБЫЛЬ',
+            'Маржа %', 'ROI %', 'Безубыт-ть'
+        ]
+        for col_idx, header in enumerate(headers):
+            ws.write(2, col_idx, header, self.formats['header'])
+        ws.set_row(2, 35)
+
+        # ✅ ИСПРАВЛЕНИЕ v100.11: Используем константы вместо магических чисел
+        p_tax = f"'⚙️ Параметры'!$B${self._global_tax_row}"
+        min_profit = f"'⚙️ Параметры'!$B${self._global_min_profit_row}"
+        p_ad = f"'⚙️ Параметры'!$B${self.AD_ROW}"
+        p_days = f"'⚙️ Параметры'!$B${self.DAYS_ROW}"
+        p_currency = f"'⚙️ Параметры'!$B${self.CURRENCY_ROW}"
+        params_range = f"'⚙️ Параметры'!$A${self._base_rates_start_row}:$P${self._base_rates_end_row}"
+
+        for i in range(self._total_rows):
+            excel_row = 3 + i
+            input_row = 4 + i
+            in_art = f"'📥 Входные'!A{input_row}"
+            in_mp = f"'📥 Входные'!C{input_row}"
+            in_mode = f"'📥 Входные'!D{input_row}"
+            in_cat = f"'📥 Входные'!E{input_row}"
+            in_price = f"'📥 Входные'!F{input_row}"
+            in_cost = f"'📥 Входные'!G{input_row}"
+            in_weight = f"'📥 Входные'!H{input_row}"
+            in_volume = f"'📥 Входные'!L{input_row}"
+            lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
+
+            ws.write_formula(excel_row, 0, f"={in_art}", self.formats['default'])
+            ws.write_formula(excel_row, 1, f"={in_mp}", self.formats['default'])
+            ws.write_formula(excel_row, 2, f"={in_mode}", self.formats['default'])
+            ws.write_formula(excel_row, 3, f"={in_cat}", self.formats['default'])
+            ws.write_formula(excel_row, 4, f"={in_price}", self.formats['formula_cell'])
+            ws.write_formula(excel_row, 5, f"={in_cost}", self.formats['formula_cell'])
+            ws.write_formula(excel_row, 6, f"={in_weight}", self.formats['formula_cell'])
+            ws.write_formula(excel_row, 7, f"={in_volume}", self.formats['formula_cell'])
+            ws.write_formula(excel_row, 8,
+                             f"=VLOOKUP({lookup_key},{params_range},4,FALSE)*{in_price}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 9,
+                             f"=VLOOKUP({lookup_key},{params_range},5,FALSE)+"
+                             f"{in_weight}*VLOOKUP({lookup_key},{params_range},6,FALSE)+"
+                             f"{in_volume}*VLOOKUP({lookup_key},{params_range},7,FALSE)",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 10,
+                             f"={in_volume}*VLOOKUP({lookup_key},{params_range},8,FALSE)*{p_days}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 11,
+                             f"=VLOOKUP({lookup_key},{params_range},9,FALSE)*{in_price}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 12,
+                             f"=VLOOKUP({lookup_key},{params_range},11,FALSE)",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 13,
+                             f"=VLOOKUP({lookup_key},{params_range},10,FALSE)*{in_price}*1.3",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 14,
+                             f"={in_price}*{p_ad}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 15,
+                             f"={in_price}*{p_tax}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 16,
+                             f"=VLOOKUP({lookup_key},{params_range},13,FALSE)*{in_price}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 17,
+                             f"=VLOOKUP({lookup_key},{params_range},14,FALSE)",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 18,
+                             f"={in_cost}+SUM(I{excel_row+1}:R{excel_row+1})",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 19,
+                             f"={in_price}-S{excel_row+1}",
+                             self.formats['formula_cell'])
+            ws.write_formula(excel_row, 20,
+                             f"=IF({in_price}>0,T{excel_row+1}/{in_price},0)",
+                             self.formats['formula_percent'])
+            ws.write_formula(excel_row, 21,
+                             f"=IF({in_cost}>0,T{excel_row+1}/{in_cost},0)",
+                             self.formats['formula_percent'])
+            ws.write_formula(excel_row, 22,
+                             f"=S{excel_row+1}/(1-"
+                             f"VLOOKUP({lookup_key},{params_range},4,FALSE)-"
+                             f"VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",
+                             self.formats['formula_cell'])
+
+        if self._total_rows > 0:
+            last_row = 3 + self._total_rows
+            profit_range = f"T4:T{last_row}"
+            ws.conditional_format(profit_range, {
+                'type': 'cell',
+                'criteria': '>',
+                'value': 0,
+                'format': self.formats['positive']
+            })
+            ws.conditional_format(profit_range, {
+                'type': 'cell',
+                'criteria': '<',
+                'value': 0,
+                'format': self.formats['negative']
+            })
+
+            margin_range = f"U4:U{last_row}"
+            ws.conditional_format(margin_range, {
+                'type': '3_color_scale',
+                'min_color': self.COLORS["negative"],
+                'mid_color': self.COLORS["warning"],
+                'max_color': self.COLORS["positive"]
+            })
+
+            total_row = 3 + self._total_rows + 2
+            ws.merge_range(total_row, 0, total_row, 2,
+                           "ИТОГО / СРЕДНЕЕ:", self.formats['bold_money'])
+            last_data_row = 3 + self._total_rows
+            for col_idx, col_letter in enumerate(['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']):
+                ws.write_formula(total_row, col_idx + 4,
+                                 f"=SUM({col_letter}4:{col_letter}{last_data_row})",
+                                 self.formats['bold_money'])
+            for col_idx, col_letter in enumerate(['U', 'V'], start=20):
+                ws.write_formula(total_row, col_idx,
+                                 f"=AVERAGE({col_letter}4:{col_letter}{last_data_row})",
+                                 self.formats['bold_percent'])
+
+        widths = {
+            'A': 15, 'B': 14, 'C': 10, 'D': 14, 'E': 12, 'F': 12,
+            'G': 10, 'H': 10, 'I': 12, 'J': 12, 'K': 12, 'L': 12,
+            'M': 12, 'N': 12, 'O': 12, 'P': 12, 'Q': 12, 'R': 12,
+            'S': 15, 'T': 15, 'U': 12, 'V': 12, 'W': 14
+        }
+        for col, width in widths.items():
+            ws.set_column(f'{col}:{col}', width)
+        ws.freeze_panes(3, 0)
+        if self._total_rows > 0:
+            ws.autofilter(2, 0, 2 + self._total_rows, 22)
+        return ws
+
+    def _write_marketplace_comparison(self, workbook, df: pd.DataFrame):
+        """🏪 Сравнение маркетплейсов с автоматическими выводами"""
+        ws = workbook.add_worksheet("🏪 Сравнение МП")
+        ws.merge_range('A1:K1', "🏪 СРАВНИТЕЛЬНЫЙ АНАЛИЗ МАРКЕТПЛЕЙСОВ",
+                       self.formats['header_title'])
+
+        headers = [
+            'МП', 'SKU', 'Выручка', 'Расходы', 'Прибыль',
+            'Ср. прибыль', 'Ср. маржа %', 'ROI %',
+            'Доля рынка %', 'Эффективность', 'Рейтинг'
+        ]
+        for col_idx, header in enumerate(headers):
+            ws.write(2, col_idx, header, self.formats['header'])
+
+        if 'marketplace' in df.columns:
+            mp_stats = df.groupby('marketplace').agg({
+                'price': 'sum',
+                'total_expenses': 'sum',
+                'profit': ['sum', 'mean'],
+                'margin_percent': 'mean',
+                'roi': 'mean',
+            }).reset_index()
+            mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа %', 'ROI %']
+            total_profit = mp_stats['Прибыль'].sum()
+
+            for i, row in mp_stats.iterrows():
+                excel_row = 3 + i
+                ws.write(excel_row, 0, row['МП'], self.formats['bold'])
+                ws.write_formula(excel_row, 1,
+                                 f"=COUNTIF('📊 Расчёт'!$B:$B,A{excel_row+1})",
+                                 self.formats['default'])
+                ws.write(excel_row, 2, row['Выручка'], self.formats['money'])
+                ws.write(excel_row, 3, row['Расходы'], self.formats['money'])
+                ws.write(excel_row, 4, row['Прибыль'],
+                         self.formats['positive'] if row['Прибыль'] > 0 else self.formats['negative'])
+                ws.write(excel_row, 5, row['Ср. прибыль'], self.formats['money'])
+                ws.write(excel_row, 6, row['Ср. маржа %'], self.formats['formula_percent'])
+                ws.write(excel_row, 7, row['ROI %'], self.formats['formula_percent'])
+
+                share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
+                ws.write(excel_row, 8, share / 100, self.formats['formula_percent'])
+                ws.write_formula(excel_row, 9,
+                                 f"=IF(C{excel_row+1}>0,E{excel_row+1}/C{excel_row+1},0)",
+                                 self.formats['formula_percent'])
+                ws.write_formula(excel_row, 10,
+                                 f"=RANK(E{excel_row+1},$E$4:$E${3+len(mp_stats)})",
+                                 self.formats['default'])
+
+        ws.set_column('A:K', 16)
+        ws.freeze_panes(3, 0)
+        return ws
+
+    def _write_category_analysis(self, workbook, df: pd.DataFrame):
+        """📂 Анализ по категориям - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        ws = workbook.add_worksheet("📂 Категории")
+        ws.merge_range('A1:H1', "📂 АНАЛИЗ ПО КАТЕГОРИЯМ",
+                       self.formats['header_title'])
+
+        headers = ['Категория', 'SKU', 'Выручка', 'Прибыль', 'Ср. маржа %',
+                   'Топ товар', 'Прибыль топ', 'Доля %']
+        for col_idx, header in enumerate(headers):
+            ws.write(2, col_idx, header, self.formats['header'])
+
+        if 'category' in df.columns:
+            # ✅ ИСПРАВЛЕНИЕ: правильная агрегация с 3 колонками
+            cat_stats = df.groupby('category').agg({
+                'price': 'sum',
+                'profit': 'sum',
+                'margin_percent': 'mean',
+            }).reset_index()
+            # ✅ ИСПРАВЛЕНИЕ: ровно 4 колонки
+            cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. маржа %']
+            total_profit = cat_stats['Прибыль'].sum()
+
+            for i, row in cat_stats.iterrows():
+                excel_row = 3 + i
+                ws.write(excel_row, 0, row['Категория'], self.formats['bold'])
+                ws.write_formula(excel_row, 1,
+                                 f"=COUNTIF('📊 Расчёт'!$D:$D,A{excel_row+1})",
+                                 self.formats['default'])
+                ws.write(excel_row, 2, row['Выручка'], self.formats['money'])
+                ws.write(excel_row, 3, row['Прибыль'],
+                         self.formats['positive'] if row['Прибыль'] > 0 else self.formats['negative'])
+                ws.write(excel_row, 4, row['Ср. маржа %'], self.formats['formula_percent'])
+                ws.write_formula(excel_row, 5,
+                                 f"=INDEX('📊 Расчёт'!$A:$A,MATCH(MAX(IF('📊 Расчёт'!$D:$D=A{excel_row+1},'📊 Расчёт'!$T:$T)),'📊 Расчёт'!$T:$T,0))",
+                                 self.formats['default'])
+                ws.write_formula(excel_row, 6,
+                                 f"=MAX(IF('📊 Расчёт'!$D:$D=A{excel_row+1},'📊 Расчёт'!$T:$T))",
+                                 self.formats['money'])
+
+                share = (row['Прибыль'] / total_profit * 100) if total_profit > 0 else 0
+                ws.write(excel_row, 7, share / 100, self.formats['formula_percent'])
+
+        ws.set_column('A:H', 16)
+        ws.freeze_panes(3, 0)
+        return ws
+
+    def _write_profit_forecast(self, workbook, df: pd.DataFrame):
+        """📈 Прогноз прибыли на 12 месяцев"""
+        ws = workbook.add_worksheet("📈 Прогноз")
+        ws.merge_range('A1:G1', "📈 ПРОГНОЗ ПРИБЫЛИ НА 12 МЕСЯЦЕВ",
+                       self.formats['header_title'])
+
+        headers = ['Месяц', 'Оптимистичный', 'Базовый', 'Пессимистичный',
+                   'Ср. значение', 'Рост %', 'Тренд']
+        for col_idx, header in enumerate(headers):
+            ws.write(2, col_idx, header, self.formats['header'])
+
+        total_profit = df['profit'].sum() if 'profit' in df.columns else 0
+        base_monthly = total_profit / 12 if total_profit > 0 else 1000
+        growth_rate = 0.05
+        volatility = 0.15
+        seasonal = [0.85, 0.85, 0.95, 1.05, 1.10, 1.15,
+                    1.20, 1.15, 1.10, 1.05, 0.95, 0.90]
+        month_names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
+                       'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+
+        for i in range(12):
+            excel_row = 3 + i
+            month_factor = seasonal[i]
+            trend_factor = (1 + growth_rate) ** (i / 12)
+            base = base_monthly * month_factor * trend_factor
+            optimistic = base * (1 + volatility * 0.5)
+            pessimistic = base * (1 - volatility * 0.3)
+
+            ws.write(excel_row, 0, month_names[i], self.formats['default'])
+            ws.write(excel_row, 1, optimistic, self.formats['money'])
+            ws.write(excel_row, 2, base, self.formats['money'])
+            ws.write(excel_row, 3, pessimistic, self.formats['money'])
+            ws.write(excel_row, 4, base, self.formats['money'])
+
+            if i > 0:
+                prev_base = base_monthly * seasonal[i-1] * (1 + growth_rate) ** ((i-1)/12)
+                growth = (base / prev_base - 1) if prev_base > 0 else 0
+                ws.write(excel_row, 5, growth, self.formats['formula_percent'])
+                ws.write(excel_row, 6, "↑" if growth > 0.02 else "↓" if growth < -0.02 else "→",
+                         self.formats['default'])
+            else:
+                ws.write(excel_row, 5, 0, self.formats['formula_percent'])
+                ws.write(excel_row, 6, "→", self.formats['default'])
+
+        chart = workbook.add_chart({'type': 'line'})
+        chart.add_series({
+            'name': 'Оптимистичный',
+            'categories': f'=📈 Прогноз!$A$4:$A$15',
+            'values': f'=📈 Прогноз!$B$4:$B$15',
+            'line': {'color': 'green', 'width': 2},
+        })
+        chart.add_series({
+            'name': 'Базовый',
+            'categories': f'=📈 Прогноз!$A$4:$A$15',
+            'values': f'=📈 Прогноз!$C$4:$C$15',
+            'line': {'color': 'blue', 'width': 3},
+        })
+        chart.add_series({
+            'name': 'Пессимистичный',
+            'categories': f'=📈 Прогноз!$A$4:$A$15',
+            'values': f'=📈 Прогноз!$D$4:$D$15',
+            'line': {'color': 'red', 'width': 2, 'dash_type': 'dash'},
+        })
+        chart.set_title({'name': 'Прогноз прибыли'})
+        chart.set_x_axis({'name': 'Месяц'})
+        chart.set_y_axis({'name': 'Прибыль, ₽'})
+        chart.set_size({'width': 720, 'height': 400})
+        ws.insert_chart(16, 0, chart)
+        ws.set_column('A:G', 16)
+        return ws
+
+    def _write_sensitivity_analysis(self, workbook, df: pd.DataFrame):
+        """🎯 Анализ чувствительности"""
+        ws = workbook.add_worksheet("🎯 Чувствительность")
+        ws.merge_range('A1:I1', "🎯 АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ",
+                       self.formats['header_title'])
+        ws.merge_range('A2:I2',
+                       "Как изменяется прибыль при изменении ключевых параметров",
+                       self.formats['info'])
+
+        avg_price = df['price'].mean() if 'price' in df.columns else 1000
+        avg_cost = df['cost'].mean() if 'cost' in df.columns else 500
+
+        row = 4
+        ws.write(row, 0, "Параметр", self.formats['header'])
+        ws.write(row, 1, "Текущее", self.formats['header'])
+        ws.write(row, 2, "-20%", self.formats['header'])
+        ws.write(row, 3, "-10%", self.formats['header'])
+        ws.write(row, 4, "0%", self.formats['header'])
+        ws.write(row, 5, "+10%", self.formats['header'])
+        ws.write(row, 6, "+20%", self.formats['header'])
+        row += 1
+
+        scenarios = [
+            ("Цена продажи", avg_price),
+            ("Себестоимость", avg_cost),
+            ("Комиссия МП", 0.15),
+            ("Логистика", 100),
+            ("Реклама (ДРР)", 0.15),
+        ]
+
+        for param_name, base_value in scenarios:
+            ws.write(row, 0, param_name, self.formats['param_cell'])
+            ws.write(row, 1, base_value, self.formats['default'])
+            for i, change in enumerate([-0.20, -0.10, 0, 0.10, 0.20]):
+                new_value = base_value * (1 + change)
+                ws.write(row, 2 + i, new_value, self.formats['input_cell'])
+            row += 1
+
+        ws.set_column('A:I', 16)
+        return ws
+
+    def _write_top_analytics(self, workbook, df: pd.DataFrame):
+        """🏆 Топ-аналитика"""
+        ws = workbook.add_worksheet("🏆 Топ")
+        ws.merge_range('A1:F1', "🏆 ТОП-10 ПРИБЫЛЬНЫХ И УБЫТОЧНЫХ",
+                       self.formats['header_title'])
+
+        ws.write(2, 0, "ТОП-10 ПРИБЫЛЬНЫХ", self.formats['section_title'])
+        headers = ['№', 'Артикул', 'МП', 'Прибыль', 'Маржа %', 'Рекомендация']
+        for col_idx, header in enumerate(headers):
+            ws.write(3, col_idx, header, self.formats['header'])
+
+        if 'profit' in df.columns and 'Артикул' in df.columns:
+            top_df = df.nlargest(10, 'profit')
+            for i, (_, row) in enumerate(top_df.iterrows()):
+                excel_row = 4 + i
+                ws.write(excel_row, 0, i + 1, self.formats['default'])
+                ws.write(excel_row, 1, row.get('Артикул', ''), self.formats['default'])
+                ws.write(excel_row, 2, row.get('marketplace', ''), self.formats['default'])
+                ws.write(excel_row, 3, row.get('profit', 0), self.formats['positive'])
+                ws.write(excel_row, 4, row.get('margin_percent', 0), self.formats['formula_percent'])
+                ws.write(excel_row, 5, "✅ Лидер", self.formats['info'])
+
+        bottom_start = 4 + 10 + 3
+        ws.write(bottom_start, 0, "ТОП-10 УБЫТОЧНЫХ", self.formats['section_title'])
+        for col_idx, header in enumerate(headers):
+            ws.write(bottom_start + 1, col_idx, header, self.formats['header'])
+
+        if 'profit' in df.columns:
+            bottom_df = df.nsmallest(10, 'profit')
+            for i, (_, row) in enumerate(bottom_df.iterrows()):
+                excel_row = bottom_start + 2 + i
+                ws.write(excel_row, 0, i + 1, self.formats['default'])
+                ws.write(excel_row, 1, row.get('Артикул', ''), self.formats['default'])
+                ws.write(excel_row, 2, row.get('marketplace', ''), self.formats['default'])
+                ws.write(excel_row, 3, row.get('profit', 0), self.formats['negative'])
+                ws.write(excel_row, 4, row.get('margin_percent', 0), self.formats['formula_percent'])
+                ws.write(excel_row, 5, "⚠️ Требует внимания", self.formats['warning_cell'])
+
+        ws.set_column('A:F', 16)
+        return ws
+
+    def _write_recommendations(self, workbook, df: pd.DataFrame):
+        """💡 Автоматические рекомендации"""
+        ws = workbook.add_worksheet("💡 Рекомендации")
+        ws.merge_range('A1:D1', "💡 АВТОМАТИЧЕСКИЕ РЕКОМЕНДАЦИИ",
+                       self.formats['header_title'])
+        ws.merge_range('A2:D2',
+                       "Система анализирует данные и предлагает оптимальные решения",
+                       self.formats['info'])
+
+        row = 4
+        if 'marketplace' in df.columns and 'profit' in df.columns:
+            best_mp = df.groupby('marketplace')['profit'].sum().idxmax()
+            ws.write(row, 0, "🏪 Лучший маркетплейс", self.formats['bold'])
+            ws.merge_range(row, 1, row, 3,
+                           f"✅ Рекомендуется использовать {best_mp} — он приносит максимальную прибыль",
+                           self.formats['info'])
+            row += 2
+
+        if 'operation_mode' in df.columns and 'profit' in df.columns:
+            best_mode = df.groupby('operation_mode')['profit'].sum().idxmax()
+            ws.write(row, 0, "📦 Оптимальный режим", self.formats['bold'])
+            ws.merge_range(row, 1, row, 3,
+                           f"✅ Режим {best_mode} показывает лучшие результаты",
+                           self.formats['info'])
+            row += 2
+
+        avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
+        if avg_margin < 15:
+            ws.write(row, 0, "💰 Ценовая политика", self.formats['bold'])
+            ws.merge_range(row, 1, row, 3,
+                           "⚠️ Средняя маржа ниже 15%. Рекомендуется пересмотреть цены",
+                           self.formats['warning_cell'])
+            row += 2
+
+        if 'profit' in df.columns:
+            unprofitable = (df['profit'] < 0).sum()
+            if unprofitable > 0:
+                ws.write(row, 0, "⚠️ Убыточные товары", self.formats['bold'])
+                ws.merge_range(row, 1, row, 3,
+                               f"⚠️ {unprofitable} товаров убыточны. Рекомендуется провести аудит",
+                               self.formats['warning_cell'])
+                row += 2
+
+        if 'total_expenses' in df.columns and 'price' in df.columns:
+            expense_ratio = (df['total_expenses'].sum() / df['price'].sum() * 100) if df['price'].sum() > 0 else 0
+            if expense_ratio > 70:
+                ws.write(row, 0, "📉 Оптимизация расходов", self.formats['bold'])
+                ws.merge_range(row, 1, row, 3,
+                               f"⚠️ Расходы составляют {expense_ratio:.1f}% от выручки. Ищите точки оптимизации",
+                               self.formats['warning_cell'])
+            else:
+                ws.write(row, 0, "📈 Эффективность", self.formats['bold'])
+                ws.merge_range(row, 1, row, 3,
+                               f"✅ Расходы составляют {expense_ratio:.1f}% от выручки — хороший показатель",
+                               self.formats['info'])
+
+        ws.set_column('A:A', 25)
+        ws.set_column('B:D', 30)
+        return ws
+
+    def _write_export_summary(self, workbook, df: pd.DataFrame, metadata: Dict):
+        """📋 Сводка экспорта"""
+        ws = workbook.add_worksheet("📋 Сводка")
+        ws.merge_range('A1:C1', "📋 СВОДКА ЭКСПОРТА",
+                       self.formats['header_title'])
+
+        row = 3
+        summary = [
+            ("📅 Дата экспорта", datetime.now().strftime('%d.%m.%Y %H:%M:%S')),
+            ("📦 Всего товаров", f"{len(df):,}"),
+            ("🏪 Маркетплейсы", ", ".join(metadata.get('marketplaces', ['Ozon'])) if metadata else "Ozon"),
+            ("📊 Режимы", ", ".join(metadata.get('modes', ['FBS'])) if metadata else "FBS"),
+            ("💰 Общая прибыль", f"{df['profit'].sum():,.0f} ₽" if 'profit' in df.columns else "Н/Д"),
+            ("📈 Средняя маржа", f"{df['margin_percent'].mean():.1f}%" if 'margin_percent' in df.columns else "Н/Д"),
+            ("⚙️ Версия", "SUPER-PRO v2.0 (v100.15)"),
+        ]
+
+        for label, value in summary:
+            ws.write(row, 0, label, self.formats['param_cell'])
+            ws.write(row, 1, value, self.formats['default'])
+            row += 1
+
+        ws.set_column('A:A', 30)
+        ws.set_column('B:B', 40)
+        return ws
 # ============================================================================
 # 🆕 БЛОК 18: КЛАСС DeepSeekRateUpdater (ПОЛНАЯ ВЕРСИЯ С REAL API)
 # ============================================================================
@@ -11345,8 +12188,17 @@ def show_category_stats(db: CategoryDimensionsDB):
         st.metric("⚖️ Диапазон веса", f"{stats.get('min_weight', 0):.2f} - {stats.get('max_weight', 0):.2f} кг")
 
 # ============================================================================
-# 🆕 БЛОК 23: ИНТЕГРАЦИЯ С ВАЛИДАТОРОМ ВЕСОГАБАРИТОВ
+# 🆕 БЛОК 23: ИНТЕГРАЦИЯ С ВАЛИДАТОРОМ ВЕСОГАБАРИТОВ (v100.15)
 # ============================================================================
+# ✅ v100.5.2: Базовая валидация габаритов товара против эталона категории
+# ✅ v100.15: МАССОВАЯ ВАЛИДАЦИЯ КАТАЛОГА
+#   - Функция validate_catalog_dimensions_vs_categories()
+#   - Сравнение габаритов каждого товара с эталоном категории
+#   - 4 новые колонки: Эталон, Соответствие, Отклонение %, Детали
+#   - Подсветка: ✅ (зелёный), ⚠️ (жёлтый), ❌ (красный), ❓ (серо-зелёный)
+#   - Настраиваемый порог отклонения (по умолчанию 20%)
+# ============================================================================
+
 def validate_dimensions_with_category(
     length: float,
     width: float,
@@ -11357,15 +12209,21 @@ def validate_dimensions_with_category(
 ) -> Dict[str, Any]:
     """
     ✅ Валидация весогабаритов с использованием базы категорий
-
+    
     Args:
         length, width, height: Фактические размеры (см)
         weight: Фактический вес (кг)
         category: Название категории
         tolerance_percent: Допустимое отклонение в %
-
+    
     Returns:
-        Dict с результатами валидации
+        Dict с результатами валидации:
+        {
+            "valid": True/False,
+            "category": "название категории",
+            "deviations": [список отклонений],
+            "warnings": [список предупреждений]
+        }
     """
     result = {
         "valid": True,
@@ -11373,18 +12231,18 @@ def validate_dimensions_with_category(
         "deviations": [],
         "warnings": []
     }
-
+    
     # Получаем стандартные размеры категории
     if 'category_dimensions_db' in st.session_state:
         db = st.session_state.category_dimensions_db
         category_data = db.get_category(category)
-
+        
         if category_data:
             std_length = category_data['length_cm']
             std_width = category_data['width_cm']
             std_height = category_data['height_cm']
             std_weight = category_data['weight_kg']
-
+            
             # Проверяем отклонения
             if std_length > 0:
                 length_dev = abs(length - std_length) / std_length * 100
@@ -11396,7 +12254,7 @@ def validate_dimensions_with_category(
                         "deviation_percent": length_dev
                     })
                     result["valid"] = False
-
+            
             if std_width > 0:
                 width_dev = abs(width - std_width) / std_width * 100
                 if width_dev > tolerance_percent:
@@ -11407,7 +12265,7 @@ def validate_dimensions_with_category(
                         "deviation_percent": width_dev
                     })
                     result["valid"] = False
-
+            
             if std_height > 0:
                 height_dev = abs(height - std_height) / std_height * 100
                 if height_dev > tolerance_percent:
@@ -11418,7 +12276,7 @@ def validate_dimensions_with_category(
                         "deviation_percent": height_dev
                     })
                     result["valid"] = False
-
+            
             if std_weight > 0:
                 weight_dev = abs(weight - std_weight) / std_weight * 100
                 if weight_dev > tolerance_percent:
@@ -11429,14 +12287,144 @@ def validate_dimensions_with_category(
                         "deviation_percent": weight_dev
                     })
                     result["valid"] = False
-
+            
             if result["valid"]:
                 result["warnings"].append("✅ Все параметры в пределах нормы")
         else:
             result["warnings"].append(f"⚠️ Категория '{category}' не найдена в базе")
-
+    else:
+        result["warnings"].append("⚠️ База категорий не загружена")
+    
     return result
 
+
+# ============================================================================
+# 🆕 v100.15: МАССОВАЯ ВАЛИДАЦИЯ ГАБАРИТОВ ТОВАРОВ ПРОТИВ КАТЕГОРИЙ
+# ============================================================================
+def validate_catalog_dimensions_vs_categories(
+    df: pd.DataFrame,
+    tolerance_percent: float = 20.0
+) -> pd.DataFrame:
+    """
+    🆕 v100.15: Сравнивает габариты каждого товара из каталога с эталоном категории.
+    
+    Возвращает DataFrame с новыми колонками:
+      - 'Эталон категории' — название категории из БД весогабаритов
+      - 'Соответствие габаритам' — текстовая оценка (✅ / ⚠️ / ❌ / ❓)
+      - 'Макс. отклонение %' — числовое значение максимального отклонения
+      - 'Детали отклонений' — что именно не совпадает
+    
+    Логика подсветки:
+      ✅ Полное соответствие / Допустимое отклонение (≤ tolerance_percent)
+      ⚠️ Значительное отклонение (tolerance_percent < dev ≤ tolerance_percent * 2)
+      ❌ Критическое расхождение (dev > tolerance_percent * 2)
+      ❓ Категория не найдена в базе
+    
+    Args:
+        df: DataFrame с товарами (должен содержать колонки с габаритами)
+        tolerance_percent: Допустимое отклонение в % (по умолчанию 20%)
+    
+    Returns:
+        DataFrame с добавленными колонками валидации
+    """
+    # Проверка наличия БД категорий
+    if 'category_dimensions_db' not in st.session_state:
+        df['Эталон категории'] = ''
+        df['Соответствие габаритам'] = '⚠️ БД категорий не загружена'
+        df['Макс. отклонение %'] = 0.0
+        df['Детали отклонений'] = ''
+        return df
+    
+    db = st.session_state.category_dimensions_db
+    all_categories = db.get_all_categories()
+    
+    if not all_categories:
+        df['Эталон категории'] = ''
+        df['Соответствие габаритам'] = '⚠️ БД категорий пуста'
+        df['Макс. отклонение %'] = 0.0
+        df['Детали отклонений'] = ''
+        return df
+    
+    # Колонки для результатов
+    match_labels = []
+    max_devs = []
+    details_list = []
+    matched_cats = []
+    
+    for _, row in df.iterrows():
+        # === Определяем категорию товара ===
+        category = ''
+        for col in ['Категория', 'category', 'Категория товара', 'representative_category']:
+            if col in df.columns and pd.notna(row.get(col)) and str(row.get(col)).strip():
+                category = str(row.get(col)).strip().lower()
+                break
+        
+        # === Получаем эталон из БД ===
+        cat_data = None
+        matched_cat_name = ''
+        
+        if category:
+            # Прямое совпадение
+            cat_data = db.get_category(category)
+            if cat_data:
+                matched_cat_name = cat_data['name']
+            else:
+                # Поиск по частичному совпадению
+                for key, val in all_categories.items():
+                    if key in category or category in key:
+                        cat_data = val
+                        matched_cat_name = val['name']
+                        break
+        
+        # Если категория не найдена
+        if not cat_data:
+            match_labels.append('❓ Категория не найдена')
+            max_devs.append(0.0)
+            details_list.append('')
+            matched_cats.append('')
+            continue
+        
+        matched_cats.append(matched_cat_name)
+        
+        # === Считаем отклонения ===
+        deviations = {}
+        params = [
+            ('Длина', safe_float(row.get('Длина', row.get('length', 0))), cat_data['length_cm']),
+            ('Ширина', safe_float(row.get('Ширина', row.get('width', 0))), cat_data['width_cm']),
+            ('Высота', safe_float(row.get('Высота', row.get('height', 0))), cat_data['height_cm']),
+            ('Вес', safe_float(row.get('Вес', row.get('weight', 0))), cat_data['weight_kg']),
+        ]
+        
+        for name, actual, expected in params:
+            if expected > 0 and actual > 0:
+                dev = abs(actual - expected) / expected * 100
+                if dev > 1.0:  # Игнорируем погрешность < 1%
+                    deviations[name] = round(dev, 1)
+        
+        max_dev = max(deviations.values()) if deviations else 0.0
+        max_devs.append(max_dev)
+        
+        # === Формируем вердикт ===
+        if not deviations:
+            match_labels.append('✅ Полное соответствие')
+            details_list.append('')
+        elif max_dev <= tolerance_percent:
+            match_labels.append('✅ Допустимое отклонение')
+            details_list.append('; '.join(f"{k}: {v}%" for k, v in deviations.items()))
+        elif max_dev <= tolerance_percent * 2:
+            match_labels.append('⚠️ Значительное отклонение')
+            details_list.append('; '.join(f"{k}: {v}%" for k, v in deviations.items()))
+        else:
+            match_labels.append('❌ Критическое расхождение')
+            details_list.append('; '.join(f"{k}: {v}%" for k, v in deviations.items()))
+    
+    # === Добавляем новые колонки в DataFrame ===
+    df['Эталон категории'] = matched_cats
+    df['Соответствие габаритам'] = match_labels
+    df['Макс. отклонение %'] = max_devs
+    df['Детали отклонений'] = details_list
+    
+    return df
 # ============================================================================
 # 🆕 БЛОК 24: РАЗДЕЛ "ИСТОРИЯ РАСЧЁТОВ"
 # ============================================================================
@@ -12578,9 +13566,13 @@ def show_photo_editor_interface():
 # ============================================================================
 # 🆕 БЛОК 27: GOOGLE SHEETS PRO (LIVE FORMULAS + OAUTH БЕЗ JSON)
 # ============================================================================
-# ✅ v100.15: Полная PRO-структура (11 листов как в Excel)
+# ✅ v100.14: Полная PRO-структура (11 листов как в Excel)
 # ✅ Авторизация через OAuth-токен (без JSON-ключа!)
 # ✅ Живые формулы, форматирование, графики, KPI
+# ✅ v100.15: ВАЛИДАЦИЯ ГАБАРИТОВ ПРОТИВ КАТЕГОРИЙ
+#   - 4 новые колонки на листе "📥 Входные"
+#   - Условное форматирование (подсветка 🟢🟡🔴⚪)
+#   - Интеграция с CategoryDimensionsDB
 # ============================================================================
 import gspread
 from gspread.utils import ValueInputOption
@@ -12590,15 +13582,14 @@ from google.auth.transport.requests import Request as GoogleRequest
 import json
 import re
 
+
 class GoogleSheetsProManager:
     """🚀 PRO-менеджер Google Таблиц с 11 листами и живыми формулами"""
-    
     SCOPES = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
         "https://www.googleapis.com/auth/spreadsheets"
     ]
-    
     # Цвета (как в PRO Excel)
     COLORS = {
         "header_bg": "1B3A5C",
@@ -12612,16 +13603,24 @@ class GoogleSheetsProManager:
         "negative": "FFC7CE",
         "negative_text": "9C0006",
         "warning": "FFEB9C",
+        "warning_text": "9C6500",
         "total_bg": "D9E2F3",
         "mp_header": "4472C4",
+        # 🆕 v100.15: Цвета для подсветки валидации габаритов
+        "validation_match": "C6EFCE",
+        "validation_match_text": "006100",
+        "validation_warn": "FFEB9C",
+        "validation_warn_text": "9C6500",
+        "validation_bad": "FFC7CE",
+        "validation_bad_text": "9C0006",
+        "validation_neutral": "E2EFDA",
+        "validation_neutral_text": "375623",
     }
-    
     OPERATION_MODES = ["FBY", "FBS", "FBO", "DBS", "FBP", "RealFBS"]
-    
     SHEETS_STRUCTURE = [
         ("📊 Дашборд", 50, 10),
         ("⚙️ Параметры", 500, 20),
-        ("📥 Входные", 5000, 15),
+        ("📥 Входные", 5000, 20),  # 🆕 v100.15: расширено до 20 колонок (было 15)
         ("📊 Расчёт", 5000, 25),
         ("🏪 Сравнение МП", 50, 12),
         ("📂 Категории", 100, 10),
@@ -12631,13 +13630,21 @@ class GoogleSheetsProManager:
         ("💡 Рекомендации", 30, 6),
         ("📋 Сводка", 20, 5),
     ]
-    
+
+    # 🆕 v100.15: Колонки валидации габаритов
+    VALIDATION_COLUMNS = [
+        'Эталон категории',
+        'Соответствие габаритам',
+        'Макс. отклонение %',
+        'Детали отклонений'
+    ]
+
     def __init__(self):
         self.gc = None
         self.sh = None
         self.auth_method = None
         self.ws = {}  # Словарь листов
-    
+
     # ====================================================================
     # 🔐 АВТОРИЗАЦИЯ (ДВА СПОСОБА)
     # ====================================================================
@@ -12655,7 +13662,7 @@ class GoogleSheetsProManager:
             return True, "✅ Авторизация через OAuth-токен успешна"
         except Exception as e:
             return False, f"❌ Ошибка OAuth: {e}"
-    
+
     def authenticate_service_account(self, creds_json: dict) -> Tuple[bool, str]:
         """📄 Авторизация через Service Account JSON (старый способ)"""
         try:
@@ -12667,11 +13674,11 @@ class GoogleSheetsProManager:
             return True, "✅ Авторизация через Service Account успешна"
         except Exception as e:
             return False, f"❌ Ошибка Service Account: {e}"
-    
+
     # ====================================================================
     # 📎 СОЗДАНИЕ / ОТКРЫТИЕ ТАБЛИЦЫ
     # ====================================================================
-    def init_or_open_sheet(self, sheet_url_or_id: str = None, 
+    def init_or_open_sheet(self, sheet_url_or_id: str = None,
                            user_email: str = None) -> Tuple[bool, str]:
         """Создаёт новую PRO-таблицу или открывает существующую"""
         try:
@@ -12685,19 +13692,17 @@ class GoogleSheetsProManager:
                 self.sh = self.gc.create(
                     f"🚗 Юнит-Экономика PRO {datetime.now().strftime('%Y-%m-%d %H:%M')}"
                 )
-                if user_email:
-                    self.sh.share(user_email, perm_type="user", role="writer")
-            
+            if user_email:
+                self.sh.share(user_email, perm_type="user", role="writer")
             # Создаём структуру из 11 листов
             self._setup_pro_structure()
             return True, f"✅ PRO-таблица готова: {self.sh.url}"
         except Exception as e:
             return False, f"❌ Ошибка: {e}"
-    
+
     def _setup_pro_structure(self):
         """Создаёт все 11 PRO-листов"""
         existing = [ws.title for ws in self.sh.worksheets()]
-        
         for sheet_name, rows, cols in self.SHEETS_STRUCTURE:
             if sheet_name in existing:
                 self.ws[sheet_name] = self.sh.worksheet(sheet_name)
@@ -12705,19 +13710,18 @@ class GoogleSheetsProManager:
                 self.ws[sheet_name] = self.sh.add_worksheet(
                     title=sheet_name, rows=rows, cols=cols
                 )
-        
         # Удаляем стандартный "Sheet1" если есть
         if "Sheet1" in existing and len(existing) > 1:
             try:
                 self.sh.del_worksheet(self.sh.worksheet("Sheet1"))
             except Exception:
                 pass
-    
+
     # ====================================================================
     # 🎨 ФОРМАТИРОВАНИЕ
     # ====================================================================
-    def _apply_header_format(self, ws, row: int, cols: int, 
-                              bg_color: str = None, text_color: str = "FFFFFF"):
+    def _apply_header_format(self, ws, row: int, cols: int,
+                             bg_color: str = None, text_color: str = "FFFFFF"):
         """Форматирование заголовка"""
         bg = bg_color or self.COLORS["header_bg"]
         requests = [{
@@ -12732,12 +13736,12 @@ class GoogleSheetsProManager:
                 "cell": {
                     "userEnteredFormat": {
                         "backgroundColor": {"red": int(bg[0:2], 16)/255,
-                                           "green": int(bg[2:4], 16)/255,
-                                           "blue": int(bg[4:6], 16)/255},
+                                            "green": int(bg[2:4], 16)/255,
+                                            "blue": int(bg[4:6], 16)/255},
                         "textFormat": {
                             "foregroundColor": {"red": int(text_color[0:2], 16)/255,
-                                               "green": int(text_color[2:4], 16)/255,
-                                               "blue": int(text_color[4:6], 16)/255},
+                                                "green": int(text_color[2:4], 16)/255,
+                                                "blue": int(text_color[4:6], 16)/255},
                             "bold": True,
                             "fontSize": 11
                         },
@@ -12753,9 +13757,9 @@ class GoogleSheetsProManager:
             ws.spreadsheet.batch_update({"requests": requests})
         except Exception:
             pass
-    
-    def _apply_number_format(self, ws, col_letter: str, start_row: int, 
-                              end_row: int, pattern: str):
+
+    def _apply_number_format(self, ws, col_letter: str, start_row: int,
+                             end_row: int, pattern: str):
         """Применяет числовой формат к колонке"""
         col_idx = ord(col_letter.upper()) - ord('A')
         requests = [{
@@ -12775,7 +13779,7 @@ class GoogleSheetsProManager:
             ws.spreadsheet.batch_update({"requests": requests})
         except Exception:
             pass
-    
+
     def _set_column_widths(self, ws, widths: Dict[str, int]):
         """Устанавливает ширину колонок"""
         requests = []
@@ -12784,7 +13788,7 @@ class GoogleSheetsProManager:
             requests.append({
                 "updateDimensionProperties": {
                     "range": {"sheetId": ws.id, "dimension": "COLUMNS",
-                             "startIndex": col_idx, "endIndex": col_idx + 1},
+                              "startIndex": col_idx, "endIndex": col_idx + 1},
                     "properties": {"pixelSize": width},
                     "fields": "pixelSize"
                 }
@@ -12794,7 +13798,97 @@ class GoogleSheetsProManager:
                 ws.spreadsheet.batch_update({"requests": requests})
             except Exception:
                 pass
-    
+
+    # ====================================================================
+    # 🆕 v100.15: УСЛОВНОЕ ФОРМАТИРОВАНИЕ ПО ТЕКСТУ (ПОДСВЕТКА)
+    # ====================================================================
+    def _apply_text_based_coloring(self, ws, col_letter: str,
+                                   start_row: int, end_row: int):
+        """
+        🆕 v100.15: Применяет цветовую подсветку к ячейкам по началу текста.
+        Используется для колонки "Соответствие габаритам":
+          ✅ (зелёный) — полное соответствие или допустимое отклонение
+          ⚠️ (жёлтый) — значительное отклонение
+          ❌ (красный) — критическое расхождение
+          ❓ (серо-зелёный) — категория не найдена
+        """
+        col_idx = ord(col_letter.upper()) - ord('A')
+        requests = []
+
+        rules = {
+            "✅": {"bg": self.COLORS["validation_match"],
+                   "fg": self.COLORS["validation_match_text"]},
+            "⚠️": {"bg": self.COLORS["validation_warn"],
+                   "fg": self.COLORS["validation_warn_text"]},
+            "❌": {"bg": self.COLORS["validation_bad"],
+                   "fg": self.COLORS["validation_bad_text"]},
+            "❓": {"bg": self.COLORS["validation_neutral"],
+                   "fg": self.COLORS["validation_neutral_text"]},
+        }
+
+        for trigger, colors in rules.items():
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": ws.id,
+                            "startRowIndex": start_row - 1,
+                            "endRowIndex": end_row,
+                            "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_STARTS_WITH",
+                                "values": [{"userEnteredValue": trigger}]
+                            },
+                            "format": {
+                                "backgroundColor": {
+                                    "red": int(colors["bg"][0:2], 16) / 255,
+                                    "green": int(colors["bg"][2:4], 16) / 255,
+                                    "blue": int(colors["bg"][4:6], 16) / 255
+                                },
+                                "textFormat": {
+                                    "foregroundColor": {
+                                        "red": int(colors["fg"][0:2], 16) / 255,
+                                        "green": int(colors["fg"][2:4], 16) / 255,
+                                        "blue": int(colors["fg"][4:6], 16) / 255
+                                    },
+                                    "bold": True
+                                }
+                            }
+                        }
+                    },
+                    "index": 0
+                }
+            })
+
+        # 🆕 Числовой формат для колонки "Макс. отклонение %" (следующая колонка)
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": start_row - 1,
+                    "endRowIndex": end_row,
+                    "startColumnIndex": col_idx + 1,
+                    "endColumnIndex": col_idx + 2
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "numberFormat": {"type": "NUMBER", "pattern": "0.0\"%\""}
+                    }
+                },
+                "fields": "userEnteredFormat.numberFormat"
+            }
+        })
+
+        try:
+            ws.spreadsheet.batch_update({"requests": requests})
+            return True
+        except Exception as e:
+            print(f"⚠️ Ошибка применения подсветки GS: {e}")
+            return False
+
     # ====================================================================
     # ⚙️ ЛИСТ "ПАРАМЕТРЫ" (как в PRO Excel)
     # ====================================================================
@@ -12802,20 +13896,16 @@ class GoogleSheetsProManager:
         """Заполняет лист ⚙️ Параметры тарифами и глобальными параметрами"""
         ws = self.ws["⚙️ Параметры"]
         ws.clear()
-        
         # Заголовок
         ws.merge_cells('A1:P1')
         ws.update('A1', [["⚙️ РАСШИРЕННЫЕ ПАРАМЕТРЫ РАСЧЁТА"]])
         self._apply_header_format(ws, 1, 16, self.COLORS["header_bg"])
-        
         ws.merge_cells('A2:P2')
         ws.update('A2', [["💡 Все параметры редактируемые — изменения применяются ко всем расчётам"]])
-        
         # === ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ ===
         ws.merge_cells('A4:P4')
         ws.update('A4', [["🌐 ГЛОБАЛЬНЫЕ ПАРАМЕТРЫ"]])
         self._apply_header_format(ws, 4, 16, self.COLORS["section_bg"])
-        
         global_params = [
             ["Налоговая ставка", 0.06, "Налог от цены продажи"],
             ["Мин. прибыль (%)", 0.10, "Минимальная целевая прибыль"],
@@ -12825,18 +13915,15 @@ class GoogleSheetsProManager:
             ["Инфляция %", 0.07, "Годовая инфляция"],
         ]
         ws.update('A6', global_params)
-        
         # Форматирование процентов
         self._apply_number_format(ws, 'B', 6, 7, "0.00%")
         self._apply_number_format(ws, 'B', 8, 8, "0")
         self._apply_number_format(ws, 'B', 9, 10, "0.00%")
         self._apply_number_format(ws, 'B', 11, 12, "0.00")
-        
         # === БАЗОВЫЕ ТАРИФЫ ===
         ws.merge_cells('A14:P14')
         ws.update('A14', [["📊 БАЗОВЫЕ ТАРИФЫ (ключ = МП|Режим)"]])
         self._apply_header_format(ws, 14, 16, self.COLORS["section_bg"])
-        
         headers = [
             'Ключ', 'МП', 'Режим', 'Комиссия', 'Лог. база', 'Лог/кг',
             'Лог/л', 'Хранение', 'Эквайринг', 'Возвраты',
@@ -12845,7 +13932,6 @@ class GoogleSheetsProManager:
         ]
         ws.update('A15', [headers])
         self._apply_header_format(ws, 15, 16, self.COLORS["mp_header"])
-        
         # Тарифы
         configs = unit_economics._configs
         data_rows = []
@@ -12871,52 +13957,89 @@ class GoogleSheetsProManager:
                     config.hazardous_surcharge,
                     config.tariff_source.value if hasattr(config.tariff_source, 'value') else str(config.tariff_source)
                 ])
-        
         if data_rows:
             ws.update(f'A16', data_rows)
-            # Формат процентов для колонок D, I, J, M, O
-            last_row = 15 + len(data_rows)
-            for col in ['D', 'I', 'J', 'M', 'O']:
-                self._apply_number_format(ws, col, 16, last_row, "0.00%")
-            # Формат денег
-            for col in ['E', 'F', 'G', 'H', 'K', 'L', 'N']:
-                self._apply_number_format(ws, col, 16, last_row, '#,##0.00')
-        
+        # Формат процентов для колонок D, I, J, M, O
+        last_row = 15 + len(data_rows)
+        for col in ['D', 'I', 'J', 'M', 'O']:
+            self._apply_number_format(ws, col, 16, last_row, "0.00%")
+        # Формат денег
+        for col in ['E', 'F', 'G', 'H', 'K', 'L', 'N']:
+            self._apply_number_format(ws, col, 16, last_row, '#,##0.00')
         # Ширины колонок
         self._set_column_widths(ws, {
             'A': 20, 'B': 15, 'C': 12, 'D': 14, 'E': 14, 'F': 14,
             'G': 14, 'H': 14, 'I': 14, 'J': 14, 'K': 14, 'L': 14,
             'M': 14, 'N': 14, 'O': 16, 'P': 16
         })
-        
         return len(data_rows)
-    
+
     # ====================================================================
-    # 📥 ЛИСТ "ВХОДНЫЕ"
+    # 📥 ЛИСТ "ВХОДНЫЕ" (🆕 v100.15 — С ВАЛИДАЦИЕЙ ГАБАРИТОВ)
     # ====================================================================
     def push_input_data(self, df: pd.DataFrame, metadata: dict) -> int:
-        """Заполняет лист 📥 Входные"""
+        """
+        🆕 v100.15: Заполняет лист 📥 Входные + колонки валидации габаритов.
+        Если загружена БД категорий с весогабаритами, добавляет 4 колонки:
+          - 🎯 Эталон категории
+          - ✅ Соответствие
+          - 📏 Макс. отклонение %
+          - 📋 Детали отклонений
+        И применяет условное форматирование с подсветкой.
+        """
         ws = self.ws["📥 Входные"]
         ws.clear()
-        
+
+        # === 🆕 v100.15: ВАЛИДАЦИЯ ГАБАРИТОВ ПРОТИВ КАТЕГОРИЙ ===
+        validation_enabled = False
+        if 'category_dimensions_db' in st.session_state:
+            cat_db = st.session_state.category_dimensions_db
+            if cat_db.get_all_categories():
+                try:
+                    tolerance = metadata.get('dim_tolerance', 20.0)
+                    df = validate_catalog_dimensions_vs_categories(
+                        df, tolerance_percent=tolerance
+                    )
+                    validation_enabled = True
+                    print(f"✅ Валидация габаритов выполнена для {len(df)} товаров")
+                except ImportError:
+                    print("⚠️ validate_catalog_dimensions_vs_categories не найдена")
+                except Exception as e:
+                    print(f"⚠️ Ошибка валидации: {e}")
+
+        # === Определяем колонки валидации в DataFrame ===
+        existing_validation = [c for c in self.VALIDATION_COLUMNS if c in df.columns]
+        total_base_cols = 14
+        total_cols = total_base_cols + len(existing_validation)
+        last_col_letter = chr(64 + total_cols) if total_cols <= 26 else 'T'
+
         # Заголовок
-        ws.merge_cells('A1:N1')
+        ws.merge_cells(f'A1:{last_col_letter}1')
         ws.update('A1', [["📥 ВХОДНЫЕ ДАННЫЕ (редактируемые)"]])
-        self._apply_header_format(ws, 1, 14, self.COLORS["header_bg"])
-        
-        ws.merge_cells('A2:N2')
+        self._apply_header_format(ws, 1, total_cols, self.COLORS["header_bg"])
+        ws.merge_cells(f'A2:{last_col_letter}2')
         ws.update('A2', [["💡 Меняйте значения — все листы пересчитаются автоматически"]])
-        
+
+        # === Заголовки колонок ===
         headers = [
             'Артикул', 'Бренд', 'МП', 'Режим', 'Категория',
             'Цена', 'Себестоимость', 'Вес, кг',
             'Длина, см', 'Ширина, см', 'Высота, см',
             'Объём, л', 'Оплач. вес', 'Наценка %'
         ]
+        # 🆕 v100.15: Добавляем колонки валидации
+        if validation_enabled and existing_validation:
+            headers += [
+                '🎯 Эталон категории',
+                '✅ Соответствие',
+                '📏 Макс. отклонение %',
+                '📋 Детали отклонений'
+            ]
+
         ws.update('A3', [headers])
-        self._apply_header_format(ws, 3, 14, self.COLORS["header_bg"])
-        
-        # Данные
+        self._apply_header_format(ws, 3, total_cols, self.COLORS["header_bg"])
+
+        # === Данные ===
         input_data = []
         for _, row in df.iterrows():
             length = float(row.get('length', 0) or 0)
@@ -12924,8 +14047,8 @@ class GoogleSheetsProManager:
             height = float(row.get('height', 0) or 0)
             weight = float(row.get('weight', 0) or 0)
             volume = (length * width * height) / 1000 if all([length, width, height]) else 0
-            
-            input_data.append([
+
+            base_row = [
                 str(row.get('Артикул', '')),
                 str(row.get('Бренд', '')),
                 str(row.get('marketplace', metadata.get('marketplace', 'Ozon'))),
@@ -12936,29 +14059,64 @@ class GoogleSheetsProManager:
                 weight,
                 length, width, height,
                 volume,
-                max(weight, volume / 5) if volume > 0 else weight,  # billable weight
+                max(weight, volume / 5) if volume > 0 else weight,
                 0
-            ])
-        
+            ]
+
+            # 🆕 v100.15: Добавляем данные валидации
+            if validation_enabled and existing_validation:
+                for col_name in self.VALIDATION_COLUMNS:
+                    if col_name in df.columns:
+                        val = row.get(col_name, '')
+                        if col_name == 'Макс. отклонение %':
+                            try:
+                                base_row.append(float(val) if val else 0.0)
+                            except (ValueError, TypeError):
+                                base_row.append(0.0)
+                        else:
+                            base_row.append(str(val) if val else '')
+                    else:
+                        base_row.append('')
+
+            input_data.append(base_row)
+
         if input_data:
             ws.update(f'A4', input_data)
             last_row = 3 + len(input_data)
-            
+
             # Формат денег
             for col in ['F', 'G']:
                 self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
             # Формат чисел
             for col in ['H', 'I', 'J', 'K', 'L', 'M']:
                 self._apply_number_format(ws, col, 4, last_row, '0.00')
-        
-        self._set_column_widths(ws, {
-            'A': 18, 'B': 18, 'C': 15, 'D': 12, 'E': 18,
-            'F': 14, 'G': 14, 'H': 12, 'I': 12, 'J': 12,
-            'K': 12, 'L': 12, 'M': 14, 'N': 12
-        })
-        
+
+            # Ширины колонок
+            widths = {
+                'A': 18, 'B': 18, 'C': 15, 'D': 12, 'E': 18,
+                'F': 14, 'G': 14, 'H': 12, 'I': 12, 'J': 12,
+                'K': 12, 'L': 12, 'M': 14, 'N': 12
+            }
+            if validation_enabled and existing_validation:
+                widths.update({
+                    'O': 160,  # Эталон категории
+                    'P': 200,  # Соответствие
+                    'Q': 120,  # Отклонение %
+                    'R': 240   # Детали
+                })
+            self._set_column_widths(ws, widths)
+
+            # 🆕 v100.15: ПОДСВЕТКА КОЛОНКИ "СООТВЕТСТВИЕ"
+            if validation_enabled and 'Соответствие габаритам' in existing_validation:
+                self._apply_text_based_coloring(
+                    ws,
+                    col_letter='P',  # Колонка "✅ Соответствие"
+                    start_row=4,
+                    end_row=last_row
+                )
+
         return len(input_data)
-    
+
     # ====================================================================
     # 📊 ЛИСТ "РАСЧЁТ" (ЖИВЫЕ ФОРМУЛЫ)
     # ====================================================================
@@ -12966,18 +14124,14 @@ class GoogleSheetsProManager:
         """Генерирует живые формулы на листе 📊 Расчёт"""
         ws = self.ws["📊 Расчёт"]
         ws.clear()
-        
         if total_items == 0:
             return 0
-        
         # Заголовки
         ws.merge_cells('A1:W1')
         ws.update('A1', [["📊 ПОЛНЫЙ РАСЧЁТ ЮНИТ-ЭКОНОМИКИ"]])
         self._apply_header_format(ws, 1, 23, self.COLORS["header_bg"])
-        
         ws.merge_cells('A2:W2')
         ws.update('A2', [["⚠️ Все расчёты автоматические — не редактируйте формулы"]])
-        
         headers = [
             'Артикул', 'МП', 'Режим', 'Категория',
             'Цена', 'Себестоимость', 'Вес', 'Объём',
@@ -12989,20 +14143,17 @@ class GoogleSheetsProManager:
         ]
         ws.update('A3', [headers])
         self._apply_header_format(ws, 3, 23, self.COLORS["header_bg"])
-        
         # Ссылки на Параметры
         p_tax = "'⚙️ Параметры'!$B$6"
         p_min_profit = "'⚙️ Параметры'!$B$7"
         p_ad = "'⚙️ Параметры'!$B$9"
         p_days = "'⚙️ Параметры'!$B$8"
         params_range = "'⚙️ Параметры'!$A$16:$P$500"
-        
         # Генерация формул для каждой строки
         formulas = []
         for i in range(total_items):
             excel_row = 4 + i
             input_row = 4 + i
-            
             in_art = f"'📥 Входные'!A{input_row}"
             in_mp = f"'📥 Входные'!C{input_row}"
             in_mode = f"'📥 Входные'!D{input_row}"
@@ -13011,9 +14162,7 @@ class GoogleSheetsProManager:
             in_cost = f"'📥 Входные'!G{input_row}"
             in_weight = f"'📥 Входные'!H{input_row}"
             in_volume = f"'📥 Входные'!L{input_row}"
-            
             lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
-            
             row_formulas = [
                 f"={in_art}",                                           # A: Артикул
                 f"={in_mp}",                                            # B: МП
@@ -13040,44 +14189,39 @@ class GoogleSheetsProManager:
                 f"=T{excel_row}/(1-VLOOKUP({lookup_key},{params_range},4,FALSE)-VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",  # W: Безубыточность
             ]
             formulas.append(row_formulas)
-        
         # Записываем формулы батчем
         BATCH_SIZE = 500
         for start_idx in range(0, len(formulas), BATCH_SIZE):
             batch = formulas[start_idx:start_idx + BATCH_SIZE]
             end_row = 4 + start_idx + len(batch) - 1
             try:
-                ws.update(f'A{4 + start_idx}:W{end_row}', batch, 
-                         value_input_option=ValueInputOption.user_entered)
+                ws.update(f'A{4 + start_idx}:W{end_row}', batch,
+                          value_input_option=ValueInputOption.user_entered)
             except Exception as e:
                 print(f"Ошибка записи формул: {e}")
-        
         # Форматирование
         last_row = 3 + total_items
         for col in ['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'W']:
             self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
         for col in ['U', 'V']:
             self._apply_number_format(ws, col, 4, last_row, '0.00%')
-        
         # ИТОГО строка
         total_row = last_row + 2
         ws.update(f'A{total_row}', [["ИТОГО / СРЕДНЕЕ:"]])
         for col_idx, col_letter in enumerate(['E', 'F', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T'], start=4):
-            ws.update(f'{chr(64+col_idx)}{total_row}', 
-                     [[f"=SUM({col_letter}4:{col_letter}{last_row})"]])
+            ws.update(f'{chr(64+col_idx)}{total_row}',
+                      [[f"=SUM({col_letter}4:{col_letter}{last_row})"]])
         for col_idx, col_letter in enumerate(['U', 'V'], start=20):
-            ws.update(f'{chr(64+col_idx)}{total_row}', 
-                     [[f"=AVERAGE({col_letter}4:{col_letter}{last_row})"]])
-        
+            ws.update(f'{chr(64+col_idx)}{total_row}',
+                      [[f"=AVERAGE({col_letter}4:{col_letter}{last_row})"]])
         self._set_column_widths(ws, {
             'A': 15, 'B': 14, 'C': 10, 'D': 14, 'E': 12, 'F': 12,
             'G': 10, 'H': 10, 'I': 12, 'J': 12, 'K': 12, 'L': 12,
             'M': 12, 'N': 12, 'O': 12, 'P': 12, 'Q': 12, 'R': 12,
             'S': 15, 'T': 15, 'U': 12, 'V': 12, 'W': 14
         })
-        
         return total_items
-    
+
     # ====================================================================
     # 📊 ЛИСТ "ДАШБОРД" (KPI)
     # ====================================================================
@@ -13085,14 +14229,11 @@ class GoogleSheetsProManager:
         """Генерирует лист 📊 Дашборд с KPI"""
         ws = self.ws["📊 Дашборд"]
         ws.clear()
-        
         ws.merge_cells('A1:H1')
         ws.update('A1', [["🚀 СУПЕР-ДАШБОРД ЮНИТ-ЭКОНОМИКИ"]])
         self._apply_header_format(ws, 1, 8, self.COLORS["header_bg"])
-        
         ws.merge_cells('A2:H2')
         ws.update('A2', [["📊 Ключевые показатели эффективности (KPI)"]])
-        
         # KPI
         total_profit = df['profit'].sum() if 'profit' in df.columns else 0
         avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
@@ -13100,7 +14241,6 @@ class GoogleSheetsProManager:
         total_revenue = df['price'].sum() if 'price' in df.columns else 0
         total_expenses = df['total_expenses'].sum() if 'total_expenses' in df.columns else 0
         unprofitable = (df['profit'] < 0).sum() if 'profit' in df.columns else 0
-        
         kpis = [
             ["📦 Всего SKU", len(df), "шт"],
             ["💰 Общая прибыль", total_profit, "₽"],
@@ -13111,13 +14251,11 @@ class GoogleSheetsProManager:
             ["⚠️ Убыточных SKU", unprofitable, "шт"],
         ]
         ws.update('A4', kpis)
-        
         # Формат
         self._apply_number_format(ws, 'B', 5, 5, '#,##0.00')
         self._apply_number_format(ws, 'B', 6, 6, '#,##0.00')
         self._apply_number_format(ws, 'B', 7, 8, '0.00%')
         self._apply_number_format(ws, 'B', 9, 10, '#,##0.00')
-        
         # Прибыль по маркетплейсам
         if 'marketplace' in df.columns:
             ws.update('A13', [["🏪 Прибыль по маркетплейсам"]])
@@ -13125,9 +14263,8 @@ class GoogleSheetsProManager:
             mp_data = [[mp, profit] for mp, profit in mp_profit.items()]
             if mp_data:
                 ws.update('A14', [["Маркетплейс", "Прибыль"]] + mp_data)
-        
-        self._set_column_widths(ws, {'A': 25, 'B': 25, 'C': 15})
-    
+            self._set_column_widths(ws, {'A': 25, 'B': 25, 'C': 15})
+
     # ====================================================================
     # 🏪 ЛИСТ "СРАВНЕНИЕ МП"
     # ====================================================================
@@ -13135,20 +14272,16 @@ class GoogleSheetsProManager:
         """Генерирует лист 🏪 Сравнение МП"""
         ws = self.ws["🏪 Сравнение МП"]
         ws.clear()
-        
         ws.merge_cells('A1:K1')
         ws.update('A1', [["🏪 СРАВНИТЕЛЬНЫЙ АНАЛИЗ МАРКЕТПЛЕЙСОВ"]])
         self._apply_header_format(ws, 1, 11, self.COLORS["header_bg"])
-        
         headers = ['МП', 'SKU', 'Выручка', 'Расходы', 'Прибыль',
                    'Ср. прибыль', 'Ср. маржа %', 'ROI %',
                    'Доля рынка %', 'Эффективность', 'Рейтинг']
         ws.update('A3', [headers])
         self._apply_header_format(ws, 3, 11, self.COLORS["header_bg"])
-        
         if 'marketplace' not in df.columns:
             return
-        
         mp_stats = df.groupby('marketplace').agg({
             'price': 'sum',
             'total_expenses': 'sum',
@@ -13157,7 +14290,6 @@ class GoogleSheetsProManager:
             'roi': 'mean',
         }).reset_index()
         mp_stats.columns = ['МП', 'Выручка', 'Расходы', 'Прибыль', 'Ср. прибыль', 'Ср. маржа', 'ROI']
-        
         total_profit = mp_stats['Прибыль'].sum()
         data = []
         for i, row in mp_stats.iterrows():
@@ -13176,15 +14308,14 @@ class GoogleSheetsProManager:
                 efficiency,
                 f"=RANK(E{4+i},$E$4:$E${3+len(mp_stats)})"
             ])
-        
         if data:
             ws.update(f'A4', data)
-            last_row = 3 + len(data)
-            for col in ['C', 'D', 'E', 'F']:
-                self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
-            for col in ['G', 'H', 'I', 'J']:
-                self._apply_number_format(ws, col, 4, last_row, '0.00%')
-    
+        last_row = 3 + len(data)
+        for col in ['C', 'D', 'E', 'F']:
+            self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
+        for col in ['G', 'H', 'I', 'J']:
+            self._apply_number_format(ws, col, 4, last_row, '0.00%')
+
     # ====================================================================
     # 📂 ЛИСТ "КАТЕГОРИИ"
     # ====================================================================
@@ -13192,26 +14323,21 @@ class GoogleSheetsProManager:
         """Генерирует лист 📂 Категории"""
         ws = self.ws["📂 Категории"]
         ws.clear()
-        
         ws.merge_cells('A1:H1')
         ws.update('A1', [["📂 АНАЛИЗ ПО КАТЕГОРИЯМ"]])
         self._apply_header_format(ws, 1, 8, self.COLORS["header_bg"])
-        
         headers = ['Категория', 'SKU', 'Выручка', 'Прибыль', 'Ср. маржа %',
                    'Топ товар', 'Прибыль топ', 'Доля %']
         ws.update('A3', [headers])
         self._apply_header_format(ws, 3, 8, self.COLORS["header_bg"])
-        
         if 'category' not in df.columns:
             return
-        
         cat_stats = df.groupby('category').agg({
             'price': 'sum',
             'profit': 'sum',
             'margin_percent': 'mean',
         }).reset_index()
         cat_stats.columns = ['Категория', 'Выручка', 'Прибыль', 'Ср. маржа']
-        
         total_profit = cat_stats['Прибыль'].sum()
         data = []
         for i, row in cat_stats.iterrows():
@@ -13226,10 +14352,9 @@ class GoogleSheetsProManager:
                 f"=MAX(IF('📊 Расчёт'!$D:$D=A{4+i},'📊 Расчёт'!$T:$T))",
                 share / 100
             ])
-        
         if data:
             ws.update(f'A4', data)
-    
+
     # ====================================================================
     # 📈 ЛИСТ "ПРОГНОЗ"
     # ====================================================================
@@ -13237,16 +14362,13 @@ class GoogleSheetsProManager:
         """Генерирует лист 📈 Прогноз на 12 месяцев"""
         ws = self.ws["📈 Прогноз"]
         ws.clear()
-        
         ws.merge_cells('A1:G1')
         ws.update('A1', [["📈 ПРОГНОЗ ПРИБЫЛИ НА 12 МЕСЯЦЕВ"]])
         self._apply_header_format(ws, 1, 7, self.COLORS["header_bg"])
-        
         headers = ['Месяц', 'Оптимистичный', 'Базовый', 'Пессимистичный',
                    'Ср. значение', 'Рост %', 'Тренд']
         ws.update('A3', [headers])
         self._apply_header_format(ws, 3, 7, self.COLORS["header_bg"])
-        
         total_profit = df['profit'].sum() if 'profit' in df.columns else 0
         base_monthly = total_profit / 12 if total_profit > 0 else 1000
         growth_rate = 0.05
@@ -13255,7 +14377,6 @@ class GoogleSheetsProManager:
                     1.20, 1.15, 1.10, 1.05, 0.95, 0.90]
         month_names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
                        'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-        
         data = []
         for i in range(12):
             month_factor = seasonal[i]
@@ -13263,7 +14384,6 @@ class GoogleSheetsProManager:
             base = base_monthly * month_factor * trend_factor
             optimistic = base * (1 + volatility * 0.5)
             pessimistic = base * (1 - volatility * 0.3)
-            
             if i > 0:
                 prev_base = base_monthly * seasonal[i-1] * (1 + growth_rate) ** ((i-1)/12)
                 growth = (base / prev_base - 1) if prev_base > 0 else 0
@@ -13271,18 +14391,16 @@ class GoogleSheetsProManager:
             else:
                 growth = 0
                 trend = "→"
-            
             data.append([
                 month_names[i], optimistic, base, pessimistic,
                 base, growth, trend
             ])
-        
         ws.update(f'A4', data)
         last_row = 3 + 12
         for col in ['B', 'C', 'D', 'E']:
             self._apply_number_format(ws, col, 4, last_row, '#,##0.00')
         self._apply_number_format(ws, 'F', 4, last_row, '0.00%')
-    
+
     # ====================================================================
     # 🎯 ЛИСТ "ЧУВСТВИТЕЛЬНОСТЬ"
     # ====================================================================
@@ -13290,20 +14408,15 @@ class GoogleSheetsProManager:
         """Генерирует лист 🎯 Чувствительность"""
         ws = self.ws["🎯 Чувствительность"]
         ws.clear()
-        
         ws.merge_cells('A1:I1')
         ws.update('A1', [["🎯 АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ"]])
         self._apply_header_format(ws, 1, 9, self.COLORS["header_bg"])
-        
         ws.merge_cells('A2:I2')
         ws.update('A2', [["Как изменяется прибыль при изменении ключевых параметров"]])
-        
         avg_price = df['price'].mean() if 'price' in df.columns else 1000
         avg_cost = df['cost'].mean() if 'cost' in df.columns else 500
-        
         ws.update('A4', [["Параметр", "Текущее", "-20%", "-10%", "0%", "+10%", "+20%"]])
         self._apply_header_format(ws, 4, 7, self.COLORS["header_bg"])
-        
         scenarios = [
             ["Цена продажи", avg_price],
             ["Себестоимость", avg_cost],
@@ -13311,16 +14424,14 @@ class GoogleSheetsProManager:
             ["Логистика", 100],
             ["Реклама (ДРР)", 0.15],
         ]
-        
         data = []
         for param_name, base_value in scenarios:
             row_data = [param_name, base_value]
             for change in [-0.20, -0.10, 0, 0.10, 0.20]:
                 row_data.append(base_value * (1 + change))
             data.append(row_data)
-        
         ws.update(f'A5', data)
-    
+
     # ====================================================================
     # 🏆 ЛИСТ "ТОП"
     # ====================================================================
@@ -13328,15 +14439,12 @@ class GoogleSheetsProManager:
         """Генерирует лист 🏆 Топ прибыльных/убыточных"""
         ws = self.ws["🏆 Топ"]
         ws.clear()
-        
         ws.merge_cells('A1:F1')
         ws.update('A1', [["🏆 ТОП-10 ПРИБЫЛЬНЫХ И УБЫТОЧНЫХ"]])
         self._apply_header_format(ws, 1, 6, self.COLORS["header_bg"])
-        
         ws.update('A3', [["ТОП-10 ПРИБЫЛЬНЫХ"]])
         ws.update('A4', [["№", "Артикул", "МП", "Прибыль", "Маржа %", "Рекомендация"]])
         self._apply_header_format(ws, 4, 6, self.COLORS["header_bg"])
-        
         if 'profit' in df.columns and 'Артикул' in df.columns:
             top_df = df.nlargest(10, 'profit')
             data = []
@@ -13351,12 +14459,10 @@ class GoogleSheetsProManager:
                 ])
             if data:
                 ws.update(f'A5', data)
-        
         bottom_start = 18
         ws.update(f'A{bottom_start}', [["ТОП-10 УБЫТОЧНЫХ"]])
         ws.update(f'A{bottom_start+1}', [["№", "Артикул", "МП", "Прибыль", "Маржа %", "Рекомендация"]])
         self._apply_header_format(ws, bottom_start+1, 6, self.COLORS["header_bg"])
-        
         if 'profit' in df.columns:
             bottom_df = df.nsmallest(10, 'profit')
             data = []
@@ -13371,7 +14477,7 @@ class GoogleSheetsProManager:
                 ])
             if data:
                 ws.update(f'A{bottom_start+2}', data)
-    
+
     # ====================================================================
     # 💡 ЛИСТ "РЕКОМЕНДАЦИИ"
     # ====================================================================
@@ -13379,41 +14485,33 @@ class GoogleSheetsProManager:
         """Генерирует лист 💡 Рекомендации"""
         ws = self.ws["💡 Рекомендации"]
         ws.clear()
-        
         ws.merge_cells('A1:D1')
         ws.update('A1', [["💡 АВТОМАТИЧЕСКИЕ РЕКОМЕНДАЦИИ"]])
         self._apply_header_format(ws, 1, 4, self.COLORS["header_bg"])
-        
         ws.merge_cells('A2:D2')
         ws.update('A2', [["Система анализирует данные и предлагает оптимальные решения"]])
-        
         row = 4
         recommendations = []
-        
         if 'marketplace' in df.columns and 'profit' in df.columns:
             best_mp = df.groupby('marketplace')['profit'].sum().idxmax()
-            recommendations.append(["🏪 Лучший маркетплейс", 
+            recommendations.append(["🏪 Лучший маркетплейс",
                                     f"✅ Рекомендуется использовать {best_mp} — он приносит максимальную прибыль"])
-        
         if 'operation_mode' in df.columns and 'profit' in df.columns:
             best_mode = df.groupby('operation_mode')['profit'].sum().idxmax()
-            recommendations.append(["📦 Оптимальный режим", 
+            recommendations.append(["📦 Оптимальный режим",
                                     f"✅ Режим {best_mode} показывает лучшие результаты"])
-        
         avg_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
         if avg_margin < 15:
-            recommendations.append(["💰 Ценовая политика", 
+            recommendations.append(["💰 Ценовая политика",
                                     "⚠️ Средняя маржа ниже 15%. Рекомендуется пересмотреть цены"])
-        
         if 'profit' in df.columns:
             unprofitable = (df['profit'] < 0).sum()
             if unprofitable > 0:
-                recommendations.append(["⚠️ Убыточные товары", 
+                recommendations.append(["⚠️ Убыточные товары",
                                         f"⚠️ {unprofitable} товаров убыточны. Рекомендуется провести аудит"])
-        
         if recommendations:
             ws.update(f'A{row}', recommendations)
-    
+
     # ====================================================================
     # 📋 ЛИСТ "СВОДКА"
     # ====================================================================
@@ -13421,11 +14519,9 @@ class GoogleSheetsProManager:
         """Генерирует лист 📋 Сводка"""
         ws = self.ws["📋 Сводка"]
         ws.clear()
-        
         ws.merge_cells('A1:C1')
         ws.update('A1', [["📋 СВОДКА ЭКСПОРТА"]])
         self._apply_header_format(ws, 1, 3, self.COLORS["header_bg"])
-        
         summary = [
             ["📅 Дата экспорта", datetime.now().strftime('%d.%m.%Y %H:%M:%S')],
             ["📦 Всего товаров", len(df)],
@@ -13436,7 +14532,7 @@ class GoogleSheetsProManager:
             ["⚙️ Версия", "PRO v100.15 (Google Sheets)"],
         ]
         ws.update('A3', summary)
-    
+
     # ====================================================================
     # 🚀 ГЛАВНЫЙ МЕТОД: ПОЛНАЯ ГЕНЕРАЦИЯ PRO-ТАБЛИЦЫ
     # ====================================================================
@@ -13445,48 +14541,37 @@ class GoogleSheetsProManager:
         try:
             # 1. Параметры (тарифы)
             self.push_parameters_sheet(unit_economics)
-            
-            # 2. Входные данные
+            # 2. Входные данные (🆕 v100.15: с валидацией габаритов)
             total_items = self.push_input_data(df, metadata)
-            
             # 3. Расчёт с живыми формулами
             self.generate_calc_formulas(total_items)
-            
             # 4. Дашборд
             self.generate_dashboard(df)
-            
             # 5. Сравнение МП
             self.generate_marketplace_comparison(df)
-            
             # 6. Категории
             self.generate_category_analysis(df)
-            
             # 7. Прогноз
             self.generate_forecast(df)
-            
             # 8. Чувствительность
             self.generate_sensitivity(df)
-            
             # 9. Топ
             self.generate_top(df)
-            
             # 10. Рекомендации
             self.generate_recommendations(df)
-            
             # 11. Сводка
             self.generate_summary(df, metadata)
-            
             return True, f"✅ PRO-таблица создана: {total_items} товаров, 11 листов"
         except Exception as e:
             return False, f"❌ Ошибка генерации: {e}"
-    
+
     # ====================================================================
     # 🔄 ОБНОВЛЕНИЕ ТОЛЬКО ТАРИФОВ (без пересоздания)
     # ====================================================================
     def update_tariffs_only(self, unit_economics) -> int:
         """Обновляет ТОЛЬКО лист ⚙️ Параметры (формулы пересчитаются автоматически)"""
         return self.push_parameters_sheet(unit_economics)
-    
+
     # ====================================================================
     # ➕ ДОБАВЛЕНИЕ НОВЫХ ТОВАРОВ (без затирания старых)
     # ====================================================================
@@ -13494,11 +14579,9 @@ class GoogleSheetsProManager:
         """Добавляет новые товары в существующую таблицу"""
         if df.empty:
             return 0
-        
         ws_input = self.ws["📥 Входные"]
         last_row = len(ws_input.get_all_values())
         start_row = max(2, last_row + 1)
-        
         # Добавляем данные во Входные
         input_data = []
         for _, row in df.iterrows():
@@ -13507,7 +14590,6 @@ class GoogleSheetsProManager:
             height = float(row.get('height', 0) or 0)
             weight = float(row.get('weight', 0) or 0)
             volume = (length * width * height) / 1000 if all([length, width, height]) else 0
-            
             input_data.append([
                 str(row.get('Артикул', '')),
                 str(row.get('Бренд', '')),
@@ -13521,24 +14603,19 @@ class GoogleSheetsProManager:
                 max(weight, volume / 5) if volume > 0 else weight,
                 0
             ])
-        
         ws_input.update(f'A{start_row}', input_data)
-        
         # Добавляем формулы в Расчёт
         ws_calc = self.ws["📊 Расчёт"]
         calc_last_row = len(ws_calc.get_all_values())
         calc_start_row = max(4, calc_last_row + 1)
-        
         p_tax = "'⚙️ Параметры'!$B$6"
         p_ad = "'⚙️ Параметры'!$B$9"
         p_days = "'⚙️ Параметры'!$B$8"
         params_range = "'⚙️ Параметры'!$A$16:$P$500"
-        
         formulas = []
         for i in range(len(input_data)):
             r = start_row + i
             calc_r = calc_start_row + i
-            
             in_mp = f"'📥 Входные'!C{r}"
             in_mode = f"'📥 Входные'!D{r}"
             in_price = f"'📥 Входные'!F{r}"
@@ -13546,7 +14623,6 @@ class GoogleSheetsProManager:
             in_weight = f"'📥 Входные'!H{r}"
             in_volume = f"'📥 Входные'!L{r}"
             lookup_key = f'CONCATENATE({in_mp},"|",{in_mode})'
-            
             formulas.append([
                 f"='📥 Входные'!A{r}",
                 f"={in_mp}",
@@ -13572,153 +14648,15 @@ class GoogleSheetsProManager:
                 f"=IF({in_cost}>0,T{calc_r}/{in_cost},0)",
                 f"=T{calc_r}/(1-VLOOKUP({lookup_key},{params_range},4,FALSE)-VLOOKUP({lookup_key},{params_range},9,FALSE)-{p_tax})",
             ])
-        
         try:
-            ws_calc.update(f'A{calc_start_row}:W{calc_start_row + len(formulas) - 1}', 
-                          formulas, value_input_option=ValueInputOption.user_entered)
+            ws_calc.update(f'A{calc_start_row}:W{calc_start_row + len(formulas) - 1}',
+                           formulas, value_input_option=ValueInputOption.user_entered)
         except Exception as e:
             print(f"Ошибка добавления формул: {e}")
-        
         return len(input_data)
-    
+
     def get_sheet_url(self) -> Optional[str]:
         return self.sh.url if self.sh else None
-
-
-# ============================================================================
-# 🆕 БЛОК 27.5: UI ИНТЕРФЕЙС ДЛЯ GOOGLE SHEETS PRO (Live Formulas)
-# ============================================================================
-def show_google_sheets_interface():
-    """🌐 Интерфейс экспорта в Google Таблицы с живыми формулами и форматированием"""
-    st.header("🌐 Google Таблицы (Live Formulas & Analytics)")
-    st.info("""
-    🚀 **СУПЕР-ЭКСПОРТ В GOOGLE SHEETS**
-    Этот инструмент создает полноценную аналитическую базу из **11 связанных листов**:
-    1. 📊 Дашборд (KPI и графики)
-    2. ⚙️ Параметры (живые тарифы МП, редактируемые)
-    3. 📥 Входные (ваши данные, можно менять прямо в таблице)
-    4. 📊 Расчёт (**живые формулы VLOOKUP**, пересчитываются при изменении Входных!)
-    5. 🏪 Сравнение МП, 📂 Категории, 📈 Прогноз, 🎯 Чувствительность, 🏆 Топ, 💡 Рекомендации, 📋 Сводка.
-    
-    💡 *Измените цену на листе "Входные" — и вся юнит-экономика пересчитается мгновенно!*
-    """)
-
-    # 1. Проверка наличия рассчитанных данных
-    if 'ue_parallel_results' not in st.session_state or st.session_state.ue_parallel_results is None or st.session_state.ue_parallel_results.empty:
-        st.warning("⚠️ **Сначала рассчитайте юнит-экономику!**\n\nПерейдите в раздел **📊 Юнит-экономика** → **📦 Весь каталог (из файла)**, загрузите данные и нажмите 'Рассчитать'. После этого вернитесь сюда.")
-        return
-
-    df = st.session_state.ue_parallel_results
-    metadata = st.session_state.get('ue_parallel_metadata', {})
-    unit_economics = get_marketplace_unit_economics()
-
-    st.success(f"✅ Найдено {len(df):,} рассчитанных записей, готовых к экспорту.")
-
-    # 2. Инициализация менеджера
-    gs_manager = GoogleSheetsProManager()
-
-    # 3. Выбор способа авторизации
-    st.subheader("🔐 Шаг 1: Авторизация в Google")
-    auth_method = st.radio(
-        "Выберите способ подключения:",
-        ["OAuth Токен (без JSON-файла)", "Service Account (JSON-ключ)"],
-        horizontal=True,
-        key="gs_auth_method"
-    )
-
-    is_authenticated = False
-
-    if auth_method == "OAuth Токен (без JSON-файла)":
-        st.markdown("##### 🔑 Через OAuth Access Token")
-        st.caption("Вставьте действующий Access Token от Google API. (Можно получить через Google OAuth Playground с правами `spreadsheets` и `drive`)")
-        access_token = st.text_input("Access Token", type="password", key="gs_oauth_token_input", placeholder="ya29.a0AfH6SMB...")
-        
-        if st.button("✅ Авторизоваться по токену", type="primary"):
-            if not access_token:
-                st.error("Введите токен")
-            else:
-                with st.spinner("Проверка токена..."):
-                    success, msg = gs_manager.authenticate_oauth_token(access_token)
-                    if success:
-                        st.success(msg)
-                        is_authenticated = True
-                    else:
-                        st.error(msg)
-    else:
-        st.markdown("##### 📄 Через Service Account JSON")
-        st.caption("Скопируйте и вставьте всё содержимое JSON-файла ключа сервисного аккаунта Google Cloud.")
-        creds_json_str = st.text_area("JSON Credentials", height=150, key="gs_json_creds_input", placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  ...')
-        
-        if st.button("✅ Авторизоваться по JSON", type="primary"):
-            if not creds_json_str:
-                st.error("Вставьте JSON")
-            else:
-                with st.spinner("Проверка JSON..."):
-                    try:
-                        creds_dict = json.loads(creds_json_str)
-                        success, msg = gs_manager.authenticate_service_account(creds_dict)
-                        if success:
-                            st.success(msg)
-                            is_authenticated = True
-                        else:
-                            st.error(msg)
-                    except json.JSONDecodeError:
-                        st.error("❌ Некорректный формат JSON. Проверьте скобки и кавычки.")
-
-    # 4. Процесс экспорта (если авторизация успешна)
-    if is_authenticated:
-        st.divider()
-        st.subheader("🚀 Шаг 2: Генерация PRO-таблицы")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            sheet_url = st.text_input(
-                "🔗 URL или ID существующей таблицы (оставьте пустым, чтобы создать новую)", 
-                key="gs_sheet_url_input",
-                placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms/edit"
-            )
-        with col2:
-            user_email = st.text_input(
-                "📧 Дать доступ (email)", 
-                key="gs_share_email_input",
-                placeholder="your@email.com",
-                help="Необязательно. Ваш email, чтобы сразу открыть таблицу."
-            )
-
-        if st.button("🚀 СОЗДАТЬ / ОБНОВИТЬ ТАБЛИЦУ С ФОРМУЛАМИ", type="primary", use_container_width=True):
-            with st.spinner("🔄 Идет магия: создание 11 листов, настройка формул VLOOKUP, условного форматирования и графиков... (10-20 сек)"):
-                try:
-                    # 1. Инициализация или открытие
-                    success_init, msg_init = gs_manager.init_or_open_sheet(sheet_url if sheet_url else None, user_email if user_email else None)
-                    
-                    if success_init:
-                        # 2. Генерация полной PRO-структуры с формулами
-                        success_gen, msg_gen = gs_manager.generate_full_pro(df, unit_economics, metadata)
-                        
-                        if success_gen:
-                            st.balloons()
-                            st.success(f"🎉 **{msg_gen}**")
-                            
-                            # Ссылка на таблицу
-                            final_url = gs_manager.get_sheet_url()
-                            st.markdown(f"### 🔗 [📂 ОТКРЫТЬ GOOGLE ТАБЛИЦУ В НОВОЙ ВКЛАДКЕ]({final_url})")
-                            
-                            st.info("""
-                            💡 **КАК ЭТО РАБОТАЕТ (ПРОВЕРЬТЕ САМИ):**
-                            1. Откройте ссылку выше.
-                            2. Перейдите на лист **📥 Входные**.
-                            3. Измените значение в колонке **Цена** или **Себестоимость** для любого товара.
-                            4. Перейдите на лист **📊 Расчёт** или **📊 Дашборд** — вы увидите, что прибыль, маржа и графики **пересчитались мгновенно** благодаря живым формулам!
-                            """)
-                        else:
-                            st.error(f"❌ Ошибка генерации структуры: {msg_gen}")
-                    else:
-                        st.error(f"❌ Ошибка инициализации таблицы: {msg_init}")
-                        
-                except Exception as e:
-                    st.error(f"❌ Критическая ошибка при экспорте: {str(e)}")
-                    with st.expander("📋 Технические детали ошибки"):
-                        st.code(traceback.format_exc())
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (v100.14 + GOOGLE SHEETS LIVE)
 # ============================================================================
