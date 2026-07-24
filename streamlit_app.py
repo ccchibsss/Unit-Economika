@@ -4286,111 +4286,58 @@ def get_demand_coefficient(category: str, month: int) -> float:
     return DEMAND_SEASONALITY_2026["default"][month - 1]
 
 
-# ============================================================================
-# 🆕 v101.0: ФУНКЦИЯ ПОЛУЧЕНИЯ КОНФИГУРАЦИЙ МАРКЕТПЛЕЙСОВ
-# ============================================================================
 def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
     """
     🆕 v101.0: Получение конфигураций маркетплейсов с приоритетом Яндекс Маркет.
-
-    Изменения v101.0:
-    ✅ Яндекс Маркет — ПЕРВЫЙ в словаре (приоритет)
-    ✅ Расширенные тарифы Яндекс Маркет 2026 (DBS, FBS, FBY, RealFBS, FBP)
-    ✅ Тарифы по типам товаров (оригинал/аналог/Китай)
-    ✅ Помесячные сезонные коэффициенты
-    ✅ Подписка ЯМ (6990 ₽/мес)
-    ✅ AI-прогноз с доверием
-    ✅ Google Sheets интеграция
     """
     configs = {}
-
+    
     # ========================================================================
     # 🟡 ЯНДЕКС МАРКЕТ — ПРИОРИТЕТ (первый в списке!)
     # ========================================================================
     configs["Яндекс Маркет"] = MarketplaceConfig(
         name="Яндекс Маркет",
-        commission_rate=0.08,           # Базовая комиссия 8% (самая низкая)
-        min_commission=0.0,             # Нет минимальной комиссии
+        commission_rate=0.08,
+        min_commission=0.0,
         max_commission=float('inf'),
-        logistics_base=40.0,            # База логистики
-        logistics_per_kg=12.0,          # За кг
-        logistics_per_liter=4.0,        # За литр объёма
-        storage_per_day=0.20,           # Хранение (самое дешёвое)
-        return_fee=0.015,               # Возвраты 1.5%
-        acquiring_fee=0.018,            # Эквайринг 1.8%
-        last_mile_fee=35.0,             # Последняя миля
-        delivery_fee_percent=0.0,       # Нет доп. доставки
-        premium_fee=0.015,              # Премиум-раздел
-        rko_fee=0.0,                    # Нет РКО
-        subscription_fee=233.0,         # 🆕 v101.0: 6990 ₽/мес → 233 ₽/день
-        insurance_fee=0.005,            # Страховка 0.5%
-        packing_fee=0.0,                # Нет упаковки
-        marketing_fee=0.0,              # Нет маркетинга
-        hazardous_surcharge=0.015,      # Надбавка за опасные 1.5%
-        fragile_surcharge=0.008,        # Надбавка за хрупкие 0.8%
-        oversized_surcharge=0.010,      # Надбавка за крупногабарит 1.0%
-
-        # 🆕 v101.0: Приоритет (1 = высший)
+        logistics_base=40.0,
+        logistics_per_kg=12.0,
+        logistics_per_liter=4.0,
+        storage_per_day=0.20,
+        return_fee=0.015,
+        acquiring_fee=0.018,
+        last_mile_fee=35.0,
+        delivery_fee_percent=0.0,
+        premium_fee=0.015,
+        rko_fee=0.0,
+        subscription_fee=233.0,
+        insurance_fee=0.005,
+        packing_fee=0.0,
+        marketing_fee=0.0,
+        hazardous_surcharge=0.015,
+        fragile_surcharge=0.008,
+        oversized_surcharge=0.010,
         priority=1,
-
-        # 🆕 v101.0: Специфика Яндекс Маркет
-        weight_rounding_step=0.1,       # Округление до 100 г
-        max_dimension_sum=200.0,        # Сумма сторон ≤ 200 см
-        max_weight=25.0,                # Макс. вес 25 кг
+        weight_rounding_step=0.1,
+        max_dimension_sum=200.0,
+        max_weight=25.0,
         volumetric_coefficient=5000.0,
-
-        # 🆕 v101.0: Помесячные сезонные коэффициенты (тарифов)
-        seasonal_multipliers={
-            "winter": 1.10,             # Декабрь-февраль: +10%
-            "spring": 1.00,             # Март-май: базовые
-            "summer": 0.90,             # Июнь-август: -10% (низкий сезон)
-            "autumn": 1.00,             # Сентябрь-ноябрь: базовые
-        },
-
-        # 🆕 v101.0: Категорийные ставки (расширенные)
+        seasonal_multipliers={"winter": 1.10, "spring": 1.00, "summer": 0.90, "autumn": 1.00},
         category_rates={
-            "двигатель": 0.07,
-            "трансмиссия": 0.08,
-            "подвеска": 0.09,
-            "тормозная_система": 0.09,
-            "рулевое_управление": 0.09,
-            "электрика": 0.10,
-            "охлаждение": 0.09,
-            "выпуск": 0.08,
-            "фильтры": 0.12,
-            "масла": 0.13,
-            "оптика": 0.10,
-            "шины": 0.11,
-            "инструменты": 0.09,
-            "кузов": 0.08,
-            "крепёж": 0.07,
-            "ремни": 0.08,
-            "подшипники": 0.08,
-            "климат": 0.09,
-            "безопасность": 0.10,
-            "автотовары": 0.10,
-            "автохимия": 0.11,
-            "аккумуляторы": 0.10,
+            "двигатель": 0.07, "трансмиссия": 0.08, "подвеска": 0.09,
+            "тормозная_система": 0.09, "рулевое_управление": 0.09,
+            "электрика": 0.10, "охлаждение": 0.09, "выпуск": 0.08,
+            "фильтры": 0.12, "масла": 0.13, "оптика": 0.10,
+            "шины": 0.11, "инструменты": 0.09, "кузов": 0.08,
+            "крепёж": 0.07, "ремни": 0.08, "подшипники": 0.08,
+            "климат": 0.09, "безопасность": 0.10, "автотовары": 0.10,
+            "автохимия": 0.11, "аккумуляторы": 0.10,
         },
-
-        # 🆕 v101.0: Расширенные режимы Яндекс Маркет
-        mode_multipliers={
-            "FBY": 0.75,                # Самый дешёвый (склад ЯМ)
-            "FBS": 1.00,                # Базовый (склад продавца)
-            "FBO": 0.80,                # Оператор
-            "DBS": 1.25,                # Доставка продавца
-            "FBP": 0.90,                # Партнёр
-            "RealFBS": 1.10,            # Свои курьеры
-        },
-
+        mode_multipliers={"FBY": 0.75, "FBS": 1.00, "FBO": 0.80, "DBS": 1.25, "FBP": 0.90, "RealFBS": 1.10},
         description="⭐ Яндекс Маркет — ПРИОРИТЕТ. Маркетплейс экосистемы Яндекса",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-
-        # 🆕 v101.0: Динамическая корректировка
         dynamic_adjustment=0.0,
-
-        # 🆕 v101.0: Режим обновления тарифов
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4420,56 +4367,25 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.02,
         fragile_surcharge=0.01,
         oversized_surcharge=0.015,
-
         priority=2,
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
         volumetric_coefficient=5000.0,
-
-        seasonal_multipliers={
-            "winter": 1.15,
-            "spring": 1.00,
-            "summer": 0.95,
-            "autumn": 1.05,
-        },
-
+        seasonal_multipliers={"winter": 1.15, "spring": 1.00, "summer": 0.95, "autumn": 1.05},
         category_rates={
-            "двигатель": 0.12,
-            "трансмиссия": 0.13,
-            "подвеска": 0.14,
-            "тормозная_система": 0.14,
-            "рулевое_управление": 0.14,
-            "электрика": 0.15,
-            "охлаждение": 0.14,
-            "выпуск": 0.13,
-            "фильтры": 0.17,
-            "масла": 0.18,
-            "оптика": 0.15,
-            "шины": 0.16,
-            "инструменты": 0.14,
-            "кузов": 0.13,
-            "крепёж": 0.12,
-            "ремни": 0.13,
-            "подшипники": 0.13,
-            "климат": 0.14,
-            "безопасность": 0.15,
-            "автотовары": 0.12,
+            "двигатель": 0.12, "трансмиссия": 0.13, "подвеска": 0.14,
+            "тормозная_система": 0.14, "рулевое_управление": 0.14,
+            "электрика": 0.15, "охлаждение": 0.14, "выпуск": 0.13,
+            "фильтры": 0.17, "масла": 0.18, "оптика": 0.15,
+            "шины": 0.16, "инструменты": 0.14, "кузов": 0.13,
+            "крепёж": 0.12, "ремни": 0.13, "подшипники": 0.13,
+            "климат": 0.14, "безопасность": 0.15, "автотовары": 0.12,
         },
-
-        mode_multipliers={
-            "FBY": 0.75,
-            "FBS": 1.00,
-            "FBO": 0.80,
-            "DBS": 1.30,
-            "FBP": 0.90,
-            "RealFBS": 1.10,
-        },
-
+        mode_multipliers={"FBY": 0.75, "FBS": 1.00, "FBO": 0.80, "DBS": 1.30, "FBP": 0.90, "RealFBS": 1.10},
         description="Ozon — крупнейший маркетплейс России",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=2,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4487,9 +4403,9 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         logistics_per_liter=6.0,
         storage_per_day=0.50,
         return_fee=0.03,
-        acquiring_fee=0.0,              # WB не берёт эквайринг отдельно
+        acquiring_fee=0.0,
         last_mile_fee=0.0,
-        delivery_fee_percent=0.05,      # Вместо этого — % от цены
+        delivery_fee_percent=0.05,
         premium_fee=0.0,
         rko_fee=0.01,
         subscription_fee=0.0,
@@ -4499,56 +4415,25 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.025,
         fragile_surcharge=0.015,
         oversized_surcharge=0.02,
-
         priority=3,
-        weight_rounding_step=0.5,       # 🆕 v101.0: WB округляет до 0.5 кг!
+        weight_rounding_step=0.5,
         max_dimension_sum=200.0,
         max_weight=25.0,
         volumetric_coefficient=5000.0,
-
-        seasonal_multipliers={
-            "winter": 1.20,
-            "spring": 1.00,
-            "summer": 0.95,
-            "autumn": 1.05,
-        },
-
+        seasonal_multipliers={"winter": 1.20, "spring": 1.00, "summer": 0.95, "autumn": 1.05},
         category_rates={
-            "двигатель": 0.15,
-            "трансмиссия": 0.16,
-            "подвеска": 0.17,
-            "тормозная_система": 0.17,
-            "рулевое_управление": 0.17,
-            "электрика": 0.18,
-            "охлаждение": 0.17,
-            "выпуск": 0.16,
-            "фильтры": 0.20,
-            "масла": 0.22,
-            "оптика": 0.18,
-            "шины": 0.19,
-            "инструменты": 0.17,
-            "кузов": 0.16,
-            "крепёж": 0.15,
-            "ремни": 0.16,
-            "подшипники": 0.16,
-            "климат": 0.17,
-            "безопасность": 0.18,
-            "автотовары": 0.15,
+            "двигатель": 0.15, "трансмиссия": 0.16, "подвеска": 0.17,
+            "тормозная_система": 0.17, "рулевое_управление": 0.17,
+            "электрика": 0.18, "охлаждение": 0.17, "выпуск": 0.16,
+            "фильтры": 0.20, "масла": 0.22, "оптика": 0.18,
+            "шины": 0.19, "инструменты": 0.17, "кузов": 0.16,
+            "крепёж": 0.15, "ремни": 0.16, "подшипники": 0.16,
+            "климат": 0.17, "безопасность": 0.18, "автотовары": 0.15,
         },
-
-        mode_multipliers={
-            "FBY": 0.75,
-            "FBS": 1.15,
-            "FBO": 1.10,
-            "DBS": 1.25,
-            "FBP": 1.00,
-            "RealFBS": 1.20,
-        },
-
+        mode_multipliers={"FBY": 0.75, "FBS": 1.15, "FBO": 1.10, "DBS": 1.25, "FBP": 1.00, "RealFBS": 1.20},
         description="Wildberries — лидер e-commerce России",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=3,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4578,56 +4463,25 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.03,
         fragile_surcharge=0.02,
         oversized_surcharge=0.025,
-
         priority=4,
         weight_rounding_step=0.5,
         max_dimension_sum=200.0,
         max_weight=30.0,
         volumetric_coefficient=5000.0,
-
-        seasonal_multipliers={
-            "winter": 1.25,             # Новый год, 11.11
-            "spring": 1.00,
-            "summer": 1.10,
-            "autumn": 1.15,             # 11.11
-        },
-
+        seasonal_multipliers={"winter": 1.25, "spring": 1.00, "summer": 1.10, "autumn": 1.15},
         category_rates={
-            "двигатель": 0.08,
-            "трансмиссия": 0.09,
-            "подвеска": 0.10,
-            "тормозная_система": 0.10,
-            "рулевое_управление": 0.10,
-            "электрика": 0.11,
-            "охлаждение": 0.10,
-            "выпуск": 0.09,
-            "фильтры": 0.12,
-            "масла": 0.13,
-            "оптика": 0.11,
-            "шины": 0.12,
-            "инструменты": 0.10,
-            "кузов": 0.09,
-            "крепёж": 0.08,
-            "ремни": 0.09,
-            "подшипники": 0.09,
-            "климат": 0.10,
-            "безопасность": 0.11,
-            "автотовары": 0.10,
+            "двигатель": 0.08, "трансмиссия": 0.09, "подвеска": 0.10,
+            "тормозная_система": 0.10, "рулевое_управление": 0.10,
+            "электрика": 0.11, "охлаждение": 0.10, "выпуск": 0.09,
+            "фильтры": 0.12, "масла": 0.13, "оптика": 0.11,
+            "шины": 0.12, "инструменты": 0.10, "кузов": 0.09,
+            "крепёж": 0.08, "ремни": 0.09, "подшипники": 0.09,
+            "климат": 0.10, "безопасность": 0.11, "автотовары": 0.10,
         },
-
-        mode_multipliers={
-            "FBY": 0.75,
-            "FBS": 1.20,
-            "FBO": 1.10,
-            "DBS": 1.30,
-            "FBP": 0.90,
-            "RealFBS": 1.25,
-        },
-
+        mode_multipliers={"FBY": 0.75, "FBS": 1.20, "FBO": 1.10, "DBS": 1.30, "FBP": 0.90, "RealFBS": 1.25},
         description="AliExpress — международный маркетплейс",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=4,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4657,56 +4511,25 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.02,
         fragile_surcharge=0.012,
         oversized_surcharge=0.015,
-
         priority=5,
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
         volumetric_coefficient=5000.0,
-
-        seasonal_multipliers={
-            "winter": 1.12,
-            "spring": 1.00,
-            "summer": 0.93,
-            "autumn": 1.03,
-        },
-
+        seasonal_multipliers={"winter": 1.12, "spring": 1.00, "summer": 0.93, "autumn": 1.03},
         category_rates={
-            "двигатель": 0.10,
-            "трансмиссия": 0.11,
-            "подвеска": 0.12,
-            "тормозная_система": 0.12,
-            "рулевое_управление": 0.12,
-            "электрика": 0.13,
-            "охлаждение": 0.12,
-            "выпуск": 0.11,
-            "фильтры": 0.15,
-            "масла": 0.16,
-            "оптика": 0.13,
-            "шины": 0.14,
-            "инструменты": 0.12,
-            "кузов": 0.11,
-            "крепёж": 0.10,
-            "ремни": 0.11,
-            "подшипники": 0.11,
-            "климат": 0.12,
-            "безопасность": 0.13,
-            "автотовары": 0.15,
+            "двигатель": 0.10, "трансмиссия": 0.11, "подвеска": 0.12,
+            "тормозная_система": 0.12, "рулевое_управление": 0.12,
+            "электрика": 0.13, "охлаждение": 0.12, "выпуск": 0.11,
+            "фильтры": 0.15, "масла": 0.16, "оптика": 0.13,
+            "шины": 0.14, "инструменты": 0.12, "кузов": 0.11,
+            "крепёж": 0.10, "ремни": 0.11, "подшипники": 0.11,
+            "климат": 0.12, "безопасность": 0.13, "автотовары": 0.15,
         },
-
-        mode_multipliers={
-            "FBY": 0.75,
-            "FBS": 1.10,
-            "FBO": 1.05,
-            "DBS": 1.20,
-            "FBP": 0.95,
-            "RealFBS": 1.15,
-        },
-
+        mode_multipliers={"FBY": 0.75, "FBS": 1.10, "FBO": 1.05, "DBS": 1.20, "FBP": 0.95, "RealFBS": 1.15},
         description="Мегамаркет (Сбер) — маркетплейс экосистемы Сбера",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=5,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4736,56 +4559,25 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.02,
         fragile_surcharge=0.012,
         oversized_surcharge=0.015,
-
         priority=6,
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
         volumetric_coefficient=5000.0,
-
-        seasonal_multipliers={
-            "winter": 1.12,
-            "spring": 1.00,
-            "summer": 0.93,
-            "autumn": 1.03,
-        },
-
+        seasonal_multipliers={"winter": 1.12, "spring": 1.00, "summer": 0.93, "autumn": 1.03},
         category_rates={
-            "двигатель": 0.10,
-            "трансмиссия": 0.11,
-            "подвеска": 0.12,
-            "тормозная_система": 0.12,
-            "рулевое_управление": 0.12,
-            "электрика": 0.13,
-            "охлаждение": 0.12,
-            "выпуск": 0.11,
-            "фильтры": 0.15,
-            "масла": 0.16,
-            "оптика": 0.13,
-            "шины": 0.14,
-            "инструменты": 0.12,
-            "кузов": 0.11,
-            "крепёж": 0.10,
-            "ремни": 0.11,
-            "подшипники": 0.11,
-            "климат": 0.12,
-            "безопасность": 0.13,
-            "автотовары": 0.12,
+            "двигатель": 0.10, "трансмиссия": 0.11, "подвеска": 0.12,
+            "тормозная_система": 0.12, "рулевое_управление": 0.12,
+            "электрика": 0.13, "охлаждение": 0.12, "выпуск": 0.11,
+            "фильтры": 0.15, "масла": 0.16, "оптика": 0.13,
+            "шины": 0.14, "инструменты": 0.12, "кузов": 0.11,
+            "крепёж": 0.10, "ремни": 0.11, "подшипники": 0.11,
+            "климат": 0.12, "безопасность": 0.13, "автотовары": 0.12,
         },
-
-        mode_multipliers={
-            "FBY": 0.75,
-            "FBS": 1.10,
-            "FBO": 1.05,
-            "DBS": 1.20,
-            "FBP": 0.95,
-            "RealFBS": 1.15,
-        },
-
+        mode_multipliers={"FBY": 0.75, "FBS": 1.10, "FBO": 1.05, "DBS": 1.20, "FBP": 0.95, "RealFBS": 1.15},
         description="СберМегаМаркет — маркетплейс Сбера",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=6,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4815,21 +4607,17 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.0,
         fragile_surcharge=0.0,
         oversized_surcharge=0.0,
-
         priority=7,
         weight_rounding_step=0.1,
         max_dimension_sum=300.0,
         max_weight=30.0,
         volumetric_coefficient=5000.0,
-
         seasonal_multipliers={},
         category_rates={},
         mode_multipliers={"RealFBS": 1.0},
-
         description="Avito — доска объявлений",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=7,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4859,21 +4647,17 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.0,
         fragile_surcharge=0.0,
         oversized_surcharge=0.0,
-
         priority=8,
         weight_rounding_step=0.1,
         max_dimension_sum=300.0,
         max_weight=30.0,
         volumetric_coefficient=5000.0,
-
         seasonal_multipliers={},
         category_rates={},
         mode_multipliers={"RealFBS": 1.0},
-
         description="Drom — площадка для автотоваров",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED,
-        priority=8,
         tariff_update_mode=TariffUpdateMode.MANUAL,
         tariff_confidence=1.0,
     )
@@ -4887,58 +4671,29 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             cached_entry = cache.get(mp_name, None, use_expired=False)
             if cached_entry and cached_entry.data:
                 data = cached_entry.data
-
-                # Применяем кэшированные значения
-                if "commission_rate" in data:
-                    config.commission_rate = float(data["commission_rate"])
-                if "min_commission" in data:
-                    config.min_commission = float(data["min_commission"])
-                if "logistics_base" in data:
-                    config.logistics_base = float(data["logistics_base"])
-                if "logistics_per_kg" in data:
-                    config.logistics_per_kg = float(data["logistics_per_kg"])
-                if "logistics_per_liter" in data:
-                    config.logistics_per_liter = float(data["logistics_per_liter"])
-                if "storage_per_day" in data:
-                    config.storage_per_day = float(data["storage_per_day"])
-                if "return_fee" in data:
-                    config.return_fee = float(data["return_fee"])
-                if "acquiring_fee" in data:
-                    config.acquiring_fee = float(data["acquiring_fee"])
-                if "last_mile_fee" in data:
-                    config.last_mile_fee = float(data["last_mile_fee"])
-                if "hazardous_surcharge" in data:
-                    config.hazardous_surcharge = float(data["hazardous_surcharge"])
-                if "fragile_surcharge" in data:
-                    config.fragile_surcharge = float(data["fragile_surcharge"])
-                if "oversized_surcharge" in data:
-                    config.oversized_surcharge = float(data["oversized_surcharge"])
-                if "subscription_fee" in data:
-                    config.subscription_fee = float(data["subscription_fee"])
-
-                # Обновляем категорийные ставки
+                if "commission_rate" in data: config.commission_rate = float(data["commission_rate"])
+                if "min_commission" in data: config.min_commission = float(data["min_commission"])
+                if "logistics_base" in data: config.logistics_base = float(data["logistics_base"])
+                if "logistics_per_kg" in data: config.logistics_per_kg = float(data["logistics_per_kg"])
+                if "logistics_per_liter" in data: config.logistics_per_liter = float(data["logistics_per_liter"])
+                if "storage_per_day" in data: config.storage_per_day = float(data["storage_per_day"])
+                if "return_fee" in data: config.return_fee = float(data["return_fee"])
+                if "acquiring_fee" in data: config.acquiring_fee = float(data["acquiring_fee"])
+                if "last_mile_fee" in data: config.last_mile_fee = float(data["last_mile_fee"])
+                if "hazardous_surcharge" in data: config.hazardous_surcharge = float(data["hazardous_surcharge"])
+                if "fragile_surcharge" in data: config.fragile_surcharge = float(data["fragile_surcharge"])
+                if "oversized_surcharge" in data: config.oversized_surcharge = float(data["oversized_surcharge"])
+                if "subscription_fee" in data: config.subscription_fee = float(data["subscription_fee"])
                 if "category_rates" in data and isinstance(data["category_rates"], dict):
                     config.category_rates.update(data["category_rates"])
-
-                # Обновляем сезонные коэффициенты
                 if "seasonal_multipliers" in data and isinstance(data["seasonal_multipliers"], dict):
                     config.seasonal_multipliers.update(data["seasonal_multipliers"])
-
-                # Обновляем режимы
                 if "mode_multipliers" in data and isinstance(data["mode_multipliers"], dict):
                     config.mode_multipliers.update(data["mode_multipliers"])
-
-                # Обновляем метаданные
                 config.tariff_source = cached_entry.source
                 config.last_updated = datetime.fromtimestamp(cached_entry.timestamp)
-
-                # 🆕 v101.0: Доверие к тарифам
                 config.tariff_confidence = cached_entry.confidence
-
-                logger.info(
-                    f"📥 Применены кэшированные тарифы для {mp_name} "
-                    f"(доверие: {cached_entry.confidence:.0%})"
-                )
+                logger.info(f"📥 Применены кэшированные тарифы для {mp_name} (доверие: {cached_entry.confidence:.0%})")
     except Exception as e:
         logger.warning(f"Не удалось загрузить кэш тарифов: {e}")
 
@@ -4951,13 +4706,8 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             forecast = cache.get_forecast(mp_name, None)
             if forecast and forecast.get("forecast"):
                 config.last_forecast = forecast["forecast"]
-                config.forecast_timestamp = datetime.fromtimestamp(
-                    forecast.get("timestamp", 0)
-                )
-                logger.info(
-                    f"📈 Применён AI-прогноз тарифов для {mp_name} "
-                    f"(до: {config.forecast_timestamp.strftime('%d.%m.%Y')})"
-                )
+                config.forecast_timestamp = datetime.fromtimestamp(forecast.get("timestamp", 0))
+                logger.info(f"📈 Применён AI-прогноз тарифов для {mp_name} (до: {config.forecast_timestamp.strftime('%d.%m.%Y')})")
     except Exception as e:
         logger.warning(f"Не удалось загрузить AI-прогноз: {e}")
 
