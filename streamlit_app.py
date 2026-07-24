@@ -1051,9 +1051,6 @@ EXCEL_DYNAMIC_CONFIG = {
 # ============================================================================
 # БЛОК 1: ENUM И ТИПЫ (🆕 v101.0 - РАСШИРЕННЫЕ)
 # ============================================================================
-# ============================================================================
-# БЛОК 1: ENUM И ТИПЫ (🆕 v101.0 - РАСШИРЕННЫЕ)
-# ============================================================================
 # 🆕 v101.0: УЛУЧШЕНИЯ БЛОКА 1:
 # ✅ Добавлены enums для ABC/XYZ-анализа
 # ✅ Добавлены enums для Google Sheets экспорта
@@ -1061,17 +1058,23 @@ EXCEL_DYNAMIC_CONFIG = {
 # ✅ Добавлены enums для сезонов спроса и состояния товара
 # ✅ Все enums получили метод from_string() для безопасного парсинга
 # ✅ Добавлены новые исключения для новых сущностей
+# ✅ ИСПРАВЛЕНИЕ v101.0.1: Добавлен базовый класс AutoPartsException
 # ============================================================================
-
 from enum import Enum, auto, IntEnum
 
+# ============================================================================
+# 🆕 v101.0.1: БАЗОВЫЙ КЛАСС ДЛЯ ВСЕХ ИСКЛЮЧЕНИЙ (ИСПРАВЛЕНИЕ NameError)
+# Должен быть объявлен ПЕРЕД всеми классами-наследниками
+# ============================================================================
+class AutoPartsException(Exception):
+    """Базовый класс для всех исключений, связанных с автозапчастями и юнит-экономикой"""
+    pass
 
 # ============================================================================
 # 🆕 v101.0: БАЗОВЫЙ КЛАСС ДЛЯ ВСЕХ ENUM С ДОПОЛНИТЕЛЬНЫМИ МЕТОДАМИ
 # ============================================================================
 class BaseEnum(Enum):
     """Базовый класс для всех enum с общими методами"""
-
     @classmethod
     def from_string(cls, value: str, default: Optional['BaseEnum'] = None) -> Optional['BaseEnum']:
         """Безопасное получение enum по строке (регистронезависимо)"""
@@ -1108,7 +1111,6 @@ class BaseEnum(Enum):
         """Получить список пар (value, name) для UI"""
         return [(m.value, m.name) for m in cls]
 
-
 # ============================================================================
 # 🆕 v101.0: ТИПЫ КОМИССИЙ
 # ============================================================================
@@ -1135,7 +1137,6 @@ class CommissionType(BaseEnum):
             "CUSTOM": "⚙️ Пользовательская",
         }
         return names.get(self.name, self.name)
-
 
 # ============================================================================
 # 🆕 v101.0: РЕЖИМЫ РАБОТЫ С МП
@@ -1177,7 +1178,6 @@ class OperationMode(BaseEnum):
             "SELF": 0.5, "REAL_FBS": 1.1,
         }
         return multipliers.get(self.name, 1.0)
-
 
 # ============================================================================
 # 🆕 v101.0: ТИПЫ ТОВАРОВ (СИСТЕМЫ АВТО)
@@ -1238,7 +1238,6 @@ class ProductType(BaseEnum):
                 return member
         return cls.OTHER
 
-
 # ============================================================================
 # 🆕 v101.0: ИСТОЧНИКИ ДАННЫХ
 # ============================================================================
@@ -1269,7 +1268,6 @@ class DataSource(BaseEnum):
             "GOOGLE_SHEETS": "📑", "PARQUET": "📦", "XML": "📰",
         }
         return icons.get(self.name, "📁")
-
 
 # ============================================================================
 # 🆕 v101.0: ФОРМАТЫ ЭКСПОРТА (РАСШИРЕННЫЕ)
@@ -1328,7 +1326,6 @@ class ExportFormat(BaseEnum):
     def is_google_sheets_format(self) -> bool:
         return self.name.startswith("GOOGLE_SHEETS")
 
-
 # ============================================================================
 # 🆕 v101.0: НАЗНАЧЕНИЕ ЭКСПОРТА
 # ============================================================================
@@ -1349,7 +1346,6 @@ class ExportDestination(BaseEnum):
             "DIRECT_PUSH": "🚀 Прямая запись в Google Sheets",
         }
         return names.get(self.name, self.name)
-
 
 # ============================================================================
 # 🆕 v101.0: СТАТУСЫ ЭКСПОРТА В GOOGLE SHEETS
@@ -1379,7 +1375,6 @@ class GoogleSheetsStatus(BaseEnum):
             "PARTIAL": "⚠️", "RATE_LIMITED": "🚦",
         }
         return icons.get(self.name, "⏳")
-
 
 # ============================================================================
 # 🆕 v101.0: РЕЖИМЫ ОБНОВЛЕНИЯ ТАРИФОВ
@@ -1417,7 +1412,6 @@ class TariffUpdateMode(BaseEnum):
         }
         return confidence.get(self.name, 0.5)
 
-
 # ============================================================================
 # 🆕 v101.0: СТАТУСЫ РАСЧЁТА
 # ============================================================================
@@ -1442,7 +1436,6 @@ class CalculationStatus(BaseEnum):
             "RECALCULATING": "🔁",
         }
         return icons.get(self.name, "⏳")
-
 
 # ============================================================================
 # 🆕 v101.0: УРОВНИ РИСКА
@@ -1469,7 +1462,6 @@ class RiskLevel(BaseEnum):
             "HIGH": "🟠", "CRITICAL": "🔴",
         }
         return icons.get(self.name, "⚪")
-
 
 # ============================================================================
 # 🆕 v101.0: СЕЗОНЫ (РАСШИРЕННЫЕ)
@@ -1508,7 +1500,6 @@ class Seasonality(BaseEnum):
         }
         return icons.get(self.name, "📅")
 
-
 # ============================================================================
 # 🆕 v101.0: СЕЗОНЫ СПРОСА (ПОМЕСЯЧНЫЕ)
 # ============================================================================
@@ -1538,7 +1529,6 @@ class DemandSeason(BaseEnum):
             "OFF": "💤",
         }
         return icons.get(self.name, "📊")
-
 
 # ============================================================================
 # 🆕 v101.0: УРОВНИ РЕНТАБЕЛЬНОСТИ
@@ -1587,7 +1577,6 @@ class ProfitabilityLevel(BaseEnum):
                 return member
         return cls.MEDIUM
 
-
 # ============================================================================
 # 🆕 v101.0: ВАЛЮТЫ
 # ============================================================================
@@ -1624,7 +1613,6 @@ class Currency(BaseEnum):
         }
         return flags.get(self.name, "🌍")
 
-
 # ============================================================================
 # 🆕 v101.0: НАЛОГОВЫЕ СИСТЕМЫ
 # ============================================================================
@@ -1645,7 +1633,6 @@ class TaxSystem(BaseEnum):
             "NPD": "👤 НПД (самозанятый)",
         }
         return names.get(self.name, self.name)
-
 
 # ============================================================================
 # 🆕 v101.0: ИСТОЧНИКИ ТАРИФОВ
@@ -1671,7 +1658,6 @@ class TariffSource(BaseEnum):
             "GOOGLE_SHEETS": "📑",
         }
         return icons.get(self.name, "📁")
-
 
 # ============================================================================
 # 🆕 v101.0: ABC-КЛАССЫ (для ABC-анализа)
@@ -1715,7 +1701,6 @@ class ABCClass(BaseEnum):
         }
         return colors.get(self.name, "#636efa")
 
-
 # ============================================================================
 # 🆕 v101.0: XYZ-КЛАССЫ (для XYZ-анализа стабильности спроса)
 # ============================================================================
@@ -1750,7 +1735,6 @@ class XYZClass(BaseEnum):
             if low <= cv < high:
                 return member
         return cls.Z
-
 
 # ============================================================================
 # 🆕 v101.0: ЯЧЕЙКИ МАТРИЦЫ ABC/XYZ
@@ -1796,7 +1780,6 @@ class ABCMatrixCell(BaseEnum):
         }
         return priorities.get(self.name, 5)
 
-
 # ============================================================================
 # 🆕 v101.0: СОСТОЯНИЕ ТОВАРА
 # ============================================================================
@@ -1835,16 +1818,15 @@ class ProductCondition(BaseEnum):
         }
         return multipliers.get(self.name, 1.0)
 
-
 # ============================================================================
 # 🆕 v101.0: НОВЫЕ ИСКЛЮЧЕНИЯ (расширение Блока 0)
+# ВСЕ наследуются от AutoPartsException (объявлен в начале блока)
 # ============================================================================
 class ProductOriginError(AutoPartsException):
     """Ошибка, связанная с типом товара (оригинал/аналог/Китай)"""
     def __init__(self, message: str, origin: Optional[str] = None):
         self.origin = origin
         super().__init__(f"Ошибка типа товара{f' ({origin})' if origin else ''}: {message}")
-
 
 class GoogleSheetsError(AutoPartsException):
     """Ошибка работы с Google Sheets"""
@@ -1860,7 +1842,6 @@ class GoogleSheetsError(AutoPartsException):
         details_str = f" ({', '.join(details)})" if details else ""
         super().__init__(f"Ошибка Google Sheets{details_str}: {message}")
 
-
 class CategoryLoadError(AutoPartsException):
     """Ошибка загрузки категорий"""
     def __init__(self, message: str, file_path: Optional[str] = None,
@@ -1874,7 +1855,6 @@ class CategoryLoadError(AutoPartsException):
             details.append(f"категория: {category_name}")
         details_str = f" ({', '.join(details)})" if details else ""
         super().__init__(f"Ошибка загрузки категорий{details_str}: {message}")
-
 
 class SeasonalityError(AutoPartsException):
     """Ошибка, связанная с сезонностью"""
@@ -1890,7 +1870,6 @@ class SeasonalityError(AutoPartsException):
         details_str = f" ({', '.join(details)})" if details else ""
         super().__init__(f"Ошибка сезонности{details_str}: {message}")
 
-
 class TariffUpdateError(AutoPartsException):
     """Ошибка обновления тарифов"""
     def __init__(self, message: str, marketplace: Optional[str] = None,
@@ -1905,20 +1884,17 @@ class TariffUpdateError(AutoPartsException):
         details_str = f" ({', '.join(details)})" if details else ""
         super().__init__(f"Ошибка обновления тарифов{details_str}: {message}")
 
-
 class ABCAnalysisError(AutoPartsException):
     """Ошибка ABC/XYZ-анализа"""
     def __init__(self, message: str, analysis_type: Optional[str] = None):
         self.analysis_type = analysis_type
         super().__init__(f"Ошибка {analysis_type + ' ' if analysis_type else ''}анализа: {message}")
 
-
 class ExportDestinationError(AutoPartsException):
     """Ошибка назначения экспорта"""
     def __init__(self, message: str, destination: Optional[str] = None):
         self.destination = destination
         super().__init__(f"Ошибка экспорта{f' в {destination}' if destination else ''}: {message}")
-
 
 class DimensionValidationError(AutoPartsException):
     """Ошибка валидации весогабаритов"""
@@ -1937,7 +1913,6 @@ class DimensionValidationError(AutoPartsException):
         details_str = f" ({', '.join(details)})" if details else ""
         super().__init__(f"Ошибка валидации габаритов{details_str}: {message}")
 
-
 # ============================================================================
 # 🆕 v101.0: УТИЛИТЫ ДЛЯ РАБОТЫ С ENUM
 # ============================================================================
@@ -1947,7 +1922,6 @@ def enum_to_dict(enum_class: type) -> Dict[str, Any]:
         raise TypeError(f"{enum_class} не является Enum")
     return {member.name: member.value for member in enum_class}
 
-
 def enum_from_value(enum_class: type, value: Any, default: Optional[Enum] = None) -> Optional[Enum]:
     """Получить enum по значению (безопасно)"""
     if not issubclass(enum_class, Enum):
@@ -1956,7 +1930,6 @@ def enum_from_value(enum_class: type, value: Any, default: Optional[Enum] = None
         if member.value == value or member.name == value:
             return member
     return default
-
 
 def get_enum_choices(enum_class: type, with_icons: bool = True) -> List[Tuple[str, str]]:
     """Получить список вариантов для UI (value, display_name)"""
@@ -4161,137 +4134,13 @@ def get_column_letter(col_idx: int) -> str:
 # ============================================================================
 # БЛОК 4: КОНФИГУРАЦИИ МАРКЕТПЛЕЙСОВ 2026 (🆕 v101.0 - С ПРИОРИТЕТОМ ЯМ)
 # ============================================================================
-# 🆕 v101.0: УЛУЧШЕНИЯ БЛОКА 4:
-# ✅ Яндекс Маркет — ПРИОРИТЕТ (первый в списке, расширенные тарифы)
-# ✅ Тарифы по типам товаров (оригинал/аналог/Китай — разные комиссии)
-# ✅ Помесячные сезонные коэффициенты спроса (не только тарифов)
-# ✅ Расширенные тарифы Яндекс Маркет 2026 (DBS, FBS, FBY, RealFBS, FBP)
-# ✅ Прогрессивное хранение для всех МП
-# ✅ Категорийные ставки с учётом типа товара
-# ✅ AI-прогноз тарифов с доверием
-# ✅ Google Sheets интеграция для тарифов
-# ✅ Корректные тарифы 2026 (обновлённые по документации)
-# ✅ Надбавки за опасные/хрупкие/крупногабаритные
-# ✅ Подписка Яндекс Маркет (6990 ₽/мес → 233 ₽/день)
-# ============================================================================
 
-
-# ============================================================================
-# 🆕 v101.0: КОНСТАНТЫ ДЛЯ ТИПОВ ТОВАРОВ (влияют на тарифы)
-# ============================================================================
-# Комиссии и возвраты зависят от типа товара
-PRODUCT_ORIGIN_TARIFF_MODIFIERS = {
-    "original": {
-        "commission_modifier": 1.0,      # Базовая комиссия
-        "return_rate_modifier": 0.7,     # Возвратов меньше
-        "logistics_modifier": 1.0,       # Стандартная логистика
-        "storage_modifier": 1.0,
-        "icon": "🏆",
-    },
-    "analog_premium": {
-        "commission_modifier": 1.0,
-        "return_rate_modifier": 0.9,
-        "logistics_modifier": 1.0,
-        "storage_modifier": 1.0,
-        "icon": "🥇",
-    },
-    "analog_standard": {
-        "commission_modifier": 1.0,
-        "return_rate_modifier": 1.0,
-        "logistics_modifier": 1.0,
-        "storage_modifier": 1.0,
-        "icon": "🥈",
-    },
-    "analog_budget": {
-        "commission_modifier": 1.05,     # Чуть выше комиссия
-        "return_rate_modifier": 1.3,     # Больше возвратов
-        "logistics_modifier": 1.0,
-        "storage_modifier": 1.0,
-        "icon": "🥉",
-    },
-    "china": {
-        "commission_modifier": 1.15,     # Выше комиссия (риск)
-        "return_rate_modifier": 1.8,     # Много возвратов
-        "logistics_modifier": 1.1,       # Чуть дороже логистика
-        "storage_modifier": 1.0,
-        "icon": "🇨🇳",
-    },
-    "remanufactured": {
-        "commission_modifier": 1.1,
-        "return_rate_modifier": 1.5,
-        "logistics_modifier": 1.05,
-        "storage_modifier": 1.0,
-        "icon": "♻️",
-    },
-    "used": {
-        "commission_modifier": 0.9,      # Ниже комиссия (б/у)
-        "return_rate_modifier": 2.0,     # Много возвратов
-        "logistics_modifier": 1.0,
-        "storage_modifier": 1.0,
-        "icon": "🔧",
-    },
-}
-
-
-# ============================================================================
-# 🆕 v101.0: ПОМЕСЯЧНЫЕ СЕЗОННЫЕ КОЭФФИЦИЕНТЫ СПРОСА (по категориям)
-# ============================================================================
-# Сумма за год ≈ 12.0 (нормировано)
-# Используется для прогноза продаж и корректировки ДРР
-DEMAND_SEASONALITY_2026 = {
-    "фильтры":              [0.85, 0.85, 0.95, 1.05, 1.10, 1.00, 0.95, 0.95, 1.05, 1.10, 1.05, 1.05],
-    "колодки":              [0.90, 0.90, 1.10, 1.20, 1.15, 1.00, 0.95, 0.95, 1.10, 1.15, 1.05, 0.95],
-    "масла":                [0.80, 0.85, 1.00, 1.10, 1.15, 1.10, 1.05, 1.00, 1.05, 1.10, 1.00, 0.80],
-    "аккумуляторы":         [1.30, 1.20, 1.00, 0.85, 0.80, 0.75, 0.75, 0.80, 0.95, 1.15, 1.30, 1.40],
-    "шины_летние":          [0.30, 0.50, 1.20, 1.80, 2.00, 1.50, 1.20, 1.00, 0.60, 0.30, 0.20, 0.20],
-    "шины_зимние":          [0.80, 0.40, 0.20, 0.15, 0.15, 0.20, 0.30, 0.50, 1.20, 1.80, 2.00, 1.50],
-    "шины_всесезонные":     [0.70, 0.70, 0.90, 1.10, 1.20, 1.10, 1.00, 0.95, 1.05, 1.15, 1.00, 0.85],
-    "фары":                 [0.90, 0.90, 1.00, 1.05, 1.10, 1.05, 1.00, 1.00, 1.05, 1.10, 1.05, 0.95],
-    "амортизаторы":         [0.85, 0.85, 1.05, 1.20, 1.25, 1.10, 1.00, 1.00, 1.10, 1.15, 1.00, 0.85],
-    "ремни":                [0.90, 0.90, 1.00, 1.10, 1.10, 1.05, 1.00, 1.00, 1.05, 1.10, 1.05, 0.95],
-    "подшипники":           [0.95, 0.95, 1.00, 1.05, 1.10, 1.05, 1.00, 1.00, 1.05, 1.10, 1.05, 0.95],
-    "датчики":              [0.95, 0.95, 1.00, 1.05, 1.05, 1.05, 1.00, 1.00, 1.05, 1.05, 1.00, 0.95],
-    "двигатель":            [0.80, 0.80, 0.95, 1.10, 1.15, 1.10, 1.05, 1.00, 1.05, 1.10, 1.00, 0.85],
-    "трансмиссия":          [0.85, 0.85, 1.00, 1.10, 1.10, 1.05, 1.00, 1.00, 1.05, 1.10, 1.00, 0.90],
-    "подвеска":             [0.80, 0.85, 1.10, 1.25, 1.30, 1.15, 1.00, 1.00, 1.10, 1.15, 1.00, 0.85],
-    "тормозная_система":    [0.90, 0.90, 1.05, 1.15, 1.15, 1.05, 1.00, 1.00, 1.05, 1.10, 1.05, 0.95],
-    "рулевое_управление":   [0.90, 0.90, 1.05, 1.10, 1.10, 1.05, 1.00, 1.00, 1.05, 1.10, 1.00, 0.90],
-    "электрика":            [0.95, 0.95, 1.00, 1.05, 1.05, 1.05, 1.00, 1.00, 1.05, 1.05, 1.00, 0.95],
-    "охлаждение":           [0.70, 0.75, 1.00, 1.25, 1.50, 1.70, 1.80, 1.60, 1.20, 0.90, 0.75, 0.70],
-    "выпуск":               [0.95, 0.95, 1.00, 1.05, 1.05, 1.05, 1.00, 1.00, 1.05, 1.05, 1.00, 0.95],
-    "оптика":               [0.95, 0.95, 1.00, 1.05, 1.05, 1.05, 1.00, 1.00, 1.05, 1.05, 1.00, 0.95],
-    "кузов":                [0.85, 0.85, 1.00, 1.15, 1.20, 1.15, 1.10, 1.05, 1.10, 1.10, 1.00, 0.90],
-    "инструменты":          [0.90, 0.90, 1.05, 1.15, 1.20, 1.10, 1.05, 1.00, 1.05, 1.10, 1.05, 0.95],
-    "климат":               [0.40, 0.50, 0.80, 1.30, 1.80, 2.20, 2.40, 2.10, 1.40, 0.80, 0.50, 0.40],
-    "безопасность":         [0.95, 0.95, 1.00, 1.05, 1.05, 1.05, 1.00, 1.00, 1.05, 1.05, 1.00, 0.95],
-    "автохимия":            [0.75, 0.80, 1.10, 1.30, 1.40, 1.30, 1.20, 1.15, 1.15, 1.10, 0.95, 0.80],
-    "default":              [0.90, 0.90, 1.00, 1.10, 1.10, 1.05, 1.00, 1.00, 1.05, 1.10, 1.00, 0.90],
-}
-
-
-def get_demand_coefficient(category: str, month: int) -> float:
-    """
-    🆕 v101.0: Получить коэффициент спроса для категории и месяца (1-12).
-    Используется для прогноза продаж и корректировки ДРР.
-    """
-    if not category or not (1 <= month <= 12):
-        return 1.0
-    cat_key = category.lower().strip()
-    if cat_key in DEMAND_SEASONALITY_2026:
-        return DEMAND_SEASONALITY_2026[cat_key][month - 1]
-    # Поиск по подстроке
-    for key, values in DEMAND_SEASONALITY_2026.items():
-        if key in cat_key:
-            return values[month - 1]
-    return DEMAND_SEASONALITY_2026["default"][month - 1]
-
-
-def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
+def get_marketplace_configs_2026() -> Dict[str, 'MarketplaceConfig']:
     """
     🆕 v101.0: Получение конфигураций маркетплейсов с приоритетом Яндекс Маркет.
     """
     configs = {}
-    
+
     # ========================================================================
     # 🟡 ЯНДЕКС МАРКЕТ — ПРИОРИТЕТ (первый в списке!)
     # ========================================================================
@@ -4317,7 +4166,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.015,
         fragile_surcharge=0.008,
         oversized_surcharge=0.010,
-        priority=1,
+        priority=1,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
@@ -4367,7 +4216,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.02,
         fragile_surcharge=0.01,
         oversized_surcharge=0.015,
-        priority=2,
+        priority=2,  # ← ЕДИНСТВЕННЫЙ priority (дубликат удалён)
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
@@ -4415,7 +4264,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.025,
         fragile_surcharge=0.015,
         oversized_surcharge=0.02,
-        priority=3,
+        priority=3,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.5,
         max_dimension_sum=200.0,
         max_weight=25.0,
@@ -4463,7 +4312,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.03,
         fragile_surcharge=0.02,
         oversized_surcharge=0.025,
-        priority=4,
+        priority=4,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.5,
         max_dimension_sum=200.0,
         max_weight=30.0,
@@ -4511,7 +4360,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.02,
         fragile_surcharge=0.012,
         oversized_surcharge=0.015,
-        priority=5,
+        priority=5,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
@@ -4559,7 +4408,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.02,
         fragile_surcharge=0.012,
         oversized_surcharge=0.015,
-        priority=6,
+        priority=6,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.1,
         max_dimension_sum=200.0,
         max_weight=25.0,
@@ -4607,7 +4456,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.0,
         fragile_surcharge=0.0,
         oversized_surcharge=0.0,
-        priority=7,
+        priority=7,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.1,
         max_dimension_sum=300.0,
         max_weight=30.0,
@@ -4647,7 +4496,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         hazardous_surcharge=0.0,
         fragile_surcharge=0.0,
         oversized_surcharge=0.0,
-        priority=8,
+        priority=8,  # ← ЕДИНСТВЕННЫЙ priority
         weight_rounding_step=0.1,
         max_dimension_sum=300.0,
         max_weight=30.0,
@@ -4712,106 +4561,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         logger.warning(f"Не удалось загрузить AI-прогноз: {e}")
 
     return configs
-
-
-# ============================================================================
-# 🆕 v101.0: УТИЛИТА ДЛЯ ПОЛУЧЕНИЯ ТАРИФОВ С УЧЁТОМ ТИПА ТОВАРА
-# ============================================================================
-def get_tariffs_for_origin(marketplace: str,
-                           product_origin: str = "analog_standard") -> Dict[str, float]:
-    """
-    🆕 v101.0: Получить тарифы с учётом типа товара.
-
-    Args:
-        marketplace: Название маркетплейса
-        product_origin: Тип товара (original/analog_premium/analog_standard/
-                       analog_budget/china/remanufactured/used)
-
-    Returns:
-        Dict с модифицированными тарифами
-    """
-    configs = get_marketplace_configs_2026()
-    config = configs.get(marketplace)
-    if not config:
-        return {}
-
-    modifiers = PRODUCT_ORIGIN_TARIFF_MODIFIERS.get(
-        product_origin,
-        PRODUCT_ORIGIN_TARIFF_MODIFIERS["analog_standard"]
-    )
-
-    return {
-        "commission_rate": config.commission_rate * modifiers["commission_modifier"],
-        "return_rate": config.return_fee * modifiers["return_rate_modifier"],
-        "logistics_base": config.logistics_base * modifiers["logistics_modifier"],
-        "logistics_per_kg": config.logistics_per_kg * modifiers["logistics_modifier"],
-        "logistics_per_liter": config.logistics_per_liter * modifiers["logistics_modifier"],
-        "storage_per_day": config.storage_per_day * modifiers["storage_modifier"],
-        "acquiring_fee": config.acquiring_fee,
-        "last_mile_fee": config.last_mile_fee,
-        "hazardous_surcharge": config.hazardous_surcharge,
-        "fragile_surcharge": config.fragile_surcharge,
-        "oversized_surcharge": config.oversized_surcharge,
-        "subscription_fee": config.subscription_fee,
-        "origin_icon": modifiers["icon"],
-    }
-
-
-# ============================================================================
-# 🆕 v101.0: УТИЛИТА ДЛЯ СОРТИРОВКИ МП ПО ПРИОРИТЕТУ
-# ============================================================================
-def get_marketplaces_by_priority() -> List[str]:
-    """
-    🆕 v101.0: Получить список МП, отсортированный по приоритету.
-    Яндекс Маркет — первый.
-    """
-    configs = get_marketplace_configs_2026()
-    sorted_mps = sorted(
-        configs.items(),
-        key=lambda x: (x[1].priority, x[0])
-    )
-    return [mp_name for mp_name, _ in sorted_mps]
-
-
-# ============================================================================
-# 🆕 v101.0: УТИЛИТА ДЛЯ ПОЛУЧЕНИЯ СЕЗОННОГО КОЭФФИЦИЕНТА
-# ============================================================================
-def get_seasonal_demand_factor(category: str,
-                               month: Optional[int] = None) -> float:
-    """
-    🆕 v101.0: Получить сезонный коэффициент спроса.
-
-    Args:
-        category: Название категории
-        month: Месяц (1-12), если None — текущий месяц
-
-    Returns:
-        Коэффициент спроса (1.0 = среднемесячный)
-    """
-    if month is None:
-        month = datetime.now().month
-    return get_demand_coefficient(category, month)
-
-
-# ============================================================================
-# 🆕 v101.0: УТИЛИТА ДЛЯ ПРОГНОЗА ТАРИФОВ
-# ============================================================================
-def get_tariff_forecast(marketplace: str,
-                        months_ahead: int = 3) -> Optional[Dict[str, Any]]:
-    """
-    🆕 v101.0: Получить прогноз тарифов на N месяцев вперёд.
-
-    Returns:
-        Dict с прогнозом или None
-    """
-    try:
-        cache = get_smart_tariff_cache()
-        forecast = cache.get_forecast(marketplace, None)
-        if forecast:
-            return forecast.get("forecast")
-    except Exception as e:
-        logger.warning(f"Не удалось получить прогноз: {e}")
-    return None
+    
 # ============================================================================
 # БЛОК 5: 150+ КАТЕГОРИЙ АВТОЗАПЧАСТЕЙ (🆕 v101.0 - С ТИПОМ ТОВАРА И СЕЗОННОСТЬЮ)
 # ============================================================================
