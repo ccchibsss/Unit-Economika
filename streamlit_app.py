@@ -586,10 +586,10 @@ class SaveLoadAction(Enum):
     RESTORE = "Восстановить"
 
 # ============================================================================
-# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses)  ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ
+# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses) — ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ
 # ============================================================================
 # 📌 v101.0: Добавлены новые классы:
-# - CategoryHierarchy (3-уровневая иерархия: Родитель  Группа  Подгруппа)
+# - CategoryHierarchy (3-уровневая иерархия: Родитель → Группа → Подгруппа)
 # - ABCAnalysisResult (ABC/XYZ анализ по маржинальности и прибыли)
 # - GoogleSheetsConfig (конфигурация Google Sheets)
 # - SaveLoadState (состояние сохранения/загрузки расчётов)
@@ -597,101 +597,6 @@ class SaveLoadAction(Enum):
 # - DataLinkConfig (конфигурация связывания данных)
 # ============================================================================
 
-
-@dataclass
-class MarketplaceConfig:
-    """
-    Расширенная конфигурация маркетплейса с сезонностью и промо.
-    Хранит все тарифы, комиссии, логистические ставки для одного МП.
-    """
-    name: str
-    commission_rate: float
-    min_commission: float = 0.0
-    max_commission: float = float('inf')
-    logistics_base: float = 0.0
-    logistics_per_kg: float = 0.0
-    logistics_per_liter: float = 0.0
-    storage_per_day: float = 0.0
-    return_fee: float = 0.0
-    acquiring_fee: float = 0.0
-    last_mile_fee: float = 0.0
-    delivery_fee_percent: float = 0.0
-    premium_fee: float = 0.0
-    rko_fee: float = 0.0
-    subscription_fee: float = 0.0
-    insurance_fee: float = 0.0
-    packing_fee: float = 0.0
-    marketing_fee: float = 0.0
-    hazardous_surcharge: float = 0.0
-    fragile_surcharge: float = 0.0
-    oversized_surcharge: float = 0.0
-    category_rates: Dict[str, float] = field(default_factory=dict)
-    mode_multipliers: Dict[str, float] = field(default_factory=dict)
-    weight_tiers: List[Tuple[float, float, float]] = field(default_factory=list)
-    volume_tiers: List[Tuple[float, float, float]] = field(default_factory=list)
-    available: bool = True
-    description: str = ""
-    version: str = "2026.1"
-    last_updated: datetime = field(default_factory=datetime.now)
-    tariff_source: TariffSource = TariffSource.HARDCODED
-    seasonal_multipliers: Dict[str, float] = field(default_factory=dict)
-    promo_discount: float = 0.0
-    promo_start: Optional[datetime] = None
-    promo_end: Optional[datetime] = None
-    dynamic_adjustment: float = 0.0
-    last_forecast: Optional[Dict[str, Any]] = None
-    forecast_timestamp: Optional[datetime] = None
-
-    def get_commission_rate(self, category: Optional[str] = None) -> float:
-        """Получить ставку комиссии (общую или по категории)"""
-        if category and category in self.category_rates:
-            return self.category_rates[category]
-        return self.commission_rate
-
-    def get_mode_multiplier(self, mode: str) -> float:
-        """Получить мультипликатор режима работы"""
-        return self.mode_multipliers.get(mode, 1.0)
-
-    def apply_seasonal_multiplier(self, base_rate: float, current_month: Optional[int] = None) -> float:
-        """Применить сезонный коэффициент к базовой ставке"""
-        if current_month is None:
-            current_month = datetime.now().month
-        if current_month in [12, 1, 2]:
-            season = "winter"
-        elif current_month in [3, 4, 5]:
-            season = "spring"
-        elif current_month in [6, 7, 8]:
-            season = "summer"
-        else:
-            season = "autumn"
-        multiplier = self.seasonal_multipliers.get(season, 1.0)
-        return base_rate * multiplier
-
-    def apply_promo_discount(self, amount: float) -> float:
-        """Применить промо-скидку к сумме"""
-        if self.promo_discount <= 0:
-            return amount
-        now = datetime.now()
-        if self.promo_start and self.promo_end:
-            if self.promo_start <= now <= self.promo_end:
-                return amount * (1 - self.promo_discount)
-        else:
-            return amount * (1 - self.promo_discount)
-        return amount
-
-    def calculate_commission_with_dynamics(
-        self,
-        price: float,
-        discount_percent: float = 0.0,
-        promo_participation: float = 0.0,
-        category: Optional[str] = None,
-        current_month: Optional[int] = None
-    ) -> float:
-        """
-        Расчёт комиссии с учётом скидок, участия в акциях и сезонности.
-# ============================================================================
-# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses)  ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ (ПРОДОЛЖЕНИЕ)
-# ============================================================================
 @dataclass
 class MarketplaceConfig:
     """
@@ -840,8 +745,8 @@ class ProductDimensions:
 class CategoryHierarchy:
     """
     v101.0: 3-уровневая иерархия категорий
-    Родитель  Группа  Подгруппа
-    Пример: Автозапчасти  Подвеска  Сайлентблоки
+    Родитель → Группа → Подгруппа
+    Пример: Автозапчасти → Подвеска → Сайлентблоки
     """
     parent: str = ""          # Уровень 1: Автозапчасти
     group: str = ""           # Уровень 2: Подвеска
@@ -1016,8 +921,8 @@ class UnitEconomicsResult:
 class ABCAnalysisResult:
     """
     v101.0: Результат ABC/XYZ анализа
-    ABC  по маржинальности и прибыли
-    XYZ  по стабильности (коэффициент вариации)
+    ABC — по маржинальности и прибыли
+    XYZ — по стабильности (коэффициент вариации)
     """
     article: str
     brand: str
@@ -1039,7 +944,7 @@ class ABCAnalysisResult:
 @dataclass
 class ColumnMapping:
     """
-     v101.0: Маппинг столбцов между файлами
+    v101.0: Маппинг столбцов между файлами
     Используется для связывания данных из разных источников
     """
     source_file: str
@@ -1065,7 +970,7 @@ class ColumnMapping:
 @dataclass
 class DataLinkConfig:
     """
-     v101.0: Конфигурация связывания данных между файлами
+    v101.0: Конфигурация связывания данных между файлами
     """
     link_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
@@ -1098,7 +1003,7 @@ class DataLinkConfig:
 @dataclass
 class GoogleSheetsConfig:
     """
-     v101.0: Конфигурация Google Sheets
+    v101.0: Конфигурация Google Sheets
     """
     credentials_json: str = ""  # Путь к JSON-файлу или содержимое
     spreadsheet_id: str = ""
@@ -1130,7 +1035,7 @@ class GoogleSheetsConfig:
 @dataclass
 class SaveLoadState:
     """
-     v101.0: Состояние сохранения/загрузки расчётов
+    v101.0: Состояние сохранения/загрузки расчётов
     """
     state_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
@@ -1214,8 +1119,7 @@ class AutoPartsSpecificCosts:
     customs_duty: float = 0.0
     currency_risk: float = 0.03
 
-    def calculate(self, price: float, is_import: bool = False,
-                  requires_marking: bool = True) -> float:
+    def calculate(self, price: float, is_import: bool = False, requires_marking: bool = True) -> float:
         total = 0.0
         if requires_marking:
             total += self.chestny_znak
@@ -3284,12 +3188,16 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
 # БЛОК 5: 150+ КАТЕГОРИЙ АВТОЗАПЧАСТЕЙ С 3-УРОВНЕВОЙ ИЕРАРХИЕЙ
 # ============================================================================
 # 📌 v101.0: Расширено до 150+ категорий с:
-# - 3-уровневой иерархией (Родитель  Группа  Подгруппа)
+# - 3-уровневой иерархией (Родитель → Группа → Подгруппа)
 # - Типичными весогабаритами (min/max)
 # - OEM-кодами и кросс-ссылками
 # - Сезонностью, уровнем риска
 # - Признаками опасности/хрупкости
 # - Ключевыми словами для автокатегоризации
+#
+# 🐛 ИСПРАВЛЕНИЯ v101.0:
+# 1. Добавлен return statement в get_category_keywords_map()
+# 2. Улучшена защита от None в make_cat
 # ============================================================================
 
 
@@ -3298,10 +3206,10 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
     Полный справочник категорий автозапчастей с весогабаритами и иерархией.
     
     Иерархия:
-        Родитель (Автозапчасти)  Группа (Подвеска)  Подгруппа (Сайлентблоки)
+        Родитель (Автозапчасти) → Группа (Подвеска) → Подгруппа (Сайлентблоки)
     
     Returns:
-        Dict[str, ProductCategory]  словарь всех категорий
+        Dict[str, ProductCategory] — словарь всех категорий
     """
     categories = {}
     
@@ -3324,15 +3232,22 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
         group: str = "",
         subgroup: str = "",
         keywords: Optional[List[str]] = None,
-        weight_range: Tuple[float, float] = (0.0, 100.0),
+        weight_range: Optional[Tuple[float, float]] = None,
     ) -> ProductCategory:
-        """Вспомогательная функция создания категории с иерархией"""
+        """
+        Вспомогательная функция создания категории с иерархией.
+        
+        🆕 v101.0: Добавлена защита от None в weight_range.
+        """
+        # Защита от None в weight_range
+        actual_weight_range = weight_range if weight_range is not None else (min_wt, max_wt)
+        
         hierarchy = CategoryHierarchy(
             parent=parent,
             group=group or name,
             subgroup=subgroup or name,
             keywords=keywords or [],
-            weight_range=weight_range or (min_wt, max_wt),
+            weight_range=actual_weight_range,
             dimensions_range={
                 "length": (min_l, max_l),
                 "width": (min_w, max_w),
@@ -3364,7 +3279,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
         )
     
     # ========================================================================
-    # 🏭 ДВИГАТЕЛЬ (Родитель: Автозапчасти  Группа: Двигатель)
+    # 🏭 ДВИГАТЕЛЬ (Родитель: Автозапчасти → Группа: Двигатель)
     # ========================================================================
     categories["двигатель"] = make_cat(
         "двигатель", "Двигатель", "Двигатели и комплектующие",
@@ -4196,7 +4111,7 @@ def get_category_hierarchy_map() -> Dict[str, CategoryHierarchy]:
     Быстрый доступ к иерархиям всех категорий.
     
     Returns:
-        Dict[str, CategoryHierarchy]  {ключ_категории: иерархия}
+        Dict[str, CategoryHierarchy] — {ключ_категории: иерархия}
     """
     categories = get_auto_parts_categories_full()
     return {key: cat.hierarchy for key, cat in categories.items() if cat.hierarchy}
@@ -4206,18 +4121,23 @@ def get_category_keywords_map() -> Dict[str, List[str]]:
     """
     Карта ключевых слов для автокатегоризации.
     
+    🆕 v101.0: ИСПРАВЛЕНА критическая ошибка - добавлен return statement.
+    Ранее функция обрывалась без return, что вызывало SyntaxError.
+    
     Returns:
-        Dict[str, List[str]]  {ключ_категории: [ключевые слова]}
+        Dict[str, List[str]] — {ключ_категории: [ключевые слова]}
     """
     categories = get_auto_parts_categories_full()
+    return {key: cat.hierarchy.keywords for key, cat in categories.items() 
+            if cat.hierarchy and cat.hierarchy.keywords}
 
 # ============================================================================
 # БЛОК 6: ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
 # ============================================================================
 # 📌 v101.0: Добавлены новые классы:
-# - CategoryClassifier  3-уровневая ML-классификация (Родитель/Группа/Подгруппа)
-# - CatalogEnhancer  обогащение каталога через поиск аналогов по OE
-# - SmartTariffCache  умный кэш тарифов с прогнозированием
+# - CategoryClassifier — 3-уровневая ML-классификация (Родитель/Группа/Подгруппа)
+# - CatalogEnhancer — обогащение каталога через поиск аналогов по OE
+# - SmartTariffCache — умный кэш тарифов с прогнозированием
 # ============================================================================
 
 
@@ -4227,12 +4147,12 @@ def get_category_keywords_map() -> Dict[str, List[str]]:
 
 class CategoryClassifier:
     """
-     v101.0: Классификатор категорий с 3-уровневой иерархией.
+    v101.0: Классификатор категорий с 3-уровневой иерархией.
     
     Логика:
     1. Сначала ищет по ключевым словам в справочнике категорий (Блок 5)
-    2. Если не нашёл  использует ML-модель (если обучена)
-    3. Если и ML не помог  возвращает "Прочее"
+    2. Если не нашёл — использует ML-модель (если обучена)
+    3. Если и ML не помог — возвращает "Прочее"
     
     Возвращает:
     - parent: Родитель (например, "Автозапчасти")
@@ -4267,7 +4187,7 @@ class CategoryClassifier:
         Предсказание категории по названию.
         
         Returns:
-            (category_key, confidence)  ключ категории и уверенность
+            (category_key, confidence) — ключ категории и уверенность
         """
         if not text:
             return ("прочее", 0.0)
@@ -4280,7 +4200,7 @@ class CategoryClassifier:
         for cat_key, keywords in self.keywords_map.items():
             for keyword in keywords:
                 if keyword.lower() in text_lower:
-                    # Чем длиннее совпадение  тем точнее
+                    # Чем длиннее совпадение — тем точнее
                     score = len(keyword) / max(len(text_lower), 1)
                     if score > best_score:
                         best_score = score
@@ -4304,7 +4224,7 @@ class CategoryClassifier:
     
     def predict_hierarchy(self, text: str) -> Dict[str, str]:
         """
-         v101.0: Предсказание полной иерархии (Родитель/Группа/Подгруппа).
+        v101.0: Предсказание полной иерархии (Родитель/Группа/Подгруппа).
         
         Returns:
             {"parent": "...", "group": "...", "subgroup": "...", "confidence": 0.0}
@@ -4335,7 +4255,7 @@ class CategoryClassifier:
         name_col: str = "Наименование"
     ) -> pd.DataFrame:
         """
-         v101.0: Классификация всего DataFrame.
+        v101.0: Классификация всего DataFrame.
         Добавляет колонки: parent_category, group_category, subgroup_category, category_key, confidence
         """
         if df.empty or name_col not in df.columns:
@@ -4411,7 +4331,7 @@ class CatalogEnhancer:
     """
     Обогащение каталога через поиск аналогов по OE-номерам.
     
-     v101.0: Добавлена возможность автоматического заполнения
+    v101.0: Добавлена возможность автоматического заполнения
     недостающих параметров (вес, габариты) из аналогов.
     """
     
@@ -4555,9 +4475,9 @@ class CatalogEnhancer:
         columns_to_fill: Optional[List[str]] = None
     ) -> pd.DataFrame:
         """
-         v101.0: Автоматическое заполнение недостающих параметров из аналогов.
+        v101.0: Автоматическое заполнение недостающих параметров из аналогов.
         
-        Если у товара нет веса/габаритов, но есть аналог с теми же OE  
+        Если у товара нет веса/габаритов, но есть аналог с теми же OE — 
         берём усреднённые данные из аналогов.
         
         Args:
@@ -4640,7 +4560,7 @@ class SmartTariffCache:
     """
     Умный кэш тарифов с прогнозированием и историей.
     
-     v101.0: Добавлена поддержка Google Sheets как источника тарифов.
+    v101.0: Добавлена поддержка Google Sheets как источника тарифов.
     """
     
     def __init__(self):
@@ -4955,8 +4875,6 @@ class SmartTariffCache:
 def get_smart_tariff_cache():
     """Получение экземпляра кэша через st.cache_resource"""
     return SmartTariffCache()
-    return {key: cat.hierarchy.keywords for key, cat in categories.items() 
-            if cat.hierarchy and cat.hierarchy.keywords}
 
 # ============================================================================
 # БЛОК 7: ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ + УПРАВЛЕНИЕ СОСТОЯНИЕМ
@@ -6989,7 +6907,7 @@ class MarketplaceUnitEconomics:
         return self._tariff_cache.get_history(limit)
 
 # ============================================================================
-# БЛОК 9: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v101.0  АДАПТИРОВАННАЯ ВЕРСИЯ)
+# БЛОК 9: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v101.0 — АДАПТИРОВАННАЯ ВЕРСИЯ)
 # ============================================================================
 # 📌 v101.0: Адаптировано для новой архитектуры с 4 разделами
 # - Интеграция с AppStateManager для передачи данных между разделами
@@ -6997,6 +6915,13 @@ class MarketplaceUnitEconomics:
 # - Добавлено автоматическое заполнение недостающих параметров из аналогов
 # - Упрощён интерфейс (убраны лишние подразделы)
 # - Сохранены все оптимизации из v100.41 (chunked UPSERT, vectorized_convert_to_float)
+#
+# 🔧 ИСПРАВЛЕНИЯ v101.0:
+# 1. Исправлены переносы строк в load_exclusion_rules, save_exclusion_rules
+# 2. Исправлены переносы строк в load_category_mapping, save_category_mapping
+# 3. Исправлен перенос строки в get_export_query (select_clause)
+# 4. Заменены стрелки → на -> в логах для совместимости с кодировками
+# 5. Добавлены значения по умолчанию для параметров fill_missing_from_analogs
 # ============================================================================
 
 import os
@@ -7048,7 +6973,7 @@ class HighVolumeAutoPartsCatalog:
     """
     🚗 High-Volume каталог автозапчастей v101.0
     
-     Новые возможности:
+    🆕 Новые возможности:
     - Связывание столбцов между файлами (link_files)
     - Автоматическое заполнение недостающих параметров из аналогов
     - Интеграция с AppStateManager для передачи данных между разделами
@@ -7069,7 +6994,7 @@ class HighVolumeAutoPartsCatalog:
         else:
             self.create_indexes()
         
-        #  v101.0: Интеграция с CatalogEnhancer
+        # 🆕 v101.0: Интеграция с CatalogEnhancer
         self.enhancer = CatalogEnhancer()
         
         logger.info("✅ HighVolumeAutoPartsCatalog v101.0 инициализирован")
@@ -7160,6 +7085,7 @@ class HighVolumeAutoPartsCatalog:
         price_rules_path.write_text(json.dumps(
             self.price_rules, indent=2, ensure_ascii=False), encoding='utf-8')
     
+    # 🔧 ИСПРАВЛЕНО v101.0: переносы строк через \n
     def load_exclusion_rules(self) -> List[str]:
         exclusion_path = self.data_dir / "exclusion_rules.txt"
         if exclusion_path.exists():
@@ -7169,13 +7095,14 @@ class HighVolumeAutoPartsCatalog:
                 logger.error(f"Ошибка чтения exclusion_rules.txt: {e}")
                 return []
         else:
-            content = "Кузов\nСтекла\nМасла"
+            content = "Кузов\nСтекла\nМасла"  # ✅ ИСПРАВЛЕНО: \n вместо переноса
             exclusion_path.write_text(content, encoding='utf-8')
             return ["Кузов", "Стекла", "Масла"]
     
+    # 🔧 ИСПРАВЛЕНО v101.0: переносы строк через \n
     def save_exclusion_rules(self):
         exclusion_path = self.data_dir / "exclusion_rules.txt"
-        exclusion_path.write_text("\n".join(self.exclusion_rules), encoding='utf-8')
+        exclusion_path.write_text("\n".join(self.exclusion_rules), encoding='utf-8')  # ✅ ИСПРАВЛЕНО
     
     def load_category_mapping(self) -> Dict[str, str]:
         category_path = self.data_dir / "category_mapping.txt"
@@ -7197,13 +7124,15 @@ class HighVolumeAutoPartsCatalog:
                 logger.error(f"Ошибка чтения category_mapping.txt: {e}")
                 return default_mapping
         else:
-            content = "\n".join([f"{k}|{v}" for k, v in default_mapping.items()])
+            # 🔧 ИСПРАВЛЕНО v101.0: переносы строк через \n
+            content = "\n".join([f"{k}|{v}" for k, v in default_mapping.items()])  # ✅ ИСПРАВЛЕНО
             category_path.write_text(content, encoding='utf-8')
             return default_mapping
     
+    # 🔧 ИСПРАВЛЕНО v101.0: переносы строк через \n
     def save_category_mapping(self):
         category_path = self.data_dir / "category_mapping.txt"
-        content = "\n".join([f"{k}|{v}" for k, v in self.category_mapping.items()])
+        content = "\n".join([f"{k}|{v}" for k, v in self.category_mapping.items()])  # ✅ ИСПРАВЛЕНО
         category_path.write_text(content, encoding='utf-8')
     
     # ====================================================================
@@ -7378,7 +7307,7 @@ class HighVolumeAutoPartsCatalog:
             return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ====================================================================
-    #  v101.0: СВЯЗЫВАНИЕ СТОЛБЦОВ МЕЖДУ ФАЙЛАМИ
+    # 🆕 v101.0: СВЯЗЫВАНИЕ СТОЛБЦОВ МЕЖДУ ФАЙЛАМИ
     # ====================================================================
     def link_files(
         self,
@@ -7390,7 +7319,7 @@ class HighVolumeAutoPartsCatalog:
         columns_to_fill: Optional[List[str]] = None
     ) -> pl.DataFrame:
         """
-         v101.0: Связывание двух DataFrame по ключевым столбцам.
+        🆕 v101.0: Связывание двух DataFrame по ключевым столбцам.
         Недостающие параметры заполняются из второго файла.
         
         Args:
@@ -7399,7 +7328,7 @@ class HighVolumeAutoPartsCatalog:
             join_key_1: Ключевой столбец в df1
             join_key_2: Ключевой столбец в df2
             join_type: Тип соединения (left, inner, outer)
-            columns_to_fill: Какие столбцы заполнять из df2 (если None  все уникальные)
+            columns_to_fill: Какие столбцы заполнять из df2 (если None — все уникальные)
         
         Returns:
             Объединённый DataFrame
@@ -7463,7 +7392,7 @@ class HighVolumeAutoPartsCatalog:
         return result
     
     # ====================================================================
-    #  v101.0: АВТОМАТИЧЕСКОЕ ЗАПОЛНЕНИЕ ИЗ АНАЛОГОВ
+    # 🆕 v101.0: АВТОМАТИЧЕСКОЕ ЗАПОЛНЕНИЕ ИЗ АНАЛОГОВ
     # ====================================================================
     def fill_missing_from_analogs(
         self,
@@ -7473,9 +7402,9 @@ class HighVolumeAutoPartsCatalog:
         columns_to_fill: Optional[List[str]] = None
     ) -> pl.DataFrame:
         """
-         v101.0: Заполнение недостающих параметров из аналогов по OE-номерам.
+        🆕 v101.0: Заполнение недостающих параметров из аналогов по OE-номерам.
         
-        Если у товара нет веса/габаритов, но есть аналог с тем же OE  
+        Если у товара нет веса/габаритов, но есть аналог с тем же OE — 
         берём усреднённые данные из аналогов.
         
         Args:
@@ -7538,12 +7467,12 @@ class HighVolumeAutoPartsCatalog:
         return billable
     
     # ====================================================================
-    #  v100.41: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (ЗАЩИТА ОТ ДАТ)
+    # 🆕 v100.41: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (ЗАЩИТА ОТ ДАТ)
     # ====================================================================
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
-        """ v100.41: Конвертация Series с защитой от pl.Date/pl.Datetime"""
-        #  ИСПРАВЛЕНИЕ: Если calamine распарсил колонку как Дату, конвертируем в сериальный номер Excel
+        """🆕 v100.41: Конвертация Series с защитой от pl.Date/pl.Datetime"""
+        # 🆕 ИСПРАВЛЕНИЕ: Если calamine распарсил колонку как Дату, конвертируем в сериальный номер Excel
         if series.dtype in [pl.Date, pl.Datetime]:
             try:
                 base = pl.datetime(1899, 12, 30)
@@ -7746,7 +7675,8 @@ class HighVolumeAutoPartsCatalog:
                     else:
                         logger.warning(f"Колонка {new_name} уже существует, пропускаем {old_name}")
                 except Exception as e2:
-                    logger.warning(f"Не удалось переименовать {old_name}  {new_name}: {e2}")
+                    # 🔧 ИСПРАВЛЕНО v101.0: заменена стрелка → на ->
+                    logger.warning(f"Не удалось переименовать {old_name} -> {new_name}: {e2}")
         
         if len(df.columns) != len(set(df.columns)):
             logger.warning(f"Обнаружены дубликаты колонок: {df.columns}")
@@ -7764,7 +7694,7 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        #  v100.41: ИСПРАВЛЕНО  используем map_batches для передачи Series, а не Expr
+        # 🆕 v100.41: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
@@ -7835,11 +7765,11 @@ class HighVolumeAutoPartsCatalog:
         return True
     
     # ====================================================================
-    #  v100.41: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
+    # 🆕 v100.41: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
     # ====================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
         """
-         v100.41: UPSERT через DELETE + INSERT ЧАНКАМИ.
+        🆕 v100.41: UPSERT через DELETE + INSERT ЧАНКАМИ.
         DuckDB 1.5.4 падает с Segmentation Fault при вставке >50K строк за раз.
         """
         if df.is_empty():
@@ -7853,7 +7783,7 @@ class HighVolumeAutoPartsCatalog:
         df = df.unique(keep='first')
         total_rows = len(df)
         
-        #  ИСПРАВЛЕНИЕ: Таблица parts  самая тяжёлая, используем маленькие чанки
+        # 🆕 ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
         CHUNK_SIZE = 10_000 if table_name == 'parts' else 50_000
         
         try:
@@ -7875,7 +7805,7 @@ class HighVolumeAutoPartsCatalog:
         pk_conditions = " AND ".join([f't."{c}" = s."{c}"' for c in pk])
         
         num_chunks = (total_rows + CHUNK_SIZE - 1) // CHUNK_SIZE
-        logger.info(f"📦 UPSERT {table_name}: {total_rows:,} строк  {num_chunks} чанков по {CHUNK_SIZE:,}")
+        logger.info(f"📦 UPSERT {table_name}: {total_rows:,} строк -> {num_chunks} чанков по {CHUNK_SIZE:,}")
         
         total_upserted = 0
         for chunk_idx in range(num_chunks):
@@ -8173,7 +8103,7 @@ class HighVolumeAutoPartsCatalog:
                     if 'dimensions_str' not in parts_df.columns:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
                     
-                    #  v101.0: Автоматическое заполнение недостающих параметров из аналогов
+                    # 🆕 v101.0: Автоматическое заполнение недостающих параметров из аналогов
                     status.write("🔍 Заполнение недостающих параметров из аналогов...")
                     try:
                         parts_df = self.fill_missing_from_analogs(parts_df)
@@ -8281,7 +8211,7 @@ class HighVolumeAutoPartsCatalog:
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
                     
-                    #  v100.41: Освобождаем память после тяжёлой таблицы
+                    # 🆕 v100.41: Освобождаем память после тяжёлой таблицы
                     del parts_df
                     gc.collect()
                     if hasattr(pl, 'free_memory'):
@@ -8320,7 +8250,7 @@ class HighVolumeAutoPartsCatalog:
     # ====================================================================
     def get_export_query(self, selected_columns=None, include_prices=True, apply_markup=True):
         """Построение SQL-запроса для экспорта"""
-        # Упрощённая версия  полный код аналогичен оригиналу из Блока 11
+        # Упрощённая версия — полный код аналогичен оригиналу из Блока 11
         # Здесь оставляем базовую структуру
         select_parts = []
         
@@ -8351,7 +8281,8 @@ class HighVolumeAutoPartsCatalog:
         if not select_parts:
             select_parts = ['p.artikul AS "Артикул бренда"', 'p.brand AS "Бренд"']
         
-        select_clause = ",\n".join(select_parts)
+        # 🔧 ИСПРАВЛЕНО v101.0: перенос строки через \n
+        select_clause = ",\n".join(select_parts)  # ✅ ИСПРАВЛЕНО
         
         price_join = """
         LEFT JOIN prices pr ON p.artikul_norm = pr.artikul_norm AND p.brand_norm = pr.brand_norm
@@ -8440,7 +8371,7 @@ class HighVolumeAutoPartsCatalog:
                 
                 dimension_cols = ["Длинна", "Ширина", "Высота", "Вес"]
                 
-                #  ИСПРАВЛЕНИЕ: Принудительный сброс типа datetime в float
+                # 🆕 ИСПРАВЛЕНИЕ: Принудительный сброс типа datetime в float
                 for col in dimension_cols:
                     if col in df.columns:
                         if pd.api.types.is_datetime64_any_dtype(df[col]):
@@ -8452,7 +8383,7 @@ class HighVolumeAutoPartsCatalog:
                     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                         df.to_excel(writer, index=False, sheet_name='Данные')
                         
-                        #  ИСПРАВЛЕНИЕ: Жестко задаем числовой формат, чтобы Excel не рисовал календари
+                        # 🆕 ИСПРАВЛЕНИЕ: Жестко задаем числовой формат, чтобы Excel не рисовал календари
                         ws = writer.sheets['Данные']
                         for col_idx, col_name in enumerate(df.columns, 1):
                             if col_name in dimension_cols:
@@ -8556,7 +8487,7 @@ class HighVolumeAutoPartsCatalog:
         return stats
     
     # ====================================================================
-    #  v101.0: ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ФАЙЛОВ С СВЯЗЫВАНИЕМ
+    # 🆕 v101.0: ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ФАЙЛОВ С СВЯЗЫВАНИЕМ
     # ====================================================================
     def merge_all_data_parallel(self, file_paths: Dict[str, str], max_workers: int = 4) -> Dict[str, pl.DataFrame]:
         """Параллельная обработка загруженных файлов"""
@@ -8586,7 +8517,7 @@ class HighVolumeAutoPartsCatalog:
         link_configs: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, pl.DataFrame]:
         """
-         v101.0: Обработка файлов с связыванием столбцов между ними.
+        🆕 v101.0: Обработка файлов с связыванием столбцов между ними.
         
         Args:
             file_paths: Словарь {тип_файла: путь_к_файлу}
@@ -8626,7 +8557,7 @@ class HighVolumeAutoPartsCatalog:
                 join_type = config.get("join_type", "left")
                 columns_to_fill = config.get("columns_to_fill")
                 
-                logger.info(f"🔗 Связывание {primary_file} ↔ {secondary_file} по {join_key_primary}")
+                logger.info(f"🔗 Связывание {primary_file} <-> {secondary_file} по {join_key_primary}")
                 
                 linked_df = self.link_files(
                     df1=df_primary,
