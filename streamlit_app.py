@@ -5315,24 +5315,24 @@ class AppStateManager:
     
     # Ключи session_state
     KEYS = {
-        # Раздел 1: Загрузка данных
+        # : Загрузка данных
         'section1_catalog_df': 'catalog_dataframe',
         'section1_linked_df': 'linked_dataframe',
         'section1_column_mappings': 'column_mappings',
         'section1_data_links': 'data_links',
         
-        # Раздел 2: Весогабариты и категоризация
+        # : Весогабариты и категоризация
         'section2_categorized_df': 'categorized_dataframe',
         'section2_categories_db': 'categories_db',
         'section2_classifier': 'category_classifier',
         'section2_standard_dims': 'standard_dimensions',
         
-        # Раздел 3: Тарифы
+        # : Тарифы
         'section3_tariffs': 'tariffs_config',
         'section3_google_config': 'google_sheets_config',
         'section3_tariff_cache': 'tariff_cache',
         
-        # Раздел 4: Расчёт
+        # : Расчёт
         'section4_results_df': 'calculation_results',
         'section4_abcxyz_df': 'abcxyz_results',
         'section4_metadata': 'calculation_metadata',
@@ -8574,11 +8574,11 @@ class HighVolumeAutoPartsCatalog:
         return results
 
 # ============================================================================
-# БЛОК 10: UI РАЗДЕЛ 1 "ЗАГРУЗКА ДАННЫХ" (v101.0)
+# БЛОК 10: UI  "ЗАГРУЗКА ДАННЫХ" (v101.0)
 # ============================================================================
 # 📌 v101.0: Новая архитектура с 4 разделами
-# - Раздел 1: Загрузка данных (каталог + связывание столбцов + экспорт)
-# - Интеграция с AppStateManager для передачи данных в Раздел 2
+# - : Загрузка данных (каталог + связывание столбцов + экспорт)
+# - Интеграция с AppStateManager для передачи данных в 
 # - Кнопка "Сохранить/Загрузить предыдущие расчёты"
 # - Автоматическое заполнение недостающих параметров из аналогов
 # ============================================================================
@@ -8586,11 +8586,11 @@ class HighVolumeAutoPartsCatalog:
 
 def show_section1_data_loading():
     """
-    📁 РАЗДЕЛ 1: ЗАГРУЗКА ДАННЫХ
+    📁 : ЗАГРУЗКА ДАННЫХ
     Загрузка каталога автозапчастей с возможностью связывания столбцов
     между файлами и автоматическим заполнением из аналогов.
     """
-    st.header("📁 Раздел 1: Загрузка данных")
+    st.header("📁 : Загрузка данных")
     
     st.info("""
     **🎯 ЦЕЛЬ РАЗДЕЛА:**
@@ -8602,7 +8602,7 @@ def show_section1_data_loading():
     2. Настройте связывание столбцов между файлами (если нужно)
     3. Нажмите "Обработать и загрузить"
     4. Дождитесь завершения обработки
-    5. Экспортируйте результат в CSV/Excel или переходите в Раздел 2
+    5. Экспортируйте результат в CSV/Excel или переходите в 
     
     ** v101.0:**
     - ✅ Связывание столбцов между файлами (drag-and-drop маппинг)
@@ -8888,7 +8888,7 @@ def show_section1_data_loading():
                     
                     st.success("✅ Данные успешно загружены!")
                     
-                    #  v101.0: Сохраняем в AppStateManager для передачи в Раздел 2
+                    #  v101.0: Сохраняем в AppStateManager для передачи в 
                     if 'oe' in dataframes and not dataframes['oe'].is_empty():
                         AppStateManager.set('section1_catalog_df', dataframes['oe'].to_pandas())
                     
@@ -9048,10 +9048,10 @@ def show_section1_data_loading():
                         st.rerun()
 
 # ============================================================================
-# БЛОК 11: UI РАЗДЕЛ 2 "ВЕСОГАБАРИТЫ И КАТЕГОРИЗАЦИЯ" (v101.0)
+# БЛОК 11: UI  "ВЕСОГАБАРИТЫ И КАТЕГОРИЗАЦИЯ" (v101.0)
 # ============================================================================
 # 📌 v101.0: Новая архитектура с 4 разделами
-# - Раздел 2: Весогабариты и категоризация
+# - : Весогабариты и категоризация
 # - 3-уровневая иерархия (Родитель  Группа  Подгруппа)
 # - Автоматическая категоризация по наименованию
 # - Загрузка стандартных весогабаритов из Excel
@@ -9061,11 +9061,11 @@ def show_section1_data_loading():
 
 def show_section2_categorization():
     """
-    📂 РАЗДЕЛ 2: ВЕСОГАБАРИТЫ И КАТЕГОРИЗАЦИЯ
+    📂 : ВЕСОГАБАРИТЫ И КАТЕГОРИЗАЦИЯ
     Автоматическая категоризация товаров с 3-уровневой иерархией
     и проверкой весогабаритов.
     """
-    st.header("📂 Раздел 2: Весогабариты и категоризация")
+    st.header("📂 : Весогабариты и категоризация")
     
     st.info("""
     **🎯 ЦЕЛЬ РАЗДЕЛА:**
@@ -9078,7 +9078,7 @@ def show_section2_categorization():
     2. Система автоматически определит категории по ключевым словам
     3. Проверьте весогабариты на соответствие стандартам (±20%)
     4. При необходимости загрузите справочник стандартных весогабаритов
-    5. Переходите в Раздел 3 (Тарифы) или Раздел 4 (Расчёт)
+    5. Переходите в  (Тарифы) или  (Расчёт)
     
     ** v101.0:**
     - ✅ 3-уровневая иерархия категорий
@@ -9561,8 +9561,8 @@ def show_section2_categorization():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("💾 Сохранить и перейти в Раздел 3 (Тарифы)", type="primary", key="go_to_section3"):
-                st.success("✅ Данные сохранены! Переходите в Раздел 3")
+            if st.button("💾 Сохранить и перейти в  (Тарифы)", type="primary", key="go_to_section3"):
+                st.success("✅ Данные сохранены! Переходите в ")
                 AppStateManager.set('current_section', 'section3')
         
         with col2:
@@ -9572,10 +9572,10 @@ def show_section2_categorization():
                 st.rerun()
 
 # ============================================================================
-# БЛОК 12: UI РАЗДЕЛ 3 "ТАРИФЫ" (v101.0)
+# БЛОК 12: UI  "ТАРИФЫ" (v101.0)
 # ============================================================================
 # 📌 v101.0: Новая архитектура с 4 разделами
-# - Раздел 3: Тарифы (объединяет все функции работы с тарифами)
+# - : Тарифы (объединяет все функции работы с тарифами)
 # - Умная загрузка тарифов (API/AI/Кэш/Гибрид)
 # - Google Sheets интеграция (загрузка/выгрузка тарифов)
 # - Кнопка "Обновить тарифы" для обновления юнит-экономики
@@ -9585,14 +9585,14 @@ def show_section2_categorization():
 
 def show_section3_tariffs():
     """
-    💰 РАЗДЕЛ 3: ТАРИФЫ
+    💰 : ТАРИФЫ
     Объединяет все функции работы с тарифами маркетплейсов:
     - Умная загрузка (API/AI/Кэш/Гибрид)
     - Google Sheets интеграция
     - Обновление юнит-экономики
     - Экспорт/импорт
     """
-    st.header("💰 Раздел 3: Тарифы")
+    st.header("💰 : Тарифы")
     
     st.info("""
     **🎯 ЦЕЛЬ РАЗДЕЛА:**
@@ -9603,7 +9603,7 @@ def show_section3_tariffs():
     2. Загрузите тарифы (API/AI/Кэш/Гибрид)
     3. При необходимости загрузите/выгрузите в Google Sheets
     4. Нажмите "Обновить тарифы" для применения к расчётам
-    5. Переходите в Раздел 4 (Расчёт)
+    5. Переходите в  (Расчёт)
     
     ** v101.0:**
     - ✅ Google Sheets интеграция (JSON + API)
@@ -9782,7 +9782,7 @@ def show_section3_tariffs():
                     unit_economics._apply_ai_tariffs(marketplace, rates_to_apply)
                     st.success(f"✅ Тарифы для {marketplace} применены!")
                     
-                    # Сохраняем в AppStateManager для передачи в Раздел 4
+                    # Сохраняем в AppStateManager для передачи в 
                     AppStateManager.set('section3_tariffs', {
                         'marketplace': marketplace,
                         'rates': rates_to_apply,
@@ -10067,14 +10067,14 @@ def show_section3_tariffs():
                 categorized_data = AppStateManager.get_categorized_data()
                 
                 if catalog_data is None or catalog_data.empty:
-                    st.warning("⚠️ Нет данных каталога. Перейдите в Раздел 1 и загрузите данные.")
+                    st.warning("⚠️ Нет данных каталога. Перейдите в  и загрузите данные.")
                 elif categorized_data is None or categorized_data.empty:
-                    st.warning("⚠️ Нет категоризированных данных. Перейдите в Раздел 2 и выполните категоризацию.")
+                    st.warning("⚠️ Нет категоризированных данных. Перейдите в  и выполните категоризацию.")
                 else:
                     # Пересчитываем юнит-экономику с новыми тарифами
                     # TODO: Вызов calculate_for_catalog_batch с новыми тарифами
                     st.success("✅ Юнит-экономика обновлена с новыми тарифами!")
-                    st.info("💡 Перейдите в Раздел 4 для просмотра результатов.")
+                    st.info("💡 Перейдите в  для просмотра результатов.")
                     
                     # Сохраняем метаданные
                     AppStateManager.set('section4_metadata', {
@@ -10174,8 +10174,8 @@ def show_section3_tariffs():
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("💾 Сохранить и перейти в Раздел 4 (Расчёт)", type="primary", key="go_to_section4"):
-            st.success("✅ Тарифы сохранены! Переходите в Раздел 4")
+        if st.button("💾 Сохранить и перейти в  (Расчёт)", type="primary", key="go_to_section4"):
+            st.success("✅ Тарифы сохранены! Переходите в ")
             AppStateManager.set('current_section', 'section4')
     
     with col2:
@@ -10187,7 +10187,7 @@ def show_section3_tariffs():
             st.rerun()
 
 # ============================================================================
-# БЛОК 13: UI РАЗДЕЛ 4 "РАСЧЁТ" (v101.0  ФИНАЛЬНЫЙ РАЗДЕЛ)
+# БЛОК 13: UI  "РАСЧЁТ" (v101.0  ФИНАЛЬНЫЙ РАЗДЕЛ)
 # ============================================================================
 # 📌 v101.0: Финальный раздел приложения
 # - Берёт данные из Раздела 1 (каталог) + Раздела 2 (категоризация) + Раздела 3 (тарифы)
@@ -10201,11 +10201,11 @@ def show_section3_tariffs():
 
 def show_section4_calculation():
     """
-    🧮 РАЗДЕЛ 4: РАСЧЁТ ЮНИТ-ЭКОНОМИКИ
+    🧮 : РАСЧЁТ ЮНИТ-ЭКОНОМИКИ
     Финальный раздел, который объединяет данные из всех предыдущих разделов
     и выполняет полный расчёт юнит-экономики с ABC/XYZ анализом.
     """
-    st.header("🧮 Раздел 4: Расчёт юнит-экономики")
+    st.header("🧮 : Расчёт юнит-экономики")
     
     st.info("""
     **🎯 ЦЕЛЬ РАЗДЕЛА:**
@@ -10232,13 +10232,13 @@ def show_section4_calculation():
     # ========================================================================
     st.subheader("📥 Данные из предыдущих разделов")
     
-    # Раздел 1: Каталог
+    # : Каталог
     catalog_data = AppStateManager.get_catalog_data()
     
-    # Раздел 2: Категоризация
+    # : Категоризация
     categorized_data = AppStateManager.get_categorized_data()
     
-    # Раздел 3: Тарифы
+    # : Тарифы
     tariffs_config = AppStateManager.get_tariffs_config()
     google_config = AppStateManager.get_google_config()
     
@@ -10247,21 +10247,21 @@ def show_section4_calculation():
     
     with col1:
         if catalog_data is not None and not catalog_data.empty:
-            st.success(f"✅ Раздел 1: {len(catalog_data)} товаров")
+            st.success(f"✅ : {len(catalog_data)} товаров")
         else:
-            st.error("❌ Раздел 1: Нет данных")
+            st.error("❌ : Нет данных")
     
     with col2:
         if categorized_data is not None and not categorized_data.empty:
-            st.success(f"✅ Раздел 2: {len(categorized_data)} категоризировано")
+            st.success(f"✅ : {len(categorized_data)} категоризировано")
         else:
-            st.warning("⚠️ Раздел 2: Нет категоризации")
+            st.warning("⚠️ : Нет категоризации")
     
     with col3:
         if tariffs_config is not None:
-            st.success(f"✅ Раздел 3: Тарифы загружены")
+            st.success(f"✅ : Тарифы загружены")
         else:
-            st.warning("⚠️ Раздел 3: Тарифы не настроены")
+            st.warning("⚠️ : Тарифы не настроены")
     
     # Определяем, какие данные использовать
     if categorized_data is not None and not categorized_data.empty:
@@ -10271,7 +10271,7 @@ def show_section4_calculation():
         df_base = catalog_data.copy()
         st.info(f"📊 Используем данные из Раздела 1 ({len(df_base)} товаров)")
     else:
-        st.error("❌ Нет данных для расчёта. Перейдите в Раздел 1 и загрузите каталог.")
+        st.error("❌ Нет данных для расчёта. Перейдите в  и загрузите каталог.")
         return
     
     # ========================================================================
@@ -10831,7 +10831,7 @@ def show_section4_calculation():
                 except Exception as e:
                     st.error(f"❌ Ошибка: {e}")
         else:
-            st.warning("⚠️ Google Sheets не настроен. Перейдите в Раздел 3.")
+            st.warning("⚠️ Google Sheets не настроен. Перейдите в .")
     
     # ========================================================================
     # 💾 СОХРАНЕНИЕ РАСЧЁТА
@@ -10875,9 +10875,9 @@ def show_section4_calculation():
 # ============================================================================
 # 📌 v101.0: Классы, которые используются в новом интерфейсе с 4 разделами,
 # но не были показаны в предыдущих блоках:
-# - SmartTariffLoader  умная загрузка тарифов (Раздел 3)
+# - SmartTariffLoader  умная загрузка тарифов ()
 # - DeepSeekRateUpdater  AI обновление тарифов
-# - CategoryDimensionsDB  база данных категорий с ВГ (Раздел 2)
+# - CategoryDimensionsDB  база данных категорий с ВГ ()
 # - AdvancedDimensionsValidator  валидатор весогабаритов
 # - MarketplaceAPIConnector  API коннектор маркетплейсов
 # - PerformanceManager  менеджер памяти и производительности
@@ -12710,10 +12710,10 @@ def main():
     section = st.sidebar.radio(
         "Выберите раздел:",
         [
-            "📁 Раздел 1: Загрузка данных",
-            "📂 Раздел 2: Весогабариты и категоризация",
-            "💰 Раздел 3: Тарифы",
-            "🧮 Раздел 4: Расчёт юнит-экономики",
+            "📁 : Загрузка данных",
+            "📂 : Весогабариты и категоризация",
+            "💰 : Тарифы",
+            "🧮 : Расчёт юнит-экономики",
         ],
         key="main_navigation",
     )
@@ -12721,16 +12721,16 @@ def main():
     # ========================================================================
     # ОТОБРАЖЕНИЕ ВЫБРАННОГО РАЗДЕЛА
     # ========================================================================
-    if section == "📁 Раздел 1: Загрузка данных":
+    if section == "📁 : Загрузка данных":
         show_section1_data_loading()
     
-    elif section == "📂 Раздел 2: Весогабариты и категоризация":
+    elif section == "📂 : Весогабариты и категоризация":
         show_section2_categorization()
     
-    elif section == "💰 Раздел 3: Тарифы":
+    elif section == "💰 : Тарифы":
         show_section3_tariffs()
     
-    elif section == "🧮 Раздел 4: Расчёт юнит-экономики":
+    elif section == "🧮 : Расчёт юнит-экономики":
         show_section4_calculation()
     
     # ========================================================================
