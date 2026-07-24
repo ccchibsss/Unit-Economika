@@ -586,7 +586,7 @@ class SaveLoadAction(Enum):
     RESTORE = "Восстановить"
 
 # ============================================================================
-# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses) — ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ
+# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses)  ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ
 # ============================================================================
 # 📌 v101.0: Добавлены новые классы:
 # - CategoryHierarchy (3-уровневая иерархия: Родитель  Группа  Подгруппа)
@@ -690,7 +690,7 @@ class MarketplaceConfig:
         """
         Расчёт комиссии с учётом скидок, участия в акциях и сезонности.
 # ============================================================================
-# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses) — ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ (ПРОДОЛЖЕНИЕ)
+# БЛОК 2: ДАТА-КЛАССЫ (Dataclasses)  ОСНОВНЫЕ СТРУКТУРЫ ДАННЫХ (ПРОДОЛЖЕНИЕ)
 # ============================================================================
 
 @dataclass
@@ -1017,8 +1017,8 @@ class UnitEconomicsResult:
 class ABCAnalysisResult:
     """
     v101.0: Результат ABC/XYZ анализа
-    ABC — по маржинальности и прибыли
-    XYZ — по стабильности (коэффициент вариации)
+    ABC  по маржинальности и прибыли
+    XYZ  по стабильности (коэффициент вариации)
     """
     article: str
     brand: str
@@ -1231,15 +1231,15 @@ class AutoPartsSpecificCosts:
         return money_round(total)
 
 # ============================================================================
-# БЛОК 3: УТИЛИТЫ — ВАЛИДАЦИЯ, ПАРСИНГ, РАСЧЁТЫ
+# БЛОК 3: УТИЛИТЫ  ВАЛИДАЦИЯ, ПАРСИНГ, РАСЧЁТЫ
 # ============================================================================
 # 📌 v101.0: Добавлены новые утилиты:
-# - abc_analysis() / xyz_analysis() — ABC/XYZ анализ по маржинальности и прибыли
-# - link_columns_between_files() — связывание столбцов между файлами
-# - save_state() / load_state() — сохранение/загрузка состояния расчётов
-# - google_sheets_upload() / google_sheets_download() — интеграция с Google Sheets
-# - detect_mojibake() / fix_double_utf8() — исправление кракозябр
-# - calculate_recommended_min_price() — расчёт минимальной цены для безубыточности
+# - abc_analysis() / xyz_analysis()  ABC/XYZ анализ по маржинальности и прибыли
+# - link_columns_between_files()  связывание столбцов между файлами
+# - save_state() / load_state()  сохранение/загрузка состояния расчётов
+# - google_sheets_upload() / google_sheets_download()  интеграция с Google Sheets
+# - detect_mojibake() / fix_double_utf8()  исправление кракозябр
+# - calculate_recommended_min_price()  расчёт минимальной цены для безубыточности
 # ============================================================================
 
 
@@ -1276,10 +1276,10 @@ def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> fl
     base = cfg["base"]
     
     if base == "revenue":
-        # УСН 6%, НПД 6% — от выручки
+        # УСН 6%, НПД 6%  от выручки
         return money_round(price * cfg["rate"])
     elif base == "profit":
-        # УСН 15%, ОСН — от прибыли
+        # УСН 15%, ОСН  от прибыли
         profit = price - cost
         tax = profit * cfg["rate"]
         # Для УСН 15% есть минимальный налог 1% от выручки
@@ -1288,7 +1288,7 @@ def calculate_tax(price: float, cost: float, tax_system: str = "УСН_6") -> fl
             tax = max(tax, min_tax)
         return money_round(max(0, tax))
     elif base == "fixed":
-        # ПСН — фиксированный платёж, не зависит от продажи
+        # ПСН  фиксированный платёж, не зависит от продажи
         return 0.0
     return 0.0
 
@@ -1442,7 +1442,7 @@ def calculate_advertising_cost(
     ad_intensity: str = "medium"
 ) -> float:
     """
-    Рекламные расходы (ДРР — доля рекламных расходов).
+    Рекламные расходы (ДРР  доля рекламных расходов).
     Для конкурентных категорий (масла, фильтры, колодки) интенсивность повышается.
     """
     drr_rates = {
@@ -1468,7 +1468,7 @@ def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
     """
     Парсит "человеческий" ввод размеров в формат (длина, ширина, высота).
     Поддерживает разделители: x, *, х, ×, пробел, запятая.
-    Результат сортируется по убыванию (большая сторона — первая).
+    Результат сортируется по убыванию (большая сторона  первая).
     
     Примеры:
         "20x15x10"  (20.0, 15.0, 10.0)
@@ -1499,7 +1499,7 @@ def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
                         return tuple(dimensions)
                 except (ValueError, TypeError):
                     pass
-            # Если нашли ровно 2 числа — считаем высоту = 1
+            # Если нашли ровно 2 числа  считаем высоту = 1
             if len(parts) == 2:
                 try:
                     nums = []
@@ -1891,11 +1891,11 @@ def validate_input_data(df: pd.DataFrame) -> Tuple[bool, List[str]]:
             errors.append(f"⚠️ {negative_prices} товаров с ценой ≤ 0")
         suspicious = (df['Цена'] < 50).sum()
         if suspicious > 0:
-            errors.append(f"⚠️ {suspicious} товаров дешевле 50₽ — проверьте")
+            errors.append(f"⚠️ {suspicious} товаров дешевле 50₽  проверьте")
     if 'Длина' in df.columns:
         missing_dims = df['Длина'].isna().sum()
         if missing_dims > len(df) * 0.3:
-            errors.append(f"⚠️ У {missing_dims} товаров нет габаритов — логистика будет неточной")
+            errors.append(f"⚠️ У {missing_dims} товаров нет габаритов  логистика будет неточной")
     return len(errors) == 0, errors
 
 
@@ -2085,7 +2085,7 @@ def xyz_analysis(
     - Y: CV 0.5-1.0 (умеренные)
     - Z: CV > 1.0 (нестабильные)
     
-    Если данных по периодам нет — возвращает 'X' для всех.
+    Если данных по периодам нет  возвращает 'X' для всех.
     """
     if df.empty:
         return df
@@ -2164,26 +2164,26 @@ def abcxyz_combined_analysis(
         margin = row.get(margin_col, 0)
         
         if abcxyz == 'AX':
-            recs.append("⭐ Звезда — поддерживать и масштабировать")
+            recs.append("⭐ Звезда  поддерживать и масштабировать")
         elif abcxyz == 'AY':
-            recs.append("💪 Сильный середняк — оптимизировать логистику")
+            recs.append("💪 Сильный середняк  оптимизировать логистику")
         elif abcxyz == 'AZ':
-            recs.append("⚠️ Высокая маржа, но нестабильно — анализировать спрос")
+            recs.append("⚠️ Высокая маржа, но нестабильно  анализировать спрос")
         elif abcxyz in ['BX', 'BY']:
-            recs.append("📊 Рабочая лошадка — стандартное управление")
+            recs.append("📊 Рабочая лошадка  стандартное управление")
         elif abcxyz == 'BZ':
             recs.append("🔍 Пересмотреть ценообразование")
         elif abcxyz == 'CX':
-            recs.append("📉 Низкая маржа, стабильный спрос — поднять цену")
+            recs.append("📉 Низкая маржа, стабильный спрос  поднять цену")
         elif abcxyz == 'CY':
-            recs.append("⚠️ Кандидат на вывод — оптимизировать или убрать")
+            recs.append("⚠️ Кандидат на вывод  оптимизировать или убрать")
         elif abcxyz == 'CZ':
-            recs.append("🗑️ Аутсайдер — рассмотреть вывод из ассортимента")
+            recs.append("🗑️ Аутсайдер  рассмотреть вывод из ассортимента")
         
         if margin < 0:
-            recs.append("❌ Убыточный товар — срочно пересмотреть цену")
+            recs.append("❌ Убыточный товар  срочно пересмотреть цену")
         elif margin < 10:
-            recs.append("💰 Маржа ниже 10% — увеличить наценку")
+            recs.append("💰 Маржа ниже 10%  увеличить наценку")
         
         return "; ".join(recs) if recs else "Стандартное управление"
     
@@ -2287,7 +2287,7 @@ def link_columns_between_files(
         join_key_1: Ключевой столбец в df1
         join_key_2: Ключевой столбец в df2
         join_type: Тип соединения (left, inner, outer)
-        columns_to_fill: Какие столбцы заполнять из df2 (если None — все уникальные)
+        columns_to_fill: Какие столбцы заполнять из df2 (если None  все уникальные)
         auto_fill_from_analogs: Автоматически подставлять данные из аналогов
     
     Returns:
@@ -2319,7 +2319,7 @@ def link_columns_between_files(
     
     # Выбираем только нужные столбцы из df2
     df2_subset = df2_work[['_join_key'] + columns_to_fill].copy()
-    # Убираем дубликаты — берём первые значения
+    # Убираем дубликаты  берём первые значения
     df2_subset = df2_subset.drop_duplicates(subset=['_join_key'], keep='first')
     
     # Соединяем
@@ -2357,7 +2357,7 @@ def fill_missing_from_analogs(
 ) -> pd.DataFrame:
     """
     Заполнение недостающих параметров из аналогов по OE-номерам.
-    Если у товара нет веса/габаритов, но есть аналог с тем же OE — берём усреднённые данные.
+    Если у товара нет веса/габаритов, но есть аналог с тем же OE  берём усреднённые данные.
     """
     if df.empty or cross_references is None or cross_references.empty:
         return df
@@ -2716,7 +2716,7 @@ def google_sheets_download(
             logger.warning("⚠️ Лист пустой")
             return pd.DataFrame()
         
-        # Первая строка — заголовки
+        # Первая строка  заголовки
         headers = values[0]
         data = values[1:]
         
@@ -2802,7 +2802,7 @@ def retry_decorator(
 
 
 def safe_execution(default_return: Any = None, log_error: bool = True) -> Callable:
-    """Декоратор безопасного выполнения — ловит все исключения"""
+    """Декоратор безопасного выполнения  ловит все исключения"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -2906,7 +2906,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
     - Сезонные коэффициенты
     - Мультипликаторы режимов
     
-    Если в кэше есть более свежие данные — они применяются поверх базовых.
+    Если в кэше есть более свежие данные  они применяются поверх базовых.
     """
     configs = {}
     
@@ -2950,7 +2950,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             "FBY": 0.75, "FBS": 1.0, "FBO": 0.8,
             "DBS": 1.3, "FBP": 0.9, "RealFBS": 1.1
         },
-        description="Ozon — крупнейший маркетплейс России",
+        description="Ozon  крупнейший маркетплейс России",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -2975,7 +2975,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         fragile_surcharge=0.015,
         oversized_surcharge=0.02,
         seasonal_multipliers={
-            "winter": 1.2,    # Высокий сезон — Новый год
+            "winter": 1.2,    # Высокий сезон  Новый год
             "spring": 1.0,
             "summer": 0.95,
             "autumn": 1.05
@@ -2997,7 +2997,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             "FBY": 0.75, "FBS": 1.15, "FBO": 1.1,
             "DBS": 1.25, "FBP": 1.0, "RealFBS": 1.2
         },
-        description="Wildberries — лидер e-commerce России",
+        description="Wildberries  лидер e-commerce России",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3044,7 +3044,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             "FBY": 0.75, "FBS": 1.0, "FBO": 0.8,
             "DBS": 1.3, "FBP": 0.9, "RealFBS": 1.1
         },
-        description="Яндекс Маркет — маркетплейс экосистемы Яндекса",
+        description="Яндекс Маркет  маркетплейс экосистемы Яндекса",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3090,7 +3090,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             "FBY": 0.75, "FBS": 1.2, "FBO": 1.1,
             "DBS": 1.3, "FBP": 0.9, "RealFBS": 1.25
         },
-        description="AliExpress — международный маркетплейс",
+        description="AliExpress  международный маркетплейс",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3136,7 +3136,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             "FBY": 0.75, "FBS": 1.1, "FBO": 1.05,
             "DBS": 1.2, "FBP": 0.95, "RealFBS": 1.15
         },
-        description="Мегамаркет (Сбер) — маркетплейс экосистемы Сбера",
+        description="Мегамаркет (Сбер)  маркетплейс экосистемы Сбера",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3183,7 +3183,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
             "FBY": 0.75, "FBS": 1.1, "FBO": 1.05,
             "DBS": 1.2, "FBP": 0.95, "RealFBS": 1.15
         },
-        description="СберМегаМаркет — маркетплейс Сбера",
+        description="СберМегаМаркет  маркетплейс Сбера",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3195,7 +3195,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         name="Avito",
         commission_rate=0.05,        # Минимальная комиссия
         min_commission=0.0,
-        logistics_base=0.0,          # Avito — доска объявлений, логистика опциональна
+        logistics_base=0.0,          # Avito  доска объявлений, логистика опциональна
         logistics_per_kg=0.0,
         logistics_per_liter=0.0,
         storage_per_day=0.0,
@@ -3209,7 +3209,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         seasonal_multipliers={},
         category_rates={},
         mode_multipliers={"RealFBS": 1.0},
-        description="Avito — доска объявлений",
+        description="Avito  доска объявлений",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3235,7 +3235,7 @@ def get_marketplace_configs_2026() -> Dict[str, MarketplaceConfig]:
         seasonal_multipliers={},
         category_rates={},
         mode_multipliers={"RealFBS": 1.0},
-        description="Drom — площадка для автотоваров",
+        description="Drom  площадка для автотоваров",
         version="2026.1",
         tariff_source=TariffSource.HARDCODED
     )
@@ -3302,7 +3302,7 @@ def get_auto_parts_categories_full() -> Dict[str, ProductCategory]:
         Родитель (Автозапчасти)  Группа (Подвеска)  Подгруппа (Сайлентблоки)
     
     Returns:
-        Dict[str, ProductCategory] — словарь всех категорий
+        Dict[str, ProductCategory]  словарь всех категорий
     """
     categories = {}
     
@@ -4197,7 +4197,7 @@ def get_category_hierarchy_map() -> Dict[str, CategoryHierarchy]:
     Быстрый доступ к иерархиям всех категорий.
     
     Returns:
-        Dict[str, CategoryHierarchy] — {ключ_категории: иерархия}
+        Dict[str, CategoryHierarchy]  {ключ_категории: иерархия}
     """
     categories = get_auto_parts_categories_full()
     return {key: cat.hierarchy for key, cat in categories.items() if cat.hierarchy}
@@ -4208,7 +4208,7 @@ def get_category_keywords_map() -> Dict[str, List[str]]:
     Карта ключевых слов для автокатегоризации.
     
     Returns:
-        Dict[str, List[str]] — {ключ_категории: [ключевые слова]}
+        Dict[str, List[str]]  {ключ_категории: [ключевые слова]}
     """
     categories = get_auto_parts_categories_full()
 
@@ -4216,9 +4216,9 @@ def get_category_keywords_map() -> Dict[str, List[str]]:
 # БЛОК 6: ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
 # ============================================================================
 # 📌 v101.0: Добавлены новые классы:
-# - CategoryClassifier — 3-уровневая ML-классификация (Родитель/Группа/Подгруппа)
-# - CatalogEnhancer — обогащение каталога через поиск аналогов по OE
-# - SmartTariffCache — умный кэш тарифов с прогнозированием
+# - CategoryClassifier  3-уровневая ML-классификация (Родитель/Группа/Подгруппа)
+# - CatalogEnhancer  обогащение каталога через поиск аналогов по OE
+# - SmartTariffCache  умный кэш тарифов с прогнозированием
 # ============================================================================
 
 
@@ -4232,8 +4232,8 @@ class CategoryClassifier:
     
     Логика:
     1. Сначала ищет по ключевым словам в справочнике категорий (Блок 5)
-    2. Если не нашёл — использует ML-модель (если обучена)
-    3. Если и ML не помог — возвращает "Прочее"
+    2. Если не нашёл  использует ML-модель (если обучена)
+    3. Если и ML не помог  возвращает "Прочее"
     
     Возвращает:
     - parent: Родитель (например, "Автозапчасти")
@@ -4268,7 +4268,7 @@ class CategoryClassifier:
         Предсказание категории по названию.
         
         Returns:
-            (category_key, confidence) — ключ категории и уверенность
+            (category_key, confidence)  ключ категории и уверенность
         """
         if not text:
             return ("прочее", 0.0)
@@ -4281,7 +4281,7 @@ class CategoryClassifier:
         for cat_key, keywords in self.keywords_map.items():
             for keyword in keywords:
                 if keyword.lower() in text_lower:
-                    # Чем длиннее совпадение — тем точнее
+                    # Чем длиннее совпадение  тем точнее
                     score = len(keyword) / max(len(text_lower), 1)
                     if score > best_score:
                         best_score = score
@@ -4558,7 +4558,7 @@ class CatalogEnhancer:
         """
          v101.0: Автоматическое заполнение недостающих параметров из аналогов.
         
-        Если у товара нет веса/габаритов, но есть аналог с теми же OE — 
+        Если у товара нет веса/габаритов, но есть аналог с теми же OE  
         берём усреднённые данные из аналогов.
         
         Args:
@@ -4963,9 +4963,9 @@ def get_smart_tariff_cache():
 # БЛОК 7: ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ + УПРАВЛЕНИЕ СОСТОЯНИЕМ
 # ============================================================================
 # 📌 v101.0: Адаптировано для новой архитектуры с 4 разделами
-# - PersistentHistoryDB — хранение истории расчётов в DuckDB/SQLite
-# - AppStateManager — управление состоянием приложения между разделами
-# - SaveLoadManager — сохранение/загрузка расчётов одной кнопкой
+# - PersistentHistoryDB  хранение истории расчётов в DuckDB/SQLite
+# - AppStateManager  управление состоянием приложения между разделами
+# - SaveLoadManager  сохранение/загрузка расчётов одной кнопкой
 # ============================================================================
 
 
@@ -5204,7 +5204,7 @@ class PersistentHistoryDB:
             return []
     
     def _migrate_database(self):
-        """Автоматическая миграция БД — добавление новых колонок"""
+        """Автоматическая миграция БД  добавление новых колонок"""
         if self.conn is None:
             return
         
@@ -6084,7 +6084,7 @@ class MarketplaceUnitEconomics:
             width = parsed_width
             height = parsed_height
         
-        # Если габариты не указаны, но есть категория — берём из категории
+        # Если габариты не указаны, но есть категория  берём из категории
         if all([length == 0, width == 0, height == 0, weight == 0]) and category:
             length, width, height, weight = self.calculate_dimensions_from_category(category)
         
@@ -6990,7 +6990,7 @@ class MarketplaceUnitEconomics:
         return self._tariff_cache.get_history(limit)
 
 # ============================================================================
-# БЛОК 9: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v101.0 — АДАПТИРОВАННАЯ ВЕРСИЯ)
+# БЛОК 9: HIGH-VOLUME КАТАЛОГ АВТОЗАПЧАСТЕЙ (v101.0  АДАПТИРОВАННАЯ ВЕРСИЯ)
 # ============================================================================
 # 📌 v101.0: Адаптировано для новой архитектуры с 4 разделами
 # - Интеграция с AppStateManager для передачи данных между разделами
@@ -7400,7 +7400,7 @@ class HighVolumeAutoPartsCatalog:
             join_key_1: Ключевой столбец в df1
             join_key_2: Ключевой столбец в df2
             join_type: Тип соединения (left, inner, outer)
-            columns_to_fill: Какие столбцы заполнять из df2 (если None — все уникальные)
+            columns_to_fill: Какие столбцы заполнять из df2 (если None  все уникальные)
         
         Returns:
             Объединённый DataFrame
@@ -7476,7 +7476,7 @@ class HighVolumeAutoPartsCatalog:
         """
          v101.0: Заполнение недостающих параметров из аналогов по OE-номерам.
         
-        Если у товара нет веса/габаритов, но есть аналог с тем же OE — 
+        Если у товара нет веса/габаритов, но есть аналог с тем же OE  
         берём усреднённые данные из аналогов.
         
         Args:
@@ -7765,7 +7765,7 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        #  v100.41: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
+        #  v100.41: ИСПРАВЛЕНО  используем map_batches для передачи Series, а не Expr
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
@@ -7854,7 +7854,7 @@ class HighVolumeAutoPartsCatalog:
         df = df.unique(keep='first')
         total_rows = len(df)
         
-        #  ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
+        #  ИСПРАВЛЕНИЕ: Таблица parts  самая тяжёлая, используем маленькие чанки
         CHUNK_SIZE = 10_000 if table_name == 'parts' else 50_000
         
         try:
@@ -8321,7 +8321,7 @@ class HighVolumeAutoPartsCatalog:
     # ====================================================================
     def get_export_query(self, selected_columns=None, include_prices=True, apply_markup=True):
         """Построение SQL-запроса для экспорта"""
-        # Упрощённая версия — полный код аналогичен оригиналу из Блока 11
+        # Упрощённая версия  полный код аналогичен оригиналу из Блока 11
         # Здесь оставляем базовую структуру
         select_parts = []
         
@@ -8845,7 +8845,7 @@ def show_section1_data_loading():
             недостающие параметры (вес, габариты) из аналогов.
             
             **📋 ПРИМЕР:**
-            Если в файле "OE" нет веса, но в файле "Габариты" вес есть —
+            Если в файле "OE" нет веса, но в файле "Габариты" вес есть 
             система автоматически подставит его по артикулу.
             """)
             
@@ -9178,9 +9178,9 @@ def show_section2_categorization():
     
     st.info("""
     **📋 ТРЕБОВАНИЯ К ФАЙЛУ:**
-    - **Артикул** (обязательно) — уникальный идентификатор товара
-    - **Наименование** (обязательно) — название товара для категоризации
-    - **Длина, Ширина, Высота, Вес** (опционально) — для проверки ВГ
+    - **Артикул** (обязательно)  уникальный идентификатор товара
+    - **Наименование** (обязательно)  название товара для категоризации
+    - **Длина, Ширина, Высота, Вес** (опционально)  для проверки ВГ
     
     💡 **ИЛИ** используйте данные из Раздела 1 (если они уже загружены).
     """)
@@ -9366,7 +9366,7 @@ def show_section2_categorization():
         чтобы проверить фактические размеры товаров на соответствие.
         
         **📋 ТРЕБОВАНИЯ К ФАЙЛУ:**
-        - **Категория** (обязательно) — название категории
+        - **Категория** (обязательно)  название категории
         - **Длина (см)** (обязательно)
         - **Ширина (см)** (обязательно)
         - **Высота (см)** (обязательно)
@@ -9466,12 +9466,12 @@ def show_section2_categorization():
         **📋 ЛОГИКА ПРОВЕРКИ:**
         - Сравниваем фактические размеры товаров со стандартными для их категории
         - Допустимое отклонение: ±20%
-        - Проверка **не строгая** — только дополнительная информация
-        - Если у товара нет размеров — пропускаем
+        - Проверка **не строгая**  только дополнительная информация
+        - Если у товара нет размеров  пропускаем
         
         💡 **ПРИМЕР:**
         Если стандартный вес для "Фильтры" = 0.5 кг, а у товара = 0.7 кг,
-        то отклонение = 40% — это больше 20%, система выдаст предупреждение.
+        то отклонение = 40%  это больше 20%, система выдаст предупреждение.
         """)
         
         # Проверяем, есть ли колонки с размерами
@@ -10257,7 +10257,7 @@ def show_section3_tariffs():
             st.rerun()
 
 # ============================================================================
-# БЛОК 13: UI РАЗДЕЛ 4 "РАСЧЁТ" (v101.0 — ФИНАЛЬНЫЙ РАЗДЕЛ)
+# БЛОК 13: UI РАЗДЕЛ 4 "РАСЧЁТ" (v101.0  ФИНАЛЬНЫЙ РАЗДЕЛ)
 # ============================================================================
 # 📌 v101.0: Финальный раздел приложения
 # - Берёт данные из Раздела 1 (каталог) + Раздела 2 (категоризация) + Раздела 3 (тарифы)
@@ -10637,18 +10637,18 @@ def show_section4_calculation():
     **📋 ЛОГИКА ABC/XYZ АНАЛИЗА:**
     
     **ABC (по маржинальности и прибыли):**
-    - **A** — маржа ≥ 25% ИЛИ вклад в прибыль ≥ 70% (топ-товары)
-    - **B** — маржа ≥ 15% ИЛИ вклад в прибыль 20-70% (середняки)
-    - **C** — маржа < 15% (аутсайдеры)
+    - **A**  маржа ≥ 25% ИЛИ вклад в прибыль ≥ 70% (топ-товары)
+    - **B**  маржа ≥ 15% ИЛИ вклад в прибыль 20-70% (середняки)
+    - **C**  маржа < 15% (аутсайдеры)
     
     **XYZ (по стабильности прибыли):**
-    - **X** — CV < 0.5 (стабильные)
-    - **Y** — CV 0.5-1.0 (умеренные)
-    - **Z** — CV > 1.0 (нестабильные)
+    - **X**  CV < 0.5 (стабильные)
+    - **Y**  CV 0.5-1.0 (умеренные)
+    - **Z**  CV > 1.0 (нестабильные)
     
     **Комбинации:**
-    - **AX** — ⭐ Звезда (высокая маржа + стабильность)
-    - **CZ** — 🗑️ Аутсайдер (низкая маржа + нестабильность)
+    - **AX**  ⭐ Звезда (высокая маржа + стабильность)
+    - **CZ**  🗑️ Аутсайдер (низкая маржа + нестабильность)
     """)
     
     if st.button("🚀 Выполнить ABC/XYZ анализ", key="abcxyz_btn"):
@@ -10778,7 +10778,7 @@ def show_section4_calculation():
     **📋 ЛОГИКА РЕКОМЕНДАЦИЙ:**
     - Система анализирует каждый товар
     - Рассчитывает минимальную цену для безубыточности
-    - Если текущая цена ниже рекомендованной — выдаёт предупреждение
+    - Если текущая цена ниже рекомендованной  выдаёт предупреждение
     - Предлагает оптимальную цену для достижения маржи 20%
     """)
     
@@ -10945,12 +10945,12 @@ def show_section4_calculation():
 # ============================================================================
 # 📌 v101.0: Классы, которые используются в новом интерфейсе с 4 разделами,
 # но не были показаны в предыдущих блоках:
-# - SmartTariffLoader — умная загрузка тарифов (Раздел 3)
-# - DeepSeekRateUpdater — AI обновление тарифов
-# - CategoryDimensionsDB — база данных категорий с ВГ (Раздел 2)
-# - AdvancedDimensionsValidator — валидатор весогабаритов
-# - MarketplaceAPIConnector — API коннектор маркетплейсов
-# - PerformanceManager — менеджер памяти и производительности
+# - SmartTariffLoader  умная загрузка тарифов (Раздел 3)
+# - DeepSeekRateUpdater  AI обновление тарифов
+# - CategoryDimensionsDB  база данных категорий с ВГ (Раздел 2)
+# - AdvancedDimensionsValidator  валидатор весогабаритов
+# - MarketplaceAPIConnector  API коннектор маркетплейсов
+# - PerformanceManager  менеджер памяти и производительности
 # ============================================================================
 
 
@@ -11091,7 +11091,7 @@ class MarketplaceAPIConnector:
 class DeepSeekRateUpdater:
     """
     🤖 Обновление тарифов через DeepSeek AI.
-    Заглушка — работает без API-ключа, возвращает базовые тарифы из конфигурации.
+    Заглушка  работает без API-ключа, возвращает базовые тарифы из конфигурации.
     При наличии API-ключа может быть расширена реальными запросами к DeepSeek.
     """
     
@@ -11113,7 +11113,7 @@ class DeepSeekRateUpdater:
     ) -> Tuple[Optional[Dict[str, Any]], TariffSource, Optional[Dict[str, Any]]]:
         """
         Возвращает тарифы для указанного маркетплейса.
-        В режиме заглушки — возвращает базовые тарифы из конфигурации 2026.
+        В режиме заглушки  возвращает базовые тарифы из конфигурации 2026.
         """
         try:
             configs = get_marketplace_configs_2026()
@@ -11352,7 +11352,7 @@ class SmartTariffLoader:
     
     def _load_hybrid(self, marketplace: str, api_key: str,
                      client_id: str, result: Dict, force_refresh: bool) -> Dict:
-        """Гибридный режим: сначала API, если нет — AI, если нет — кэш"""
+        """Гибридный режим: сначала API, если нет  AI, если нет  кэш"""
         result["source_used"] = "Hybrid"
         result["warnings"].append("🔄 Используется гибридный режим загрузки")
         
@@ -12143,7 +12143,7 @@ class GoogleSheetsManager:
             if not values:
                 return pd.DataFrame()
             
-            # Первая строка — заголовки
+            # Первая строка  заголовки
             headers = values[0]
             data = values[1:]
             
