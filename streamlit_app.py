@@ -1467,7 +1467,7 @@ def calculate_advertising_cost(
 def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
     """
     Парсит "человеческий" ввод размеров в формат (длина, ширина, высота).
-    Поддерживает разделители: x, *, х, ×, пробел, запятая.
+    Поддерживает разделители: x, *, х, , пробел, запятая.
     Результат сортируется по убыванию (большая сторона  первая).
     
     Примеры:
@@ -1478,7 +1478,7 @@ def parse_dimensions_string(dim_str: str) -> Tuple[float, float, float]:
     if not dim_str or not isinstance(dim_str, str):
         return 0.0, 0.0, 0.0
     dim_str = dim_str.lower().strip()
-    separators = ['x', '*', 'х', '×', ' ', ',']
+    separators = ['x', '*', 'х', '', ' ', ',']
     for sep in separators:
         if sep in dim_str:
             parts = [p.strip() for p in dim_str.split(sep) if p.strip()]
