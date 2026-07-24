@@ -840,7 +840,7 @@ class ProductDimensions:
 @dataclass
 class CategoryHierarchy:
     """
-    🆕 v101.0: 3-уровневая иерархия категорий
+    v101.0: 3-уровневая иерархия категорий
     Родитель → Группа → Подгруппа
     Пример: Автозапчасти → Подвеска → Сайлентблоки
     """
@@ -974,7 +974,7 @@ class UnitEconomicsResult:
     billable_weight: float = 0.0
     advertising_cost: float = 0.0
     auto_parts_specific: float = 0.0
-    # 🆕 v101.0: ABC/XYZ поля
+    # v101.0: ABC/XYZ поля
     abc_category: str = ""
     xyz_category: str = ""
     abcxyz_category: str = ""
@@ -1016,7 +1016,7 @@ class UnitEconomicsResult:
 @dataclass
 class ABCAnalysisResult:
     """
-    🆕 v101.0: Результат ABC/XYZ анализа
+    v101.0: Результат ABC/XYZ анализа
     ABC — по маржинальности и прибыли
     XYZ — по стабильности (коэффициент вариации)
     """
@@ -1040,7 +1040,7 @@ class ABCAnalysisResult:
 @dataclass
 class ColumnMapping:
     """
-    🆕 v101.0: Маппинг столбцов между файлами
+     v101.0: Маппинг столбцов между файлами
     Используется для связывания данных из разных источников
     """
     source_file: str
@@ -1066,7 +1066,7 @@ class ColumnMapping:
 @dataclass
 class DataLinkConfig:
     """
-    🆕 v101.0: Конфигурация связывания данных между файлами
+     v101.0: Конфигурация связывания данных между файлами
     """
     link_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
@@ -1099,7 +1099,7 @@ class DataLinkConfig:
 @dataclass
 class GoogleSheetsConfig:
     """
-    🆕 v101.0: Конфигурация Google Sheets
+     v101.0: Конфигурация Google Sheets
     """
     credentials_json: str = ""  # Путь к JSON-файлу или содержимое
     spreadsheet_id: str = ""
@@ -1131,7 +1131,7 @@ class GoogleSheetsConfig:
 @dataclass
 class SaveLoadState:
     """
-    🆕 v101.0: Состояние сохранения/загрузки расчётов
+     v101.0: Состояние сохранения/загрузки расчётов
     """
     state_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
@@ -4228,7 +4228,7 @@ def get_category_keywords_map() -> Dict[str, List[str]]:
 
 class CategoryClassifier:
     """
-    🆕 v101.0: Классификатор категорий с 3-уровневой иерархией.
+     v101.0: Классификатор категорий с 3-уровневой иерархией.
     
     Логика:
     1. Сначала ищет по ключевым словам в справочнике категорий (Блок 5)
@@ -4305,7 +4305,7 @@ class CategoryClassifier:
     
     def predict_hierarchy(self, text: str) -> Dict[str, str]:
         """
-        🆕 v101.0: Предсказание полной иерархии (Родитель/Группа/Подгруппа).
+         v101.0: Предсказание полной иерархии (Родитель/Группа/Подгруппа).
         
         Returns:
             {"parent": "...", "group": "...", "subgroup": "...", "confidence": 0.0}
@@ -4336,7 +4336,7 @@ class CategoryClassifier:
         name_col: str = "Наименование"
     ) -> pd.DataFrame:
         """
-        🆕 v101.0: Классификация всего DataFrame.
+         v101.0: Классификация всего DataFrame.
         Добавляет колонки: parent_category, group_category, subgroup_category, category_key, confidence
         """
         if df.empty or name_col not in df.columns:
@@ -4412,7 +4412,7 @@ class CatalogEnhancer:
     """
     Обогащение каталога через поиск аналогов по OE-номерам.
     
-    🆕 v101.0: Добавлена возможность автоматического заполнения
+     v101.0: Добавлена возможность автоматического заполнения
     недостающих параметров (вес, габариты) из аналогов.
     """
     
@@ -4556,7 +4556,7 @@ class CatalogEnhancer:
         columns_to_fill: Optional[List[str]] = None
     ) -> pd.DataFrame:
         """
-        🆕 v101.0: Автоматическое заполнение недостающих параметров из аналогов.
+         v101.0: Автоматическое заполнение недостающих параметров из аналогов.
         
         Если у товара нет веса/габаритов, но есть аналог с теми же OE — 
         берём усреднённые данные из аналогов.
@@ -4641,7 +4641,7 @@ class SmartTariffCache:
     """
     Умный кэш тарифов с прогнозированием и историей.
     
-    🆕 v101.0: Добавлена поддержка Google Sheets как источника тарифов.
+     v101.0: Добавлена поддержка Google Sheets как источника тарифов.
     """
     
     def __init__(self):
@@ -5071,7 +5071,7 @@ class PersistentHistoryDB:
                         advertising_cost DOUBLE DEFAULT 0.0,
                         auto_parts_specific DOUBLE DEFAULT 0.0,
                         calculation_id VARCHAR,
-                        -- 🆕 v101.0: ABC/XYZ поля
+                        --  v101.0: ABC/XYZ поля
                         abc_category VARCHAR,
                         xyz_category VARCHAR,
                         abcxyz_category VARCHAR,
@@ -5152,7 +5152,7 @@ class PersistentHistoryDB:
                 self.conn.execute("CREATE INDEX IF NOT EXISTS idx_history_article ON calculation_history(article)")
                 self.conn.commit()
             
-            # 🆕 v101.0: Таблица сохранённых состояний
+            #  v101.0: Таблица сохранённых состояний
             if self.use_duckdb:
                 self.conn.execute("""
                     CREATE TABLE IF NOT EXISTS saved_states (
@@ -5211,7 +5211,7 @@ class PersistentHistoryDB:
         try:
             db_columns = self._get_db_columns()
             
-            # 🆕 v101.0: Новые колонки для ABC/XYZ и категоризации
+            #  v101.0: Новые колонки для ABC/XYZ и категоризации
             new_columns = {
                 'abc_category': 'VARCHAR' if self.use_duckdb else 'TEXT',
                 'xyz_category': 'VARCHAR' if self.use_duckdb else 'TEXT',
@@ -5392,7 +5392,7 @@ class PersistentHistoryDB:
 
 class AppStateManager:
     """
-    🆕 v101.0: Менеджер состояния приложения.
+     v101.0: Менеджер состояния приложения.
     Управляет передачей данных между 4 разделами через st.session_state.
     """
     
@@ -5488,7 +5488,7 @@ class AppStateManager:
 
 class SaveLoadManager:
     """
-    🆕 v101.0: Менеджер сохранения и загрузки расчётов.
+     v101.0: Менеджер сохранения и загрузки расчётов.
     Позволяет сохранить текущее состояние одной кнопкой и загрузить его позже.
     """
     
@@ -5709,7 +5709,7 @@ class MarketplaceUnitEconomics:
     """
     🚗 Основной класс для расчёта юнит-экономики автозапчастей.
     
-    🆕 v101.0: Новые возможности:
+     v101.0: Новые возможности:
     - ABC/XYZ анализ по маржинальности и прибыли
     - 3-уровневая категоризация (Родитель → Группа → Подгруппа)
     - Интеграция с AppStateManager для передачи данных между разделами
@@ -6034,7 +6034,7 @@ class MarketplaceUnitEconomics:
         **kwargs
     ) -> 'UnitEconomicsResult':
         """
-        🆕 v101.0: Расчёт юнит-экономики с поддержкой 3-уровневой категоризации.
+         v101.0: Расчёт юнит-экономики с поддержкой 3-уровневой категоризации.
         
         Args:
             price: Цена продажи
@@ -6363,7 +6363,7 @@ class MarketplaceUnitEconomics:
         ad_intensity: str = "medium"
     ) -> pd.DataFrame:
         """
-        🆕 v101.0: Параллельный расчёт юнит-экономики для больших каталогов.
+         v101.0: Параллельный расчёт юнит-экономики для больших каталогов.
         Использует ThreadPoolExecutor для совместимости со Streamlit.
         """
         if marketplaces is None:
@@ -7049,7 +7049,7 @@ class HighVolumeAutoPartsCatalog:
     """
     🚗 High-Volume каталог автозапчастей v101.0
     
-    🆕 Новые возможности:
+     Новые возможности:
     - Связывание столбцов между файлами (link_files)
     - Автоматическое заполнение недостающих параметров из аналогов
     - Интеграция с AppStateManager для передачи данных между разделами
@@ -7070,7 +7070,7 @@ class HighVolumeAutoPartsCatalog:
         else:
             self.create_indexes()
         
-        # 🆕 v101.0: Интеграция с CatalogEnhancer
+        #  v101.0: Интеграция с CatalogEnhancer
         self.enhancer = CatalogEnhancer()
         
         logger.info("✅ HighVolumeAutoPartsCatalog v101.0 инициализирован")
@@ -7379,7 +7379,7 @@ class HighVolumeAutoPartsCatalog:
             return categorization_expr.otherwise(pl.lit('Разное')).alias('category')
     
     # ====================================================================
-    # 🆕 v101.0: СВЯЗЫВАНИЕ СТОЛБЦОВ МЕЖДУ ФАЙЛАМИ
+    #  v101.0: СВЯЗЫВАНИЕ СТОЛБЦОВ МЕЖДУ ФАЙЛАМИ
     # ====================================================================
     def link_files(
         self,
@@ -7391,7 +7391,7 @@ class HighVolumeAutoPartsCatalog:
         columns_to_fill: Optional[List[str]] = None
     ) -> pl.DataFrame:
         """
-        🆕 v101.0: Связывание двух DataFrame по ключевым столбцам.
+         v101.0: Связывание двух DataFrame по ключевым столбцам.
         Недостающие параметры заполняются из второго файла.
         
         Args:
@@ -7464,7 +7464,7 @@ class HighVolumeAutoPartsCatalog:
         return result
     
     # ====================================================================
-    # 🆕 v101.0: АВТОМАТИЧЕСКОЕ ЗАПОЛНЕНИЕ ИЗ АНАЛОГОВ
+    #  v101.0: АВТОМАТИЧЕСКОЕ ЗАПОЛНЕНИЕ ИЗ АНАЛОГОВ
     # ====================================================================
     def fill_missing_from_analogs(
         self,
@@ -7474,7 +7474,7 @@ class HighVolumeAutoPartsCatalog:
         columns_to_fill: Optional[List[str]] = None
     ) -> pl.DataFrame:
         """
-        🆕 v101.0: Заполнение недостающих параметров из аналогов по OE-номерам.
+         v101.0: Заполнение недостающих параметров из аналогов по OE-номерам.
         
         Если у товара нет веса/габаритов, но есть аналог с тем же OE — 
         берём усреднённые данные из аналогов.
@@ -7539,12 +7539,12 @@ class HighVolumeAutoPartsCatalog:
         return billable
     
     # ====================================================================
-    # 🆕 v100.41: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (ЗАЩИТА ОТ ДАТ)
+    #  v100.41: ВЕКТОРИЗОВАННАЯ КОНВЕРТАЦИЯ ЧИСЕЛ (ЗАЩИТА ОТ ДАТ)
     # ====================================================================
     @staticmethod
     def vectorized_convert_to_float(series: pl.Series) -> pl.Series:
-        """🆕 v100.41: Конвертация Series с защитой от pl.Date/pl.Datetime"""
-        # 🆕 ИСПРАВЛЕНИЕ: Если calamine распарсил колонку как Дату, конвертируем в сериальный номер Excel
+        """ v100.41: Конвертация Series с защитой от pl.Date/pl.Datetime"""
+        #  ИСПРАВЛЕНИЕ: Если calamine распарсил колонку как Дату, конвертируем в сериальный номер Excel
         if series.dtype in [pl.Date, pl.Datetime]:
             try:
                 base = pl.datetime(1899, 12, 30)
@@ -7765,7 +7765,7 @@ class HighVolumeAutoPartsCatalog:
             if col in df.columns:
                 df = df.with_columns(self.clean_values(pl.col(col)).alias(col))
         
-        # 🆕 v100.41: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
+        #  v100.41: ИСПРАВЛЕНО — используем map_batches для передачи Series, а не Expr
         numeric_cols = ['length', 'width', 'height', 'weight', 'price']
         for col in numeric_cols:
             if col in df.columns:
@@ -7836,11 +7836,11 @@ class HighVolumeAutoPartsCatalog:
         return True
     
     # ====================================================================
-    # 🆕 v100.41: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
+    #  v100.41: CHUNKED UPSERT (ЗАЩИТА ОТ SEGFAULT В DUCKDB)
     # ====================================================================
     def upsert_data(self, table_name: str, df: pl.DataFrame, pk: List[str]):
         """
-        🆕 v100.41: UPSERT через DELETE + INSERT ЧАНКАМИ.
+         v100.41: UPSERT через DELETE + INSERT ЧАНКАМИ.
         DuckDB 1.5.4 падает с Segmentation Fault при вставке >50K строк за раз.
         """
         if df.is_empty():
@@ -7854,7 +7854,7 @@ class HighVolumeAutoPartsCatalog:
         df = df.unique(keep='first')
         total_rows = len(df)
         
-        # 🆕 ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
+        #  ИСПРАВЛЕНИЕ: Таблица parts — самая тяжёлая, используем маленькие чанки
         CHUNK_SIZE = 10_000 if table_name == 'parts' else 50_000
         
         try:
@@ -8174,7 +8174,7 @@ class HighVolumeAutoPartsCatalog:
                     if 'dimensions_str' not in parts_df.columns:
                         parts_df = parts_df.with_columns(dimensions_str=pl.lit(None).cast(pl.Utf8))
                     
-                    # 🆕 v101.0: Автоматическое заполнение недостающих параметров из аналогов
+                    #  v101.0: Автоматическое заполнение недостающих параметров из аналогов
                     status.write("🔍 Заполнение недостающих параметров из аналогов...")
                     try:
                         parts_df = self.fill_missing_from_analogs(parts_df)
@@ -8282,7 +8282,7 @@ class HighVolumeAutoPartsCatalog:
                     total_records += len(parts_df)
                     status.write(f"✅ Сохранено {len(parts_df):,} записей в parts")
                     
-                    # 🆕 v100.41: Освобождаем память после тяжёлой таблицы
+                    #  v100.41: Освобождаем память после тяжёлой таблицы
                     del parts_df
                     gc.collect()
                     if hasattr(pl, 'free_memory'):
@@ -8441,7 +8441,7 @@ class HighVolumeAutoPartsCatalog:
                 
                 dimension_cols = ["Длинна", "Ширина", "Высота", "Вес"]
                 
-                # 🆕 ИСПРАВЛЕНИЕ: Принудительный сброс типа datetime в float
+                #  ИСПРАВЛЕНИЕ: Принудительный сброс типа datetime в float
                 for col in dimension_cols:
                     if col in df.columns:
                         if pd.api.types.is_datetime64_any_dtype(df[col]):
@@ -8453,7 +8453,7 @@ class HighVolumeAutoPartsCatalog:
                     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                         df.to_excel(writer, index=False, sheet_name='Данные')
                         
-                        # 🆕 ИСПРАВЛЕНИЕ: Жестко задаем числовой формат, чтобы Excel не рисовал календари
+                        #  ИСПРАВЛЕНИЕ: Жестко задаем числовой формат, чтобы Excel не рисовал календари
                         ws = writer.sheets['Данные']
                         for col_idx, col_name in enumerate(df.columns, 1):
                             if col_name in dimension_cols:
@@ -8557,7 +8557,7 @@ class HighVolumeAutoPartsCatalog:
         return stats
     
     # ====================================================================
-    # 🆕 v101.0: ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ФАЙЛОВ С СВЯЗЫВАНИЕМ
+    #  v101.0: ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ФАЙЛОВ С СВЯЗЫВАНИЕМ
     # ====================================================================
     def merge_all_data_parallel(self, file_paths: Dict[str, str], max_workers: int = 4) -> Dict[str, pl.DataFrame]:
         """Параллельная обработка загруженных файлов"""
@@ -8587,7 +8587,7 @@ class HighVolumeAutoPartsCatalog:
         link_configs: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, pl.DataFrame]:
         """
-        🆕 v101.0: Обработка файлов с связыванием столбцов между ними.
+         v101.0: Обработка файлов с связыванием столбцов между ними.
         
         Args:
             file_paths: Словарь {тип_файла: путь_к_файлу}
@@ -8674,7 +8674,7 @@ def show_section1_data_loading():
     4. Дождитесь завершения обработки
     5. Экспортируйте результат в CSV/Excel или переходите в Раздел 2
     
-    **🆕 v101.0:**
+    ** v101.0:**
     - ✅ Связывание столбцов между файлами (drag-and-drop маппинг)
     - ✅ Автоматическое заполнение недостающих параметров из аналогов
     - ✅ Сохранение/загрузка расчётов одной кнопкой
@@ -8693,7 +8693,7 @@ def show_section1_data_loading():
         return
     
     # ========================================================================
-    # 🆕 v101.0: СОХРАНЕНИЕ / ЗАГРУЗКА РАСЧЁТОВ
+    #  v101.0: СОХРАНЕНИЕ / ЗАГРУЗКА РАСЧЁТОВ
     # ========================================================================
     with st.expander("💾 Сохранить / Загрузить предыдущие расчёты", expanded=False):
         save_load_manager = get_save_load_manager()
@@ -8836,7 +8836,7 @@ def show_section1_data_loading():
         st.success(f"✅ Загружено файлов: {len(active_files)}")
         
         # ====================================================================
-        # 🆕 v101.0: НАСТРОЙКА СВЯЗЫВАНИЯ СТОЛБЦОВ МЕЖДУ ФАЙЛАМИ
+        #  v101.0: НАСТРОЙКА СВЯЗЫВАНИЯ СТОЛБЦОВ МЕЖДУ ФАЙЛАМИ
         # ====================================================================
         with st.expander("🔗 Настройка связывания столбцов между файлами", expanded=False):
             st.info("""
@@ -8944,7 +8944,7 @@ def show_section1_data_loading():
             
             if saved_paths:
                 with st.spinner("Обработка файлов..."):
-                    # 🆕 v101.0: Используем link_and_merge_files если есть связывания
+                    #  v101.0: Используем link_and_merge_files если есть связывания
                     link_configs = st.session_state.get('link_configs', [])
                     
                     if link_configs:
@@ -8958,7 +8958,7 @@ def show_section1_data_loading():
                     
                     st.success("✅ Данные успешно загружены!")
                     
-                    # 🆕 v101.0: Сохраняем в AppStateManager для передачи в Раздел 2
+                    #  v101.0: Сохраняем в AppStateManager для передачи в Раздел 2
                     if 'oe' in dataframes and not dataframes['oe'].is_empty():
                         AppStateManager.set('section1_catalog_df', dataframes['oe'].to_pandas())
                     
@@ -9150,7 +9150,7 @@ def show_section2_categorization():
     4. При необходимости загрузите справочник стандартных весогабаритов
     5. Переходите в Раздел 3 (Тарифы) или Раздел 4 (Расчёт)
     
-    **🆕 v101.0:**
+    ** v101.0:**
     - ✅ 3-уровневая иерархия категорий
     - ✅ Автоматическая категоризация по ML-модели и ключевым словам
     - ✅ Загрузка стандартных весогабаритов из Excel
@@ -9675,7 +9675,7 @@ def show_section3_tariffs():
     4. Нажмите "Обновить тарифы" для применения к расчётам
     5. Переходите в Раздел 4 (Расчёт)
     
-    **🆕 v101.0:**
+    ** v101.0:**
     - ✅ Google Sheets интеграция (JSON + API)
     - ✅ Кнопка "Обновить тарифы" для обновления юнит-экономики
     - ✅ Экспорт в CSV и импорт в Google Sheets
@@ -10291,7 +10291,7 @@ def show_section4_calculation():
     - ✅ Топ прибыльных и убыточных товаров
     - ✅ Экспорт в Excel, CSV, Google Sheets
     
-    **🆕 v101.0:**
+    ** v101.0:**
     - ✅ ABC/XYZ анализ (9 комбинаций: AX, AY, AZ, BX, BY, BZ, CX, CY, CZ)
     - ✅ Автоматические рекомендации по каждому товару
     - ✅ Экспорт в Google Sheets одной кнопкой
@@ -12000,7 +12000,7 @@ class PriceCalculator:
 
 class GoogleSheetsManager:
     """
-    🆕 v101.0: Расширенный менеджер для работы с Google Sheets.
+     v101.0: Расширенный менеджер для работы с Google Sheets.
     Поддерживает множественные операции, батчинг и обработку ошибок.
     """
     
@@ -12190,7 +12190,7 @@ class GoogleSheetsManager:
 
 class DataExportImportManager:
     """
-    🆕 v101.0: Менеджер для экспорта и импорта данных в различных форматах.
+     v101.0: Менеджер для экспорта и импорта данных в различных форматах.
     """
     
     @staticmethod
@@ -12312,7 +12312,7 @@ class DataExportImportManager:
 
 class DataQualityValidator:
     """
-    🆕 v101.0: Валидатор качества данных.
+     v101.0: Валидатор качества данных.
     Проверяет данные на наличие ошибок, пропусков, аномалий.
     """
     
@@ -12434,7 +12434,7 @@ class DataQualityValidator:
 
 class FileManager:
     """
-    🆕 v101.0: Хелпер для работы с файлами.
+     v101.0: Хелпер для работы с файлами.
     """
     
     @staticmethod
@@ -12537,7 +12537,7 @@ class FileManager:
 
 class DebugLogger:
     """
-    🆕 v101.0: Утилиты для расширенного логирования и отладки.
+     v101.0: Утилиты для расширенного логирования и отладки.
     """
     
     @staticmethod
@@ -12598,7 +12598,7 @@ class DebugLogger:
 
 class ConfigManager:
     """
-    🆕 v101.0: Менеджер для работы с конфигурационными файлами.
+     v101.0: Менеджер для работы с конфигурационными файлами.
     """
     
     def __init__(self, config_dir: Union[str, Path] = CONFIG_DIR):
