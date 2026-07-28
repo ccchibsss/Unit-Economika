@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 import uuid
 from functools import lru_cache
 import warnings
+import math
 warnings.filterwarnings('ignore')
 
 # ============================================================================
@@ -27,7 +28,7 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 
 # === Версия приложения ===
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 APP_NAME = "🚀 FBS Юнит-экономика PRO 2026"
 APP_DESCRIPTION = "Сквозная юнит-экономика с живыми формулами Excel, интеграцией DeepSeek API и Google Sheets"
 
@@ -892,6 +893,31 @@ class FBSUnitEconomicsCalculator:
             "recommended_min_price": round(recommended_min_price, 2)
         }
 
+    def calculate_single(
+        self,
+        price: float,
+        cost: float,
+        weight_kg: float = 1.0,
+        length_cm: float = 0,
+        width_cm: float = 0,
+        height_cm: float = 0,
+        days_in_storage: int = 30,
+        operation_mode: str = "FBS"
+    ) -> Dict[str, Any]:
+        """
+        Упрощённый расчёт для единичного товара.
+        """
+        return self.calculate(
+            price=price,
+            cost=cost,
+            weight_kg=weight_kg,
+            length_cm=length_cm,
+            width_cm=width_cm,
+            height_cm=height_cm,
+            days_in_storage=days_in_storage,
+            operation_mode=operation_mode
+        )
+
 # ============================================================================
 # БЛОК 8: ЭКСПОРТЕР С ЖИВЫМИ ФОРМУЛАМИ EXCEL
 # ============================================================================
@@ -1056,7 +1082,133 @@ class LiveExcelExporter:
             return False
 
 # ============================================================================
-# БЛОК 9: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT)
+# БЛОК 9: ВИЗУАЛИЗАЦИЯ ДАННЫХ
+# ============================================================================
+
+class DataVisualizer:
+    """
+    Класс для визуализации данных юнит-экономики.
+    """
+    
+    @staticmethod
+    def plot_margin_distribution(df: pd.DataFrame) -> go.Figure:
+        """
+        Создаёт гистограмму распределения маржи.
+        """
+        if df.empty or 'margin_percent' not in df.columns:
+            fig = go.Figure()
+            fig.add_annotation(text="Нет данных для визуализации", showarrow=False)
+            return fig
+            
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=df['margin_percent'],
+            nbinsx=30,
+            name='Маржа',
+            marker_color='#1f77b4',
+            hovertemplate='Маржа: %{x:.1f}%<br>Кол-во: %{y}'
+        ))
+        
+        # Добавляем вертикальные линии
+        fig.add_vline(x=0, line_dash="dash", line_color="red", annotation_text="0% (Break-even)")
+        fig.add_vline(x=15, line_dash="dash", line_color="green", annotation_text="15% (Целевая)")
+        
+        fig.update_layout(
+            title="Распределение маржи по товарам",
+            xaxis_title="Маржа, %",
+            yaxis_title="Количество товаров",
+            template="plotly_white",
+            height=400
+        )
+        
+        return fig
+    
+    @staticmethod
+    def plot_profit_top(df: pd.DataFrame, n: int = 20) -> go.Figure:
+        """
+        Создаёт столбчатую диаграмму топ-N товаров по прибыли.
+        """
+        if df.empty or 'profit' not in df.columns:
+            fig = go.Figure()
+            fig.add_annotation(text="Нет данных для визуализации", showarrow=False)
+            return fig
+            
+        top_profit = df.nlargest(n, 'profit')[['Артикул', 'profit', 'margin_percent']]
+        top_profit = top_profit.sort_values('profit', ascending=True)
+        
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            y=top_profit['Артикул'],
+            x=top_profit['profit'],
+            orientation='h',
+            marker_color='green',
+            text=top_profit['margin_percent'].apply(lambda x: f'{x:.1f}%'),
+            textposition='outside',
+            name='Прибыль',
+            hovertemplate='Артикул: %{y}<br>Прибыль: %{x:.0f} ₽<br>Маржа: %{text}'
+        ))
+        
+        fig.update_layout(
+            title=f"Топ {n} товаров по прибыли",
+            xaxis_title="Прибыль, ₽",
+            yaxis_title="Артикул",
+            template="plotly_white",
+            height=500
+        )
+        
+        return fig
+    
+    @staticmethod
+    def plot_cost_breakdown(result: Dict[str, Any]) -> go.Figure:
+        """
+        Создаёт круговую диаграмму структуры расходов.
+        """
+        if not result:
+            fig = go.Figure()
+            fig.add_annotation(text="Нет данных", showarrow=False)
+            return fig
+            
+        cost_categories = {
+            'Себестоимость': result.get('cost', 0),
+            'Комиссия МП': result.get('commission', 0),
+            'Логистика': result.get('logistics', 0),
+            'Хранение': result.get('storage_cost', 0),
+            'Эквайринг': result.get('acquiring', 0),
+            'Возвраты': result.get('returns', 0),
+            'Налоги': result.get('tax', 0),
+            'Прочие': result.get('auto_parts_specific', 0)
+        }
+        
+        # Убираем нулевые значения
+        cost_categories = {k: v for k, v in cost_categories.items() if v > 0}
+        
+        if not cost_categories:
+            fig = go.Figure()
+            fig.add_annotation(text="Нет данных", showarrow=False)
+            return fig
+        
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=list(cost_categories.keys()),
+            values=list(cost_categories.values()),
+            hole=0.4,
+            marker=dict(colors=colors[:len(cost_categories)]),
+            textinfo='label+percent',
+            textposition='outside'
+        )])
+        
+        fig.update_layout(
+            title="Структура расходов",
+            template="plotly_white",
+            height=450,
+            showlegend=False
+        )
+        
+        return fig
+
+# ============================================================================
+# БЛОК 10: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT)
 # ============================================================================
 
 def init_session_state():
@@ -1072,6 +1224,9 @@ def init_session_state():
     
     if 'calculation_results_df' not in st.session_state:
         st.session_state.calculation_results_df = pd.DataFrame()
+    
+    if 'visualizer' not in st.session_state:
+        st.session_state.visualizer = DataVisualizer()
     
     if 'fbs_calculator' not in st.session_state:
         default_config = {
@@ -1092,29 +1247,6 @@ def init_session_state():
     
     if 'deepseek_manager' not in st.session_state:
         st.session_state.deepseek_manager = None
-
-def escape_excel_text(value: Any) -> str:
-    """Экранирует строку для Excel, чтобы предотвратить автоматическое преобразование в дату или формулу."""
-    if pd.isna(value) or value is None:
-        return ""
-    
-    s = str(value).strip()
-    if not s:
-        return s
-    
-    # Проверка на формулы
-    if s.startswith(('=', '+', '-', '@')):
-        return f"'{s}"
-    
-    # Проверка на потенциальные даты (например, "1-2", "OCT", "2023-10", "10/12")
-    if re.match(r'^\d+[-/]\d+([-/]\d+)?$', s) or re.match(r'^[A-Za-z]{3,4}[-/]\d+$', s, re.IGNORECASE):
-        return f"'{s}"
-    
-    # Проверка на артикулы типа "12345-678" или "A123-B45"
-    if re.match(r'^[A-Za-z0-9]+[-][A-Za-z0-9]+$', s):
-        return f"'{s}"
-        
-    return s
 
 def show_section1_data_loading():
     """Раздел 1: Загрузка и связывание данных"""
@@ -1356,6 +1488,193 @@ def show_section1_data_loading():
                             })
                             st.info("✅ Тарифы обновлены в калькуляторе!")
 
+def show_section2_single_calculation():
+    """Раздел 2: Быстрый расчёт единичного товара"""
+    st.header("🧮 Раздел 2: Быстрый расчёт единичного товара")
+    
+    st.info("""
+    **В этом разделе:**
+    - Вручную введите параметры товара
+    - Получите детальный расчёт юнит-экономики
+    - Визуализация структуры расходов
+    - Мгновенный анализ рентабельности
+    """)
+    
+    calc = st.session_state.fbs_calculator
+    
+    # --- Ввод параметров ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("💰 Финансовые параметры")
+        price = st.number_input("Цена продажи, ₽", min_value=1.0, value=500.0, step=10.0)
+        cost = st.number_input("Себестоимость, ₽", min_value=1.0, value=300.0, step=10.0)
+        
+        st.subheader("📦 Габариты")
+        weight = st.number_input("Вес, кг", min_value=0.1, value=1.0, step=0.1)
+        col_w1, col_w2, col_w3 = st.columns(3)
+        with col_w1:
+            length = st.number_input("Длина, см", min_value=0, value=0, step=1)
+        with col_w2:
+            width = st.number_input("Ширина, см", min_value=0, value=0, step=1)
+        with col_w3:
+            height = st.number_input("Высота, см", min_value=0, value=0, step=1)
+    
+    with col2:
+        st.subheader("⚙️ Параметры расчёта")
+        
+        operation_mode = st.selectbox(
+            "Режим работы",
+            options=["FBS", "FBY"],
+            index=0,
+            help="FBS — со своего склада по заказу. FBY — аналог FBS с доставкой МП."
+        )
+        
+        days_in_storage = st.number_input(
+            "Дней хранения",
+            min_value=1, max_value=365, value=30, step=1
+        )
+        
+        tax_system = st.selectbox(
+            "Налоговая система",
+            options=["УСН_6", "УСН_15", "ОСН", "НПД"],
+            index=0,
+            format_func=lambda x: {"УСН_6": "УСН 6% (доходы)", "УСН_15": "УСН 15% (доходы-расходы)", 
+                                  "ОСН": "ОСН (общая)", "НПД": "НПД (самозанятый)"}[x]
+        )
+        
+        # Дополнительные настройки
+        with st.expander("🔧 Расширенные настройки"):
+            commission_rate = st.number_input("Ставка комиссии, %", min_value=0.0, value=15.0, step=0.5) / 100
+            logistics_base = st.number_input("База логистики, ₽", min_value=0.0, value=50.0, step=5.0)
+            logistics_per_kg = st.number_input("Логистика за кг, ₽", min_value=0.0, value=15.0, step=1.0)
+            storage_rate = st.number_input("Ставка хранения, ₽/день", min_value=0.0, value=0.3, step=0.05)
+    
+    # --- Расчёт ---
+    if st.button("🧮 Рассчитать юнит-экономику", type="primary"):
+        try:
+            calc.tax_system = tax_system
+            
+            # Обновляем конфигурацию если использовались расширенные настройки
+            if 'commission_rate' in locals():
+                calc.config['commission_rate'] = commission_rate
+            if 'logistics_base' in locals():
+                calc.config['logistics_base'] = logistics_base
+            if 'logistics_per_kg' in locals():
+                calc.config['logistics_per_kg'] = logistics_per_kg
+            if 'storage_rate' in locals():
+                calc.config['storage_per_day'] = storage_rate
+            
+            result = calc.calculate(
+                price=price,
+                cost=cost,
+                weight_kg=weight,
+                length_cm=length,
+                width_cm=width,
+                height_cm=height,
+                days_in_storage=days_in_storage,
+                operation_mode=operation_mode
+            )
+            
+            # --- Отображение результатов ---
+            st.divider()
+            st.subheader("📊 Результаты расчёта")
+            
+            # KPI в 3 колонки
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                profit_color = "green" if result['profit'] > 0 else "red"
+                st.metric("💰 Прибыль", f"{result['profit']:.0f} ₽", 
+                         delta=f"{result['margin_percent']:.1f}% маржи", 
+                         delta_color="normal")
+            with col2:
+                st.metric("📦 Итого расходов", f"{result['total_expenses']:.0f} ₽")
+            with col3:
+                st.metric("📈 ROI", f"{result['roi']:.1f}%")
+            with col4:
+                if result['price'] < result['recommended_min_price']:
+                    st.metric("💡 Рек. цена", f"{result['recommended_min_price']:.0f} ₽", 
+                             delta=f"+{result['recommended_min_price'] - result['price']:.0f} ₽", 
+                             delta_color="inverse")
+                else:
+                    st.metric("💡 Рек. цена", f"{result['recommended_min_price']:.0f} ₽", 
+                             delta="✅ OK", 
+                             delta_color="off")
+            
+            # Детальная таблица
+            st.markdown("##### 📋 Детальная калькуляция")
+            
+            detail_data = {
+                "Показатель": [
+                    "Цена продажи", "Себестоимость", 
+                    "Комиссия МП", "Логистика", "Хранение", 
+                    "Эквайринг", "Возвраты", "Налоги",
+                    "Специфические расходы", "ИТОГО расходов", "ПРИБЫЛЬ"
+                ],
+                "Сумма, ₽": [
+                    result['price'], result['cost'],
+                    result['commission'], result['logistics'], result['storage_cost'],
+                    result['acquiring'], result['returns'], result['tax'],
+                    result['auto_parts_specific'], result['total_expenses'], result['profit']
+                ],
+                "% от цены": [
+                    "100%",
+                    f"{result['cost']/result['price']*100:.1f}%",
+                    f"{result['commission']/result['price']*100:.1f}%",
+                    f"{result['logistics']/result['price']*100:.1f}%",
+                    f"{result['storage_cost']/result['price']*100:.1f}%",
+                    f"{result['acquiring']/result['price']*100:.1f}%",
+                    f"{result['returns']/result['price']*100:.1f}%",
+                    f"{result['tax']/result['price']*100:.1f}%",
+                    f"{result['auto_parts_specific']/result['price']*100:.1f}%",
+                    f"{result['total_expenses']/result['price']*100:.1f}%",
+                    f"{result['profit']/result['price']*100:.1f}%"
+                ]
+            }
+            
+            df_detail = pd.DataFrame(detail_data)
+            
+            # Стилизация
+            def color_rows(row):
+                if row['Показатель'] == 'ПРИБЫЛЬ':
+                    return ['background-color: #d4edda; font-weight: bold'] * len(row)
+                elif row['Показатель'] == 'ИТОГО расходов':
+                    return ['background-color: #fff3cd; font-weight: bold'] * len(row)
+                return [''] * len(row)
+            
+            st.dataframe(df_detail.style.apply(color_rows, axis=1), use_container_width=True)
+            
+            # --- Визуализация ---
+            st.divider()
+            st.subheader("📊 Визуализация структуры расходов")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fig_pie = st.session_state.visualizer.plot_cost_breakdown(result)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            
+            with col2:
+                # Сравнение цены и расходов
+                fig_bar = go.Figure()
+                fig_bar.add_trace(go.Bar(
+                    x=['Цена', 'Расходы', 'Прибыль'],
+                    y=[result['price'], result['total_expenses'], result['profit']],
+                    marker_color=['#1f77b4', '#ff7f0e', '#2ca02c'],
+                    text=[f"{result['price']:.0f} ₽", f"{result['total_expenses']:.0f} ₽", f"{result['profit']:.0f} ₽"],
+                    textposition='auto'
+                ))
+                fig_bar.update_layout(
+                    title="Сравнение цены, расходов и прибыли",
+                    yaxis_title="Сумма, ₽",
+                    template="plotly_white",
+                    height=400
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка расчёта: {e}")
+            logger.exception("Ошибка в single calculation")
+
 def show_section4_calculation():
     """Раздел 4: Расчёт юнит-экономики (FBS)"""
     st.header("🧮 Раздел 4: Расчёт юнит-экономики (FBS)")
@@ -1365,6 +1684,7 @@ def show_section4_calculation():
     1. Рассчитайте юнит-экономику для всех товаров в режиме FBS
     2. Экспортируйте результаты в Excel с живыми формулами
     3. Интеграция с Google Sheets для обновления остатков
+    4. Визуализация распределения маржи
     """)
     
     # --- Проверка наличия данных ---
@@ -1524,10 +1844,40 @@ def show_section4_calculation():
             underpriced = (df_results['price'] < df_results['recommended_min_price']).sum()
             st.metric("💡 Недооценённых", f"{underpriced}")
         
+        # Визуализация
+        st.divider()
+        st.subheader("📈 Визуализация")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fig_margin = st.session_state.visualizer.plot_margin_distribution(df_results)
+            st.plotly_chart(fig_margin, use_container_width=True)
+        
+        with col2:
+            fig_top = st.session_state.visualizer.plot_profit_top(df_results, n=20)
+            st.plotly_chart(fig_top, use_container_width=True)
+        
         # Таблица результатов
+        st.divider()
+        st.subheader("📋 Детальная таблица")
+        
         display_cols = ["Артикул", "Наименование", "price", "cost", "profit", "margin_percent", "roi", "recommended_min_price"]
         available_cols = [c for c in display_cols if c in df_results.columns]
-        st.dataframe(df_results[available_cols].head(100), use_container_width=True)
+        
+        # Поиск и фильтрация
+        search_term = st.text_input("🔍 Поиск по артикулу или наименованию", "")
+        if search_term:
+            mask = df_results['Артикул'].str.contains(search_term, case=False, na=False) | \
+                   df_results['Наименование'].str.contains(search_term, case=False, na=False)
+            df_filtered = df_results[mask]
+        else:
+            df_filtered = df_results
+        
+        st.dataframe(
+            df_filtered[available_cols].style.background_gradient(subset=['profit', 'margin_percent'], cmap='RdYlGn', vmin=-50, vmax=50),
+            use_container_width=True,
+            height=400
+        )
         
         # --- Экспорт в Excel с живыми формулами ---
         st.divider()
@@ -1541,27 +1891,42 @@ def show_section4_calculation():
         Меняйте цену, вес или ставку комиссии — и вся экономика пересчитается!
         """)
         
-        if st.button("📥 Экспортировать в Excel с живыми формулами", type="primary"):
-            try:
-                output_path = EXPORTS_DIR / f"unit_economics_live_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                exporter = LiveExcelExporter()
-                success = exporter.export_with_formulas(df_results, str(output_path), marketplace)
-                
-                if success and output_path.exists():
-                    with open(output_path, "rb") as f:
-                        file_data = f.read()
-                    st.download_button(
-                        label="⬇️ Скачать Excel с живыми формулами",
-                        data=file_data,
-                        file_name=output_path.name,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                    st.success("✅ Excel с живыми формулами готов к скачиванию!")
-                else:
-                    st.error("❌ Ошибка создания файла")
-            except Exception as e:
-                st.error(f"❌ Ошибка экспорта: {e}")
-                logger.exception("Ошибка экспорта")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📥 Экспортировать в Excel с живыми формулами", type="primary"):
+                try:
+                    output_path = EXPORTS_DIR / f"unit_economics_live_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    exporter = LiveExcelExporter()
+                    success = exporter.export_with_formulas(df_results, str(output_path), marketplace)
+                    
+                    if success and output_path.exists():
+                        with open(output_path, "rb") as f:
+                            file_data = f.read()
+                        st.download_button(
+                            label="⬇️ Скачать Excel с живыми формулами",
+                            data=file_data,
+                            file_name=output_path.name,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="excel_download"
+                        )
+                        st.success("✅ Excel с живыми формулами готов к скачиванию!")
+                    else:
+                        st.error("❌ Ошибка создания файла")
+                except Exception as e:
+                    st.error(f"❌ Ошибка экспорта: {e}")
+                    logger.exception("Ошибка экспорта")
+        
+        with col2:
+            # Экспорт в CSV
+            if st.button("📄 Экспортировать в CSV"):
+                csv_data = df_results.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="⬇️ Скачать CSV",
+                    data=csv_data,
+                    file_name=f"unit_economics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="csv_download"
+                )
         
         # --- Google Sheets интеграция ---
         st.divider()
@@ -1585,9 +1950,11 @@ def show_section4_calculation():
                 else:
                     try:
                         manager = GoogleSheetsManager(gs_creds)
+                        export_df = df_results[["Артикул", "Наименование", "price", "profit", "margin_percent", "roi", "recommended_min_price"]].copy()
+                        export_df.columns = ["Артикул", "Наименование", "Цена", "Прибыль", "Маржа %", "ROI %", "Рек. цена"]
                         success = manager.write_sheet(
                             spreadsheet_id=spreadsheet_id,
-                            df=df_results[["Артикул", "Наименование", "price", "profit", "margin_percent", "roi", "recommended_min_price"]],
+                            df=export_df,
                             worksheet_name=worksheet_name,
                             clear_before=True
                         )
@@ -1670,6 +2037,140 @@ def show_section4_calculation():
                         except Exception as e:
                             st.error(f"❌ Ошибка: {e}")
 
+def show_section5_analytics():
+    """Раздел 5: Аналитика и дашборды"""
+    st.header("📊 Раздел 5: Аналитика и дашборды")
+    
+    st.info("""
+    **В этом разделе:**
+    - Анализ распределения маржи и прибыли
+    - Тренды и паттерны в данных
+    - Выявление проблемных зон
+    - Рекомендации по оптимизации
+    """)
+    
+    if st.session_state.calculation_results_df.empty:
+        st.warning("⚠️ Нет данных для аналитики. Выполните расчёт в Разделе 4.")
+        return
+    
+    df = st.session_state.calculation_results_df
+    
+    # --- Общая статистика ---
+    st.subheader("📈 Общая статистика")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("Всего SKU", f"{len(df)}")
+    with col2:
+        st.metric("Прибыльных SKU", f"{(df['profit'] > 0).sum()}", 
+                 delta=f"{(df['profit'] > 0).sum()/len(df)*100:.1f}%")
+    with col3:
+        st.metric("Убыточных SKU", f"{(df['profit'] < 0).sum()}")
+    with col4:
+        st.metric("Средняя маржа", f"{df['margin_percent'].mean():.1f}%")
+    with col5:
+        st.metric("Медианная маржа", f"{df['margin_percent'].median():.1f}%")
+    
+    # --- Распределение ---
+    st.divider()
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📊 Распределение маржи")
+        fig_margin = st.session_state.visualizer.plot_margin_distribution(df)
+        st.plotly_chart(fig_margin, use_container_width=True)
+    
+    with col2:
+        st.subheader("📊 Распределение прибыли")
+        fig_profit = go.Figure()
+        fig_profit.add_trace(go.Histogram(
+            x=df['profit'],
+            nbinsx=30,
+            marker_color='#2ca02c',
+            name='Прибыль'
+        ))
+        fig_profit.add_vline(x=0, line_dash="dash", line_color="red")
+        fig_profit.update_layout(
+            title="Распределение прибыли по товарам",
+            xaxis_title="Прибыль, ₽",
+            yaxis_title="Количество товаров",
+            template="plotly_white",
+            height=400
+        )
+        st.plotly_chart(fig_profit, use_container_width=True)
+    
+    # --- Топ и аутсайдеры ---
+    st.divider()
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🏆 Топ-10 по марже")
+        top_margin = df.nlargest(10, 'margin_percent')[['Артикул', 'Наименование', 'margin_percent', 'profit']]
+        st.dataframe(
+            top_margin.style.background_gradient(subset=['margin_percent'], cmap='Greens'),
+            use_container_width=True
+        )
+    
+    with col2:
+        st.subheader("📉 Аутсайдеры по марже")
+        bottom_margin = df.nsmallest(10, 'margin_percent')[['Артикул', 'Наименование', 'margin_percent', 'profit']]
+        st.dataframe(
+            bottom_margin.style.background_gradient(subset=['margin_percent'], cmap='Reds'),
+            use_container_width=True
+        )
+    
+    # --- Корреляционный анализ ---
+    st.divider()
+    st.subheader("🔍 Корреляционный анализ")
+    
+    numeric_cols = ['price', 'cost', 'profit', 'margin_percent', 'roi']
+    available_cols = [c for c in numeric_cols if c in df.columns]
+    
+    if len(available_cols) >= 2:
+        corr_df = df[available_cols].corr()
+        
+        fig_corr = go.Figure(data=go.Heatmap(
+            z=corr_df.values,
+            x=corr_df.columns,
+            y=corr_df.columns,
+            colorscale='RdBu',
+            zmin=-1, zmax=1,
+            text=corr_df.values.round(2),
+            texttemplate='%{text}',
+            textfont={"size": 10}
+        ))
+        fig_corr.update_layout(
+            title="Матрица корреляции",
+            height=400,
+            template="plotly_white"
+        )
+        st.plotly_chart(fig_corr, use_container_width=True)
+    
+    # --- Рекомендации ---
+    st.divider()
+    st.subheader("💡 Рекомендации по оптимизации")
+    
+    recommendations = []
+    
+    if (df['profit'] < 0).sum() > len(df) * 0.1:
+        recommendations.append("⚠️ Более 10% товаров убыточны. Пересмотрите ценовую политику.")
+    
+    if df['margin_percent'].median() < 15:
+        recommendations.append("⚠️ Медианная маржа ниже 15%. Целевая маржа для автозапчастей должна быть 20-30%.")
+    
+    if (df['price'] < df['recommended_min_price']).sum() > len(df) * 0.2:
+        recommendations.append("⚠️ Более 20% товаров недооценены. Рекомендуется повысить цены.")
+    
+    if len(recommendations) == 0:
+        st.success("✅ Ваш портфель товаров выглядит здоровым! Основные метрики в норме.")
+    else:
+        for rec in recommendations:
+            st.warning(rec)
+
+# ============================================================================
+# БЛОК 11: ГЛАВНАЯ ФУНКЦИЯ
+# ============================================================================
+
 def main():
     """Главная функция приложения"""
     
@@ -1703,7 +2204,9 @@ def main():
         "Выберите раздел:",
         [
             "📁 Раздел 1: Загрузка и связывание данных",
+            "🧮 Раздел 2: Быстрый расчёт единичного товара",
             "🧮 Раздел 4: Расчёт юнит-экономики (FBS)",
+            "📊 Раздел 5: Аналитика и дашборды"
         ]
     )
     
@@ -1711,20 +2214,21 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📊 Статус системы")
     
-    st.sidebar.success("✅ SecureKeyManager")
-    st.sidebar.success("✅ OECrossLinker")
-    st.sidebar.success("✅ FBSUnitEconomicsCalculator")
-    st.sidebar.success("✅ LiveExcelExporter")
-    
-    if CRYPTO_AVAILABLE:
-        st.sidebar.success("✅ Cryptography")
-    else:
-        st.sidebar.warning("⚠️ Cryptography")
-    
-    if GSPREAD_AVAILABLE:
-        st.sidebar.success("✅ GSpread")
-    else:
-        st.sidebar.warning("⚠️ GSpread")
+    status_cols = st.sidebar.columns(2)
+    with status_cols[0]:
+        st.sidebar.success("✅ SecureKeyManager")
+        st.sidebar.success("✅ OECrossLinker")
+        st.sidebar.success("✅ FBS Calculator")
+    with status_cols[1]:
+        st.sidebar.success("✅ LiveExcelExporter")
+        if CRYPTO_AVAILABLE:
+            st.sidebar.success("✅ Cryptography")
+        else:
+            st.sidebar.warning("⚠️ Crypto")
+        if GSPREAD_AVAILABLE:
+            st.sidebar.success("✅ GSpread")
+        else:
+            st.sidebar.warning("⚠️ GSpread")
     
     st.sidebar.markdown("---")
     st.sidebar.info("""
@@ -1738,8 +2242,12 @@ def main():
     # Отображение выбранного раздела
     if section == "📁 Раздел 1: Загрузка и связывание данных":
         show_section1_data_loading()
+    elif section == "🧮 Раздел 2: Быстрый расчёт единичного товара":
+        show_section2_single_calculation()
     elif section == "🧮 Раздел 4: Расчёт юнит-экономики (FBS)":
         show_section4_calculation()
+    elif section == "📊 Раздел 5: Аналитика и дашборды":
+        show_section5_analytics()
     
     # Футер
     st.divider()
@@ -1747,7 +2255,7 @@ def main():
     <div style='text-align: center; padding: 20px; color: #666;'>
     <p style='margin: 0;'>🚀 <strong>FBS Юнит-экономика PRO 2026</strong></p>
     <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
-    Версия {APP_VERSION} | Живые формулы Excel | Безопасное хранение ключей
+    Версия {APP_VERSION} | Живые формулы Excel | Безопасное хранение ключей | FBS-ONLY
     </p>
     </div>
     """, unsafe_allow_html=True)
