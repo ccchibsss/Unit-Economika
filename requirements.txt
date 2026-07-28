@@ -1,39 +1,58 @@
-# === Основные зависимости ===
-streamlit>=1.28.0
-pandas>=2.0.0
-numpy>=1.24.0
-polars>=0.19.0
-duckdb>=0.9.0
+# ============================================================================
+# FBS Юнит-экономика PRO 2026 - Все зависимости
+# ============================================================================
 
-# === Excel/CSV ===
-openpyxl>=3.1.0
-xlsxwriter>=3.1.0
-xlrd>=2.0.0
-python-calamine>=0.1.0
+# ------------- ЯДРО -------------
+streamlit==1.28.1
+pandas==2.0.3
+numpy==1.24.3
+plotly==5.15.0
 
-# === ML и анализ ===
-scikit-learn>=1.3.0
-joblib>=1.3.0
+# ------------- EXCEL -------------
+openpyxl==3.1.2
+xlsxwriter==3.1.9
 
-# === Визуализация ===
-plotly>=5.18.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
+# ------------- GOOGLE SHEETS -------------
+gspread==5.12.4
+google-auth==2.23.4
+google-auth-oauthlib==1.0.0
 
-# === Google Sheets ===
-gspread>=5.12.0
-google-auth>=2.23.0
-google-auth-oauthlib>=1.1.0
+# ------------- БЕЗОПАСНОСТЬ -------------
+cryptography==41.0.7
 
-# === Утилиты ===
-chardet>=5.2.0
-python-dateutil>=2.8.0
-psutil>=5.9.0
-requests>=2.31.0
+# ------------- HTTP & API -------------
+requests==2.31.0
+httpx==0.25.0
 
-# === Опциональные (для расширенного функционала) ===
-# openai>=1.3.0              # Для AI тарифов через OpenAI
-# anthropic>=0.5.0           # Для AI тарифов через Anthropic
-# pyarrow>=14.0.0            # Для Parquet экспорта
-# reportlab>=4.0.0           # Для PDF экспорта
-# aiohttp>=3.9.0             # Для асинхронных запросов
+# ------------- ДАТЫ -------------
+python-dateutil==2.8.2
+pytz==2023.3.post1
+
+# ------------- УТИЛИТЫ -------------
+chardet==5.2.0
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# ------------- ОПЦИОНАЛЬНО (для продвинутой аналитики) -------------
+# scikit-learn==1.3.0
+# joblib==1.3.2
+# polars==0.19.19
+# duckdb==0.9.2
+# psutil==5.9.6
+# pyarrow==14.0.1
+# fastparquet==2023.10.1
+
+# ============================================================================
+# КАК УСТАНОВИТЬ:
+# ============================================================================
+# 1. Создайте виртуальное окружение:
+#    python -m venv venv
+#    source venv/bin/activate  # Linux/Mac
+#    venv\Scripts\activate     # Windows
+#
+# 2. Установите зависимости:
+#    pip install -r requirements.txt
+#
+# 3. Если нужны опциональные библиотеки:
+#    pip install scikit-learn joblib polars duckdb psutil pyarrow fastparquet
+# ============================================================================
