@@ -12,20 +12,6 @@
 3. Динамическая подгрузка тарифов
 4. Оптимизация на основе реальных данных
 
-НОВЫЕ УЛУЧШЕНИЯ:
-1. Визуализация логистических зон риска
-2. Точка безубыточности по объему продаж
-3. Анализ сценариев "Что если"
-4. Экспорт в PDF с профессиональным дизайном
-5. Автоматические рекомендации для операционного директора
-6. Фильтры и поиск в дашборде
-7. Сезонная корректировка маржи
-8. Аудит действий пользователя
-9. Оптимизированный пакетный расчет с чанками
-10. Загрузка тарифов из CSV как fallback
-11. Расчет эффективности использования складского пространства
-12. Интеграция с реальными API маркетплейсов
-
 НИЧЕГО НЕ СОКРАЩЕНО — ПОЛНАЯ ВЕРСИЯ
 ============================================================================
 """
@@ -2322,7 +2308,7 @@ class FBSUnitEconomicsCalculator:
         return recommendations
 
 # ============================================================================
-# БЛОК 9: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT)
+# БЛОК 9: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) - УЛУЧШЕННАЯ ВЕРСИЯ
 # ============================================================================
 
 def init_session_state():
@@ -2417,13 +2403,14 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### ⚡ Быстрые действия")
         
-        if st.button("🔄 Обновить тарифы", use_container_width=True):
+        # ИСПРАВЛЕНО: заменен use_container_width на width='stretch'
+        if st.button("🔄 Обновить тарифы", width='stretch'):
             with st.spinner("Загрузка тарифов..."):
                 calculator.refresh_tariffs(force=True)
                 st.success("✅ Тарифы обновлены!")
                 st.rerun()
         
-        if st.button("🗑️ Очистить результаты", use_container_width=True):
+        if st.button("🗑️ Очистить результаты", width='stretch'):
             st.session_state.results = []
             st.session_state.input_data_list = []
             st.session_state.recommendations = []
@@ -2475,7 +2462,8 @@ def render_dashboard_with_filters(results: List[FBSResultData]):
     
     if filtered:
         df = pd.DataFrame([r.get_summary() for r in filtered])
-        st.dataframe(df, use_container_width=True, height=400)
+        # ИСПРАВЛЕНО: заменен use_container_width на width='stretch'
+        st.dataframe(df, width='stretch', height=400)
         st.caption(f"📊 Показано {len(filtered)} из {len(results)} товаров")
     else:
         st.info("ℹ️ Нет товаров, соответствующих фильтрам")
@@ -2700,17 +2688,18 @@ def main():
         
         if calculator.current_tariffs:
             df = calculator.api_manager.get_all_tariffs_as_dataframe(marketplace)
-            st.dataframe(df, use_container_width=True, height=400)
+            # ИСПРАВЛЕНО: заменен use_container_width на width='stretch'
+            st.dataframe(df, width='stretch', height=400)
             
             st.markdown("### 📊 Статистика источников")
             sources = df['Источник'].value_counts()
-            st.dataframe(sources, use_container_width=True)
+            st.dataframe(sources, width='stretch')
             
             # Проверяем наличие предупреждений
             warnings_df = df[df['Предупреждение'] != '']
             if not warnings_df.empty:
                 st.warning("⚠️ Некоторые тарифы являются примерными. Загрузите актуальные данные через API или CSV.")
-                st.dataframe(warnings_df[['Категория', 'Предупреждение']], use_container_width=True)
+                st.dataframe(warnings_df[['Категория', 'Предупреждение']], width='stretch')
     
     elif current_section == 'dashboard':
         st.markdown("## 📈 Дашборд")
@@ -2875,7 +2864,7 @@ def main():
                     
                     df_results = calculator.run_what_if_analysis(base_data, scenarios)
                     st.markdown("### 📊 Результаты анализа")
-                    st.dataframe(df_results, use_container_width=True)
+                    st.dataframe(df_results, width='stretch')
                     
                     st.markdown("### 📈 Визуализация сценариев")
                     fig = make_subplots(rows=1, cols=2, subplot_titles=("Прибыль по сценариям", "Маржа по сценариям"))
@@ -2966,7 +2955,7 @@ def main():
                 'Категория': list(categories.keys()),
                 'Количество': list(categories.values())
             })
-            st.dataframe(df_cat, use_container_width=True)
+            st.dataframe(df_cat, width='stretch')
     
     elif current_section == 'export':
         st.markdown("## 📥 Экспорт данных")
@@ -3248,7 +3237,7 @@ clothing,0.15,25,40,12,0.015,0.018
                     else:
                         calculator.refresh_tariffs(force=True, csv_content=csv_content)
                         st.success(f"✅ Тарифы загружены из CSV! ({len(df_test)} категорий)")
-                        st.dataframe(df_test, use_container_width=True)
+                        st.dataframe(df_test, width='stretch')
                         st.rerun()
                 except Exception as e:
                     st.error(f"❌ Ошибка загрузки CSV: {e}")
