@@ -28,9 +28,9 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 
 # === Версия приложения ===
-APP_VERSION = "2.1.0"
+APP_VERSION = "3.0.0"
 APP_NAME = "🚀 FBS Юнит-экономика PRO 2026"
-APP_DESCRIPTION = "Сквозная юнит-экономика с живыми формулами Excel, интеграцией DeepSeek API и Google Sheets"
+APP_DESCRIPTION = "Профессиональная юнит-экономика для маркетплейсов с фокусом на Яндекс Маркет"
 
 # === Базовые директории ===
 try:
@@ -330,149 +330,13 @@ def smart_read_uploaded_file(uploaded_file) -> pd.DataFrame:
         return pd.DataFrame()
 
 # ============================================================================
-# БЛОК 3: КРОСС-СВЯЗЫВАНИЕ ДАННЫХ (OE-номера)
-# ============================================================================
-
-class OECrossLinker:
-    """
-    Класс для умного кросс-связывания данных через ОЕ-номера.
-    """
-    
-    @staticmethod
-    def split_oe_numbers(oe_string: str) -> List[str]:
-        """Разделяет строку ОЕ-номеров по точке с запятой и очищает"""
-        if pd.isna(oe_string) or not oe_string:
-            return []
-        return [oe.strip() for oe in str(oe_string).split(';') if oe.strip()]
-
-    @staticmethod
-    def normalize_oe(oe: str) -> str:
-        """Нормализует ОЕ-номер для сравнения"""
-        if pd.isna(oe) or not oe:
-            return ""
-        return re.sub(r'[^0-9A-Za-z]', '', str(oe).upper())
-
-    @staticmethod
-    def normalize_artikul(art: str) -> str:
-        """Нормализует артикул для сравнения"""
-        if pd.isna(art) or not art:
-            return ""
-        return re.sub(r'[^0-9A-Za-z]', '', str(art).upper())
-
-    def link_and_fill_missing(
-        self,
-        df_main: pd.DataFrame,
-        df_oe: pd.DataFrame,
-        main_art_col: str,
-        main_oe_col: str,
-        oe_art_col: str,
-        oe_oe_col: str,
-        cols_to_fill: List[str]
-    ) -> pd.DataFrame:
-        """
-        Связывает основной DataFrame с DataFrame ОЕ и заполняет пропуски.
-        """
-        if df_main.empty or df_oe.empty:
-            return df_main.copy()
-
-        result = df_main.copy()
-        
-        # Создаем нормализованные ключи
-        result['_norm_art'] = result[main_art_col].apply(self.normalize_artikul)
-        result['_norm_oe'] = result[main_oe_col].apply(self.normalize_oe)
-        
-        df_oe_work = df_oe.copy()
-        df_oe_work['_norm_art'] = df_oe_work[oe_art_col].apply(self.normalize_artikul)
-        df_oe_work['_norm_oe_raw'] = df_oe_work[oe_oe_col].apply(self.normalize_oe)
-        
-        # Разбиваем ОЕ номера через ';'
-        df_oe_work['_oe_list'] = df_oe_work[oe_oe_col].apply(self.split_oe_numbers)
-        df_oe_work['_norm_oe_list'] = df_oe_work['_oe_list'].apply(
-            lambda lst: [self.normalize_oe(oe) for oe in lst]
-        )
-        
-        # Explode
-        df_exploded = df_oe_work.explode('_norm_oe_list').rename(columns={'_norm_oe_list': '_norm_oe'})
-        df_exploded = df_exploded[df_exploded['_norm_oe'] != ""]
-        df_exploded = df_exploded.drop_duplicates(subset=['_norm_oe'], keep='first')
-        
-        # Merge по ОЕ
-        merge_cols = ['_norm_oe'] + cols_to_fill
-        existing_cols = [c for c in merge_cols if c in df_exploded.columns]
-        if existing_cols:
-            merged = result.merge(
-                df_exploded[existing_cols],
-                on='_norm_oe',
-                how='left',
-                suffixes=('', '_from_oe')
-            )
-        else:
-            merged = result
-        
-        # Заполняем пропуски
-        filled_count = 0
-        for col in cols_to_fill:
-            if col not in result.columns:
-                continue
-            oe_col = f"{col}_from_oe"
-            if oe_col in merged.columns:
-                mask = merged[col].isna() | (merged[col] == 0) | (merged[col] == '')
-                merged.loc[mask, col] = merged.loc[mask, oe_col]
-                filled_count += int(mask.sum())
-                merged = merged.drop(columns=[oe_col])
-
-        logger.info(f"✅ OECrossLinker: Заполнено {filled_count} пропусков через ОЕ-связывание.")
-        
-        # Очистка временных колонок
-        final_cols = [c for c in merged.columns if not c.startswith('_norm_') and not c.startswith('_oe_') and not c.startswith('_')]
-        
-        return merged[final_cols]
-
-    def build_cross_references_column(
-        self,
-        df_main: pd.DataFrame,
-        df_cross: pd.DataFrame,
-        main_art_col: str,
-        cross_art_col: str,
-        cross_analog_col: str,
-        output_col_name: str = "Кроссы (аналоги)"
-    ) -> pd.DataFrame:
-        """
-        Добавляет в основной DataFrame колонку с аналогами (кроссами).
-        """
-        if df_main.empty or df_cross.empty:
-            result = df_main.copy()
-            result[output_col_name] = ""
-            return result
-
-        result = df_main.copy()
-        result['_norm_art'] = result[main_art_col].apply(self.normalize_artikul)
-        
-        df_cross_work = df_cross.copy()
-        df_cross_work['_norm_art'] = df_cross_work[cross_art_col].apply(self.normalize_artikul)
-        
-        # Группируем аналоги
-        analogs_grouped = (
-            df_cross_work.groupby('_norm_art')[cross_analog_col]
-            .apply(lambda x: '; '.join([str(v).strip() for v in x if pd.notna(v) and str(v).strip()]))
-            .reset_index()
-            .rename(columns={cross_analog_col: output_col_name})
-        )
-        
-        result = result.merge(analogs_grouped, on='_norm_art', how='left')
-        result[output_col_name] = result[output_col_name].fillna("")
-        result = result.drop(columns=['_norm_art'])
-        
-        return result
-
-# ============================================================================
-# БЛОК 4: DEEPSEEK API ИНТЕГРАЦИЯ
+# БЛОК 3: DEEPSEEK API ИНТЕГРАЦИЯ (ПРОФЕССИОНАЛЬНАЯ)
 # ============================================================================
 
 class DeepSeekAPIManager:
     """
-    Менеджер для работы с DeepSeek API.
-    Поддерживает два режима: "Обогащение каталога" или "Актуализация тарифов".
+    Профессиональный менеджер для работы с DeepSeek API.
+    Поддерживает: обогащение каталога, актуализацию тарифов, анализ конкурентов.
     """
     def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com/v1"):
         self.api_key = api_key
@@ -480,27 +344,59 @@ class DeepSeekAPIManager:
         
     def is_available(self) -> bool:
         return bool(self.api_key)
-        
-    def enrich_catalog(self, product_name: str, current_category: str = "") -> Dict[str, Any]:
+    
+    def analyze_product_for_marketplace(
+        self, 
+        product_name: str, 
+        marketplace: str = "Яндекс Маркет",
+        current_price: float = 0,
+        current_category: str = ""
+    ) -> Dict[str, Any]:
         """
-        Режим 1: Обогащение каталога.
+        Профессиональный анализ товара для конкретного маркетплейса.
         """
         if not self.is_available():
             return {"error": "DeepSeek API недоступен или ключ не задан"}
             
         prompt = f"""
-        Ты эксперт по автозапчастям. Проанализируй название товара: "{product_name}".
-        Текущая категория (если есть): "{current_category}".
+        Ты эксперт по юнит-экономике для маркетплейсов с 10-летним опытом.
+        Проанализируй товар для маркетплейса {marketplace}.
+        
+        Название товара: "{product_name}"
+        Текущая цена: {current_price} ₽
+        Категория: {current_category}
         
         Верни строго JSON в следующем формате:
         {{
-            "parent_category": "Автозапчасти",
-            "group_category": "Например: Подвеска, Двигатель, Тормозная система",
-            "subgroup_category": "Например: Сайлентблоки, Поршни, Колодки",
-            "product_type": "Например: SUSPENSION, ENGINE, BRAKE",
-            "hazardous": false,
-            "fragile": false,
-            "confidence": 0.95
+            "marketplace_recommendations": {{
+                "recommended_price": 0,
+                "min_profit_margin": 15.0,
+                "competition_level": "medium",
+                "sales_potential": "high",
+                "seasonality_factor": 1.0
+            }},
+            "product_characteristics": {{
+                "category": "автозапчасти",
+                "subcategory": "подвеска",
+                "is_hazardous": false,
+                "is_fragile": false,
+                "average_weight_kg": 1.5,
+                "typical_volume_l": 0.5
+            }},
+            "marketplace_tariffs": {{
+                "commission_rate": 0.15,
+                "logistics_base": 55.0,
+                "logistics_per_kg": 16.0,
+                "storage_per_day": 0.35,
+                "return_rate": 0.025,
+                "acquiring_fee": 0.015
+            }},
+            "competitive_analysis": {{
+                "price_position": "medium",
+                "recommended_actions": ["оптимизировать упаковку", "улучшить фото"],
+                "profit_optimization_tips": ["снизить логистику", "увеличить средний чек"]
+            }},
+            "confidence_score": 0.85
         }}
         Не добавляй никакой разметки, только валидный JSON.
         """
@@ -521,7 +417,7 @@ class DeepSeekAPIManager:
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=45
             )
             
             if response.status_code == 200:
@@ -531,30 +427,54 @@ class DeepSeekAPIManager:
                 return {"error": f"HTTP {response.status_code}: {response.text}"}
                 
         except Exception as e:
-            logger.error(f"Ошибка DeepSeek (обогащение): {e}")
+            logger.error(f"Ошибка DeepSeek (анализ товара): {e}")
             return {"error": str(e)}
-            
-    def update_tariffs(self, marketplace: str, category: str = "auto_parts") -> Dict[str, Any]:
+    
+    def get_marketplace_insights(
+        self,
+        marketplace: str = "Яндекс Маркет",
+        category: str = "auto_parts"
+    ) -> Dict[str, Any]:
         """
-        Режим 2: Актуализация тарифов маркетплейсов.
+        Получение актуальных инсайтов по маркетплейсу.
         """
         if not self.is_available():
             return {"error": "DeepSeek API недоступен или ключ не задан"}
             
         prompt = f"""
-        Ты аналитик данных маркетплейсов. Предоставь актуальные тарифы для "{marketplace}" 
-        для категории "{category}" на 2026 год.
+        Ты аналитик маркетплейсов с фокусом на {marketplace}.
+        Предоставь актуальные инсайты для продавцов в категории {category} на 2026 год.
         
-        Верни строго JSON в следующем формате (числа как float, без процентов):
+        Верни строго JSON в следующем формате:
         {{
-            "commission_rate": 0.15,
-            "min_commission": 30.0,
-            "logistics_base": 50.0,
-            "logistics_per_kg": 15.0,
-            "storage_per_day": 0.3,
-            "return_fee": 0.02,
-            "acquiring_fee": 0.015,
-            "source": "DeepSeek AI Estimate"
+            "marketplace_trends": {{
+                "growth_rate": 0.15,
+                "top_categories": ["подвеска", "двигатель", "тормозная система"],
+                "emerging_trends": ["электрические компоненты", "гибридные системы"],
+                "seasonal_patterns": {{
+                    "peak_months": [3, 4, 9, 10],
+                    "slow_months": [1, 2, 7, 8]
+                }}
+            }},
+            "tariffs_2026": {{
+                "commission_rate": 0.145,
+                "min_commission": 35.0,
+                "logistics_base": 55.0,
+                "logistics_per_kg": 16.0,
+                "storage_per_day": 0.35,
+                "return_fee": 0.025,
+                "acquiring_fee": 0.015,
+                "delivery_tariffs": {{
+                    "standard": 80.0,
+                    "express": 150.0
+                }}
+            }},
+            "seller_insights": {{
+                "average_margin": 0.22,
+                "top_sellers_features": ["быстрая доставка", "качественные фото", "подробное описание"],
+                "common_mistakes": ["завышенная цена", "плохая упаковка", "медленный ответ на заказы"]
+            }},
+            "source": "DeepSeek AI Professional Analytics"
         }}
         Не добавляй никакой разметки, только валидный JSON.
         """
@@ -575,7 +495,7 @@ class DeepSeekAPIManager:
                 f"{self.base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=45
             )
             
             if response.status_code == 200:
@@ -585,11 +505,11 @@ class DeepSeekAPIManager:
                 return {"error": f"HTTP {response.status_code}: {response.text}"}
                 
         except Exception as e:
-            logger.error(f"Ошибка DeepSeek (тарифы): {e}")
+            logger.error(f"Ошибка DeepSeek (инсайты маркетплейса): {e}")
             return {"error": str(e)}
 
 # ============================================================================
-# БЛОК 5: GOOGLE SHEETS ИНТЕГРАЦИЯ
+# БЛОК 4: GOOGLE SHEETS ИНТЕГРАЦИЯ
 # ============================================================================
 
 try:
@@ -675,12 +595,12 @@ class GoogleSheetsManager:
             return False
 
 # ============================================================================
-# БЛОК 6: ГЕНЕРАТОР ЖИВЫХ ФОРМУЛ EXCEL
+# БЛОК 5: ГЕНЕРАТОР ЖИВЫХ ФОРМУЛ EXCEL (ПРОФЕССИОНАЛЬНЫЙ)
 # ============================================================================
 
 class ExcelFormulaBuilder:
     """
-    Генератор живых формул Excel для юнит-экономики.
+    Профессиональный генератор живых формул Excel для юнит-экономики.
     """
     def __init__(self, col_map: Dict[str, str]):
         self.col_map = col_map
@@ -709,6 +629,21 @@ class ExcelFormulaBuilder:
         rate_cell = self._get_cell("storage_rate", row)
         return f"=IF({length_cell}*{width_cell}*{height_cell}>0, ({length_cell}*{width_cell}*{height_cell}/1000)*{rate_cell}*{days_cell}, 5*{rate_cell}*{days_cell})"
 
+    def build_acquiring_formula(self, row: int = 2) -> str:
+        price_cell = self._get_cell("price", row)
+        rate_cell = self._get_cell("acquiring_rate", row)
+        return f"={price_cell}*{rate_cell}"
+
+    def build_returns_formula(self, row: int = 2) -> str:
+        price_cell = self._get_cell("price", row)
+        rate_cell = self._get_cell("return_rate", row)
+        return f"={price_cell}*{rate_cell}"
+
+    def build_tax_formula(self, row: int = 2) -> str:
+        price_cell = self._get_cell("price", row)
+        rate_cell = self._get_cell("tax_rate", row)
+        return f"={price_cell}*{rate_cell}"
+
     def build_total_expenses_formula(self, row: int = 2) -> str:
         cost = self._get_cell("cost", row)
         commission = self._get_cell("commission", row)
@@ -717,7 +652,10 @@ class ExcelFormulaBuilder:
         acquiring = self._get_cell("acquiring", row)
         tax = self._get_cell("tax", row)
         returns = self._get_cell("returns", row)
-        return f"={cost}+{commission}+{logistics}+{storage}+{acquiring}+{tax}+{returns}"
+        marketing = self._get_cell("marketing", row)
+        packaging = self._get_cell("packaging", row)
+        specific = self._get_cell("specific", row)
+        return f"={cost}+{commission}+{logistics}+{storage}+{acquiring}+{tax}+{returns}+{marketing}+{packaging}+{specific}"
 
     def build_profit_formula(self, row: int = 2) -> str:
         price = self._get_cell("price", row)
@@ -729,6 +667,11 @@ class ExcelFormulaBuilder:
         price = self._get_cell("price", row)
         return f"=IF({price}>0, ({profit}/{price})*100, 0)"
 
+    def build_roi_formula(self, row: int = 2) -> str:
+        profit = self._get_cell("profit", row)
+        cost = self._get_cell("cost", row)
+        return f"=IF({cost}>0, ({profit}/{cost})*100, 0)"
+
     def build_recommended_price_formula(self, row: int = 2) -> str:
         cost = self._get_cell("cost", row)
         logistics_base = self._get_cell("logistics_base", row)
@@ -736,22 +679,82 @@ class ExcelFormulaBuilder:
         comm_rate = self._get_cell("commission_rate", row)
         acquiring_rate = self._get_cell("acquiring_rate", row)
         tax_rate = self._get_cell("tax_rate", row)
-        return f"=MAX(0, ({cost}+{logistics_base}+{storage}) / MAX(0.01, (1 - {comm_rate} - {acquiring_rate} - {tax_rate} - 0.10)))"
+        return_rate = self._get_cell("return_rate", row)
+        return f"=MAX(0, ({cost}+{logistics_base}+{storage}) / MAX(0.01, (1 - {comm_rate} - {acquiring_rate} - {tax_rate} - {return_rate} - 0.10)))"
+
+    def build_break_even_formula(self, row: int = 2) -> str:
+        fixed_costs = self._get_cell("fixed_costs", row)
+        variable_costs = self._get_cell("variable_costs", row)
+        return f"=IF({variable_costs}>0, {fixed_costs}/{variable_costs}, 0)"
 
 # ============================================================================
-# БЛОК 7: FBS-ONLY РАСЧЁТ ЮНИТ-ЭКОНОМИКИ
+# БЛОК 6: ПРОФЕССИОНАЛЬНЫЙ КАЛЬКУЛЯТОР ЮНИТ-ЭКОНОМИКИ (ЯНДЕКС МАРКЕТ)
 # ============================================================================
 
 class FBSUnitEconomicsCalculator:
     """
-    Калькулятор юнит-экономики для режима FBS.
+    Профессиональный калькулятор юнит-экономики для FBS.
+    Специализация: Яндекс Маркет, Ozon, Wildberries.
     """
     
-    ALLOWED_MODES = ["FBS", "FBY"]
+    ALLOWED_MODES = ["FBS", "FBY", "FBP"]
     
     def __init__(self, marketplace_config: Dict[str, Any], tax_system: str = "УСН_6"):
         self.config = marketplace_config
         self.tax_system = tax_system
+        
+        # Настройки по умолчанию для Яндекс Маркет
+        self.yandex_market_defaults = {
+            "commission_rate": 0.145,
+            "min_commission": 35.0,
+            "logistics_base": 55.0,
+            "logistics_per_kg": 16.0,
+            "storage_per_day": 0.35,
+            "acquiring_fee": 0.015,
+            "return_fee": 0.025,
+            "mode_multipliers": {"FBS": 1.0, "FBY": 0.8, "FBP": 0.7}
+        }
+        
+        # Настройки для Ozon
+        self.ozon_defaults = {
+            "commission_rate": 0.15,
+            "min_commission": 30.0,
+            "logistics_base": 50.0,
+            "logistics_per_kg": 15.0,
+            "storage_per_day": 0.3,
+            "acquiring_fee": 0.015,
+            "return_fee": 0.02,
+            "mode_multipliers": {"FBS": 1.0, "FBY": 0.75}
+        }
+        
+        # Настройки для Wildberries
+        self.wildberries_defaults = {
+            "commission_rate": 0.16,
+            "min_commission": 28.0,
+            "logistics_base": 45.0,
+            "logistics_per_kg": 14.0,
+            "storage_per_day": 0.25,
+            "acquiring_fee": 0.015,
+            "return_fee": 0.018,
+            "mode_multipliers": {"FBS": 1.0, "FBY": 0.7}
+        }
+        
+        # Применяем настройки для Яндекс Маркет по умолчанию
+        if not marketplace_config:
+            self.config = self.yandex_market_defaults.copy()
+        
+    def set_marketplace(self, marketplace: str):
+        """
+        Устанавливает конфигурацию для конкретного маркетплейса.
+        """
+        if marketplace == "Яндекс Маркет":
+            self.config.update(self.yandex_market_defaults)
+        elif marketplace == "Ozon":
+            self.config.update(self.ozon_defaults)
+        elif marketplace == "Wildberries":
+            self.config.update(self.wildberries_defaults)
+        else:
+            logger.warning(f"Неизвестный маркетплейс: {marketplace}")
         
     def calculate(
         self,
@@ -763,6 +766,7 @@ class FBSUnitEconomicsCalculator:
         height_cm: float,
         days_in_storage: int = 30,
         operation_mode: str = "FBS",
+        marketplace: str = "Яндекс Маркет",
         category: str = "auto_parts",
         is_hazardous: bool = False,
         is_fragile: bool = False,
@@ -772,68 +776,96 @@ class FBSUnitEconomicsCalculator:
         storage_rate: Optional[float] = None,
         acquiring_rate: Optional[float] = None,
         return_rate: Optional[float] = None,
-        tax_rate: Optional[float] = None
+        tax_rate: Optional[float] = None,
+        marketing_cost: float = 0.0,
+        packaging_cost: float = 0.0
     ) -> Dict[str, Any]:
         """
-        Основной метод расчёта юнит-экономики для FBS.
+        Профессиональный расчёт юнит-экономики для FBS.
         """
         if operation_mode not in self.ALLOWED_MODES:
-            raise ValueError(f"Режим {operation_mode} не поддерживается. Используйте FBS или FBY.")
+            raise ValueError(f"Режим {operation_mode} не поддерживается. Используйте FBS, FBY или FBP.")
         
         if price <= 0 or cost <= 0:
             raise ValueError("Цена и себестоимость должны быть положительными")
         
-        # === 1. КОМИССИЯ МП ===
-        comm_rate = commission_rate if commission_rate is not None else self.config.get("commission_rate", 0.15)
+        # === 1. УСТАНАВЛИВАЕМ КОНФИГУРАЦИЮ ДЛЯ МАРКЕТПЛЕЙСА ===
+        if marketplace == "Яндекс Маркет":
+            defaults = self.yandex_market_defaults
+        elif marketplace == "Ozon":
+            defaults = self.ozon_defaults
+        elif marketplace == "Wildberries":
+            defaults = self.wildberries_defaults
+        else:
+            defaults = self.config
+        
+        # === 2. КОМИССИЯ МАРКЕТПЛЕЙСА ===
+        comm_rate = commission_rate if commission_rate is not None else defaults.get("commission_rate", 0.145)
         category_rates = self.config.get("category_rates", {})
         if category in category_rates:
             comm_rate = category_rates[category]
             
-        commission = max(price * comm_rate, self.config.get("min_commission", 0.0))
+        commission = max(price * comm_rate, defaults.get("min_commission", 35.0))
         
-        # === 2. ЛОГИСТИКА FBS ===
+        # === 3. ЛОГИСТИКА FBS (ОПТИМИЗИРОВАННАЯ ДЛЯ ЯНДЕКС МАРКЕТ) ===
         vol_weight = (length_cm * width_cm * height_cm) / 5000.0 if length_cm > 0 else 0
         billable_weight = max(weight_kg, vol_weight)
         billable_weight = math.ceil(billable_weight * 2) / 2
         
-        log_base = logistics_base if logistics_base is not None else self.config.get("logistics_base", 50.0)
-        log_per_kg = logistics_per_kg if logistics_per_kg is not None else self.config.get("logistics_per_kg", 15.0)
+        log_base = logistics_base if logistics_base is not None else defaults.get("logistics_base", 55.0)
+        log_per_kg = logistics_per_kg if logistics_per_kg is not None else defaults.get("logistics_per_kg", 16.0)
         logistics = log_base + (billable_weight * log_per_kg)
         
-        mode_multipliers = self.config.get("mode_multipliers", {"FBS": 1.0, "FBY": 0.75})
+        # Множители для разных режимов работы
+        mode_multipliers = defaults.get("mode_multipliers", {"FBS": 1.0, "FBY": 0.8, "FBP": 0.7})
         logistics *= mode_multipliers.get(operation_mode, 1.0)
         
-        # === 3. ХРАНЕНИЕ ===
-        volume_liter = (length_cm * width_cm * height_cm) / 1000.0 if length_cm > 0 else 5.0
-        storage_rate_val = storage_rate if storage_rate is not None else self.config.get("storage_per_day", 0.3)
+        # Надбавка за опасные/хрупкие товары
+        if is_hazardous:
+            logistics *= 1.2
+        if is_fragile:
+            logistics *= 1.15
         
+        # === 4. ХРАНЕНИЕ (С УЧЁТОМ СЕЗОННОСТИ) ===
+        volume_liter = (length_cm * width_cm * height_cm) / 1000.0 if length_cm > 0 else 5.0
+        storage_rate_val = storage_rate if storage_rate is not None else defaults.get("storage_per_day", 0.35)
+        
+        # Прогрессивная шкала хранения (чем дольше, тем дороже)
         if days_in_storage <= 60:
             storage_multiplier = 1.0
         elif days_in_storage <= 90:
-            storage_multiplier = 2.0
+            storage_multiplier = 1.5
         elif days_in_storage <= 180:
-            storage_multiplier = 4.0
+            storage_multiplier = 2.5
+        elif days_in_storage <= 270:
+            storage_multiplier = 5.0
         else:
-            storage_multiplier = 8.0
+            storage_multiplier = 10.0
             
         storage_cost = volume_liter * storage_rate_val * days_in_storage * storage_multiplier
         
-        # === 4. ЭКВАЙРИНГ ===
-        acquiring_rate_val = acquiring_rate if acquiring_rate is not None else self.config.get("acquiring_fee", 0.015)
+        # === 5. ЭКВАЙРИНГ ===
+        acquiring_rate_val = acquiring_rate if acquiring_rate is not None else defaults.get("acquiring_fee", 0.015)
         acquiring = price * acquiring_rate_val
         
-        # === 5. ВОЗВРАТЫ ===
-        return_rate_val = return_rate if return_rate is not None else self.config.get("return_fee", 0.02)
+        # === 6. ВОЗВРАТЫ ===
+        return_rate_val = return_rate if return_rate is not None else defaults.get("return_fee", 0.025)
         returns = price * return_rate_val
         
-        # === 6. НАДБАВКИ ===
-        hazardous_surcharge = price * 0.02 if is_hazardous else 0.0
-        fragile_surcharge = price * 0.01 if is_fragile else 0.0
+        # === 7. НАДБАВКИ ЗА ОСОБЕННОСТИ ТОВАРА ===
+        hazardous_surcharge = price * 0.025 if is_hazardous else 0.0
+        fragile_surcharge = price * 0.015 if is_fragile else 0.0
         
-        # === 7. СПЕЦИФИЧЕСКИЕ РАСХОДЫ ===
-        auto_parts_specific = 1.5 + 45.0 + 3.0 + price * 0.02
+        # === 8. СПЕЦИФИЧЕСКИЕ РАСХОДЫ ДЛЯ АВТОЗАПЧАСТЕЙ ===
+        auto_parts_specific = 2.0 + 50.0 + 5.0 + price * 0.025
         
-        # === 8. НАЛОГ ===
+        # === 9. МАРКЕТИНГОВЫЕ РАСХОДЫ ===
+        marketing_expenses = marketing_cost
+        
+        # === 10. УПАКОВКА ===
+        packaging_expenses = packaging_cost
+        
+        # === 11. НАЛОГ (ПРОФЕССИОНАЛЬНЫЙ РАСЧЁТ) ===
         TAX_SYSTEMS = {
             "УСН_6": {"rate": 0.06, "base": "revenue"},
             "УСН_15": {"rate": 0.15, "base": "profit", "min_rate": 0.01},
@@ -847,35 +879,59 @@ class FBSUnitEconomicsCalculator:
         if tax_config["base"] == "revenue":
             tax = price * tax_rate_val
         else:  # profit
-            profit_before_tax = price - cost - commission - logistics - storage_cost - acquiring - returns - auto_parts_specific
+            profit_before_tax = price - cost - commission - logistics - storage_cost - acquiring - returns - auto_parts_specific - marketing_expenses - packaging_expenses
             tax = max(0, profit_before_tax * tax_rate_val)
             if self.tax_system == "УСН_15":
                 min_tax = price * tax_config.get("min_rate", 0.01)
                 tax = max(tax, min_tax)
             
-        # === 9. ИТОГО РАСХОДОВ ===
+        # === 12. ИТОГО РАСХОДОВ ===
         total_expenses = (
             cost + commission + logistics + storage_cost + acquiring + returns +
-            hazardous_surcharge + fragile_surcharge + auto_parts_specific + tax
+            hazardous_surcharge + fragile_surcharge + auto_parts_specific + 
+            marketing_expenses + packaging_expenses + tax
         )
         
-        # === 10. ПРИБЫЛЬ И МЕТРИКИ ===
+        # === 13. ПРИБЫЛЬ И КЛЮЧЕВЫЕ МЕТРИКИ ===
         profit = price - total_expenses
         margin_percent = (profit / price * 100) if price > 0 else 0
         roi = (profit / cost * 100) if cost > 0 else 0
         
-        # === 11. РЕКОМЕНДУЕМАЯ ЦЕНА ===
+        # === 14. ТОЧКА БЕЗУБЫТОЧНОСТИ ===
+        variable_costs_per_unit = (commission + logistics + acquiring + returns + tax) / price
+        fixed_costs_per_unit = (cost + storage_cost + auto_parts_specific + marketing_expenses + packaging_expenses)
+        break_even_volume = fixed_costs_per_unit / (price * (1 - variable_costs_per_unit)) if (1 - variable_costs_per_unit) > 0 else 0
+        
+        # === 15. РЕКОМЕНДУЕМАЯ ЦЕНА (С УЧЁТОМ ТРЕБУЕМОЙ МАРЖИ) ===
+        target_margin = 0.20  # Целевая маржа 20%
         variable_rate = comm_rate + acquiring_rate_val + return_rate_val + tax_rate_val + 0.10
-        fixed_costs = cost + log_base + storage_cost
-        denominator = 1 - variable_rate
-        recommended_min_price = (fixed_costs / denominator) if denominator > 0 else 0
+        fixed_costs = cost + log_base + storage_cost + marketing_expenses + packaging_expenses
+        denominator = 1 - variable_rate - target_margin
+        recommended_min_price = (fixed_costs / denominator) if denominator > 0 else price * 1.5
+        
+        # === 16. ДОПОЛНИТЕЛЬНЫЕ МЕТРИКИ ДЛЯ ЯНДЕКС МАРКЕТ ===
+        yandex_specific = {}
+        if marketplace == "Яндекс Маркет":
+            yandex_specific = {
+                "yandex_commission_optimized": round(commission * 0.95, 2),
+                "yandex_logistics_optimized": round(logistics * 0.9, 2),
+                "yandex_rating_impact": 0.02 if profit > 0 else -0.05,
+                "yandex_competitive_price": round(recommended_min_price * 0.98, 2)
+            }
         
         return {
+            # Основные параметры
             "price": round(price, 2),
             "cost": round(cost, 2),
+            "marketplace": marketplace,
             "operation_mode": operation_mode,
+            "category": category,
+            
+            # Физические параметры
             "billable_weight": round(billable_weight, 2),
             "volume_liter": round(volume_liter, 3),
+            
+            # Расходы
             "commission": round(commission, 2),
             "commission_rate": round(comm_rate * 100, 2),
             "logistics": round(logistics, 2),
@@ -885,75 +941,126 @@ class FBSUnitEconomicsCalculator:
             "hazardous_surcharge": round(hazardous_surcharge, 2),
             "fragile_surcharge": round(fragile_surcharge, 2),
             "auto_parts_specific": round(auto_parts_specific, 2),
+            "marketing_expenses": round(marketing_expenses, 2),
+            "packaging_expenses": round(packaging_expenses, 2),
             "tax": round(tax, 2),
+            
+            # Итоги
             "total_expenses": round(total_expenses, 2),
             "profit": round(profit, 2),
             "margin_percent": round(margin_percent, 2),
             "roi": round(roi, 2),
-            "recommended_min_price": round(recommended_min_price, 2)
+            "break_even_volume": round(break_even_volume, 2),
+            "recommended_min_price": round(recommended_min_price, 2),
+            
+            # Специфические для Яндекс Маркет
+            **yandex_specific
         }
 
-    def calculate_single(
+    def calculate_batch(
         self,
-        price: float,
-        cost: float,
-        weight_kg: float = 1.0,
-        length_cm: float = 0,
-        width_cm: float = 0,
-        height_cm: float = 0,
+        df: pd.DataFrame,
+        artikul_col: str,
+        price_col: str,
+        cost_col: str,
+        weight_col: Optional[str] = None,
+        length_col: Optional[str] = None,
+        width_col: Optional[str] = None,
+        height_col: Optional[str] = None,
+        name_col: Optional[str] = None,
         days_in_storage: int = 30,
-        operation_mode: str = "FBS"
-    ) -> Dict[str, Any]:
+        operation_mode: str = "FBS",
+        marketplace: str = "Яндекс Маркет",
+        **kwargs
+    ) -> pd.DataFrame:
         """
-        Упрощённый расчёт для единичного товара.
+        Пакетный расчёт юнит-экономики для всех товаров в DataFrame.
         """
-        return self.calculate(
-            price=price,
-            cost=cost,
-            weight_kg=weight_kg,
-            length_cm=length_cm,
-            width_cm=width_cm,
-            height_cm=height_cm,
-            days_in_storage=days_in_storage,
-            operation_mode=operation_mode
-        )
+        results = []
+        
+        for idx, row in df.iterrows():
+            try:
+                price = float(row.get(price_col, 0) or 0)
+                cost = float(row.get(cost_col, 0) or 0)
+                
+                if price <= 0 or cost <= 0:
+                    continue
+                
+                weight = float(row.get(weight_col, 1.0) or 1.0) if weight_col and weight_col in row else 1.0
+                length = float(row.get(length_col, 0) or 0) if length_col and length_col in row else 0
+                width = float(row.get(width_col, 0) or 0) if width_col and width_col in row else 0
+                height = float(row.get(height_col, 0) or 0) if height_col and height_col in row else 0
+                
+                result = self.calculate(
+                    price=price,
+                    cost=cost,
+                    weight_kg=weight,
+                    length_cm=length,
+                    width_cm=width,
+                    height_cm=height,
+                    days_in_storage=days_in_storage,
+                    operation_mode=operation_mode,
+                    marketplace=marketplace,
+                    **kwargs
+                )
+                
+                result["Артикул"] = row.get(artikul_col, f"SKU_{idx}")
+                result["Наименование"] = row.get(name_col, "") if name_col and name_col in row else ""
+                
+                # Сохраняем исходные данные
+                result["weight_original"] = weight
+                result["length_original"] = length
+                result["width_original"] = width
+                result["height_original"] = height
+                result["storage_days"] = days_in_storage
+                
+                results.append(result)
+                
+            except Exception as e:
+                logger.warning(f"Ошибка расчёта для строки {idx}: {e}")
+                continue
+        
+        return pd.DataFrame(results)
 
 # ============================================================================
-# БЛОК 8: ЭКСПОРТЕР С ЖИВЫМИ ФОРМУЛАМИ EXCEL
+# БЛОК 7: ПРОФЕССИОНАЛЬНЫЙ ЭКСПОРТЕР В EXCEL С ЖИВЫМИ ФОРМУЛАМИ
 # ============================================================================
 
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
-    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
+    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule
+    from openpyxl.chart import BarChart, Reference, PieChart
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-class LiveExcelExporter:
+class ProfessionalExcelExporter:
     """
-    Экспорт результатов расчёта в Excel с ЖИВЫМИ ФОРМУЛАМИ.
+    Профессиональный экспорт в Excel с живыми формулами и визуализацией.
     """
     def __init__(self):
         if not OPENPYXL_AVAILABLE:
             raise ImportError("openpyxl не установлен. pip install openpyxl")
-            
+    
     def export_with_formulas(
         self,
         df_results: pd.DataFrame,
         output_path: str,
-        marketplace_name: str = "Ozon"
+        marketplace_name: str = "Яндекс Маркет"
     ) -> bool:
         """
-        Экспорт DataFrame в Excel с живыми формулами.
+        Экспорт в Excel с живыми формулами и профессиональной визуализацией.
         """
         try:
             wb = Workbook()
-            ws = wb.active
-            ws.title = "Юнит-экономика FBS"
             
-            # === ЗАГОЛОВКИ ===
+            # === ЛИСТ 1: Юнит-экономика ===
+            ws1 = wb.active
+            ws1.title = "Юнит-экономика FBS"
+            
+            # Расширенные заголовки
             headers = [
                 "Артикул", "Наименование", "Цена продажи", "Себестоимость",
                 "Вес, кг", "Длина, см", "Ширина, см", "Высота, см",
@@ -961,120 +1068,236 @@ class LiveExcelExporter:
                 "Ставка хранения, ₽/день", "Дней хранения",
                 "Объёмный вес, кг", "Оплачиваемый вес, кг",
                 "Комиссия, ₽", "Логистика, ₽", "Хранение, ₽",
-                "Эквайринг, ₽", "Возвраты, ₽", "Авто-специфика, ₽", "Налог, ₽",
-                "ИТОГО расходов, ₽", "ПРИБЫЛЬ, ₽", "МАРЖА, %", "Рек. мин. цена, ₽"
+                "Эквайринг, ₽", "Возвраты, ₽", "Авто-специфика, ₽",
+                "Маркетинг, ₽", "Упаковка, ₽", "Налог, ₽",
+                "ИТОГО расходов, ₽", "ПРИБЫЛЬ, ₽", "МАРЖА, %", "ROI, %",
+                "Рек. мин. цена, ₽", "Точка безубыточности"
             ]
             
+            # Стили заголовков
+            header_fill = PatternFill(start_color="1a1a2e", end_color="1a1a2e", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF", size=10)
+            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
             for col_idx, header in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_idx, value=header)
-                cell.font = Font(bold=True, color="FFFFFF")
-                cell.fill = PatternFill(start_color="0F3460", end_color="0F3460", fill_type="solid")
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-                
+                cell = ws1.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+            
             # === ДАННЫЕ И ФОРМУЛЫ ===
             for row_idx, (_, row) in enumerate(df_results.iterrows(), 2):
-                # Вводные данные (желтые ячейки)
-                ws.cell(row=row_idx, column=1, value=escape_excel_text(row.get("Артикул", "")))
-                ws.cell(row=row_idx, column=2, value=str(row.get("Наименование", "")))
-                ws.cell(row=row_idx, column=3, value=float(row.get("price", 0)))
-                ws.cell(row=row_idx, column=3).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=4, value=float(row.get("cost", 0)))
-                ws.cell(row=row_idx, column=4).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=5, value=float(row.get("weight", 1.0)))
-                ws.cell(row=row_idx, column=5).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=6, value=float(row.get("length", 0)))
-                ws.cell(row=row_idx, column=6).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=7, value=float(row.get("width", 0)))
-                ws.cell(row=row_idx, column=7).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=8, value=float(row.get("height", 0)))
-                ws.cell(row=row_idx, column=8).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=9, value=float(row.get("commission_rate", 15.0)))
-                ws.cell(row=row_idx, column=9).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=10, value=float(row.get("logistics_base", 50.0)))
-                ws.cell(row=row_idx, column=10).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=11, value=float(row.get("logistics_per_kg", 15.0)))
-                ws.cell(row=row_idx, column=11).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=12, value=float(row.get("storage_rate", 0.3)))
-                ws.cell(row=row_idx, column=12).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-                ws.cell(row=row_idx, column=13, value=int(row.get("storage_days", 30)))
-                ws.cell(row=row_idx, column=13).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                # Вводные данные (жёлтые ячейки)
+                ws1.cell(row=row_idx, column=1, value=escape_excel_text(row.get("Артикул", "")))
+                ws1.cell(row=row_idx, column=2, value=str(row.get("Наименование", "")))
+                ws1.cell(row=row_idx, column=3, value=float(row.get("price", 0)))
+                ws1.cell(row=row_idx, column=3).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=4, value=float(row.get("cost", 0)))
+                ws1.cell(row=row_idx, column=4).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=5, value=float(row.get("weight_original", 1.0)))
+                ws1.cell(row=row_idx, column=5).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=6, value=float(row.get("length_original", 0)))
+                ws1.cell(row=row_idx, column=6).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=7, value=float(row.get("width_original", 0)))
+                ws1.cell(row=row_idx, column=7).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=8, value=float(row.get("height_original", 0)))
+                ws1.cell(row=row_idx, column=8).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=9, value=float(row.get("commission_rate", 14.5)))
+                ws1.cell(row=row_idx, column=9).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=10, value=float(row.get("logistics_base", 55.0)))
+                ws1.cell(row=row_idx, column=10).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=11, value=float(row.get("logistics_per_kg", 16.0)))
+                ws1.cell(row=row_idx, column=11).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=12, value=float(row.get("storage_rate", 0.35)))
+                ws1.cell(row=row_idx, column=12).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+                ws1.cell(row=row_idx, column=13, value=int(row.get("storage_days", 30)))
+                ws1.cell(row=row_idx, column=13).fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
                 
-                # Формулы (зеленые ячейки)
-                # Объёмный вес = (F*G*H)/5000
-                ws.cell(row=row_idx, column=14, value=f"=IF(F{row_idx}*G{row_idx}*H{row_idx}>0, (F{row_idx}*G{row_idx}*H{row_idx})/5000, 0)")
-                ws.cell(row=row_idx, column=14).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Расчётные формулы (зелёные ячейки)
+                # Объёмный вес
+                ws1.cell(row=row_idx, column=14, value=f"=IF(F{row_idx}*G{row_idx}*H{row_idx}>0, (F{row_idx}*G{row_idx}*H{row_idx})/5000, 0)")
+                ws1.cell(row=row_idx, column=14).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Оплачиваемый вес = MAX(E, N)
-                ws.cell(row=row_idx, column=15, value=f"=CEILING(MAX(E{row_idx}, N{row_idx}), 0.5)")
-                ws.cell(row=row_idx, column=15).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Оплачиваемый вес
+                ws1.cell(row=row_idx, column=15, value=f"=CEILING(MAX(E{row_idx}, N{row_idx}), 0.5)")
+                ws1.cell(row=row_idx, column=15).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Комиссия = MAX(C * (I/100), 30)
-                ws.cell(row=row_idx, column=16, value=f"=MAX(C{row_idx}*(I{row_idx}/100), 30)")
-                ws.cell(row=row_idx, column=16).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Комиссия
+                ws1.cell(row=row_idx, column=16, value=f"=MAX(C{row_idx}*(I{row_idx}/100), 35)")
+                ws1.cell(row=row_idx, column=16).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Логистика = J + (O * K)
-                ws.cell(row=row_idx, column=17, value=f"=J{row_idx}+(O{row_idx}*K{row_idx})")
-                ws.cell(row=row_idx, column=17).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Логистика
+                ws1.cell(row=row_idx, column=17, value=f"=J{row_idx}+(O{row_idx}*K{row_idx})")
+                ws1.cell(row=row_idx, column=17).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Хранение = (F*G*H/1000) * L * M
-                ws.cell(row=row_idx, column=18, value=f"=IF(F{row_idx}*G{row_idx}*H{row_idx}>0, (F{row_idx}*G{row_idx}*H{row_idx}/1000)*L{row_idx}*M{row_idx}, 5*L{row_idx}*M{row_idx})")
-                ws.cell(row=row_idx, column=18).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Хранение
+                ws1.cell(row=row_idx, column=18, value=f"=IF(F{row_idx}*G{row_idx}*H{row_idx}>0, (F{row_idx}*G{row_idx}*H{row_idx}/1000)*L{row_idx}*M{row_idx}, 5*L{row_idx}*M{row_idx})")
+                ws1.cell(row=row_idx, column=18).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Эквайринг = C * 0.015
-                ws.cell(row=row_idx, column=19, value=f"=C{row_idx}*0.015")
-                ws.cell(row=row_idx, column=19).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Эквайринг
+                ws1.cell(row=row_idx, column=19, value=f"=C{row_idx}*0.015")
+                ws1.cell(row=row_idx, column=19).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Возвраты = C * 0.02
-                ws.cell(row=row_idx, column=20, value=f"=C{row_idx}*0.02")
-                ws.cell(row=row_idx, column=20).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Возвраты
+                ws1.cell(row=row_idx, column=20, value=f"=C{row_idx}*0.025")
+                ws1.cell(row=row_idx, column=20).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Авто-специфика = 1.5 + 45 + 3 + C*0.02
-                ws.cell(row=row_idx, column=21, value=f"=1.5+45+3+C{row_idx}*0.02")
-                ws.cell(row=row_idx, column=21).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Авто-специфика
+                ws1.cell(row=row_idx, column=21, value=f"=2+50+5+C{row_idx}*0.025")
+                ws1.cell(row=row_idx, column=21).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # Налог = C * 0.06 (УСН 6%)
-                ws.cell(row=row_idx, column=22, value=f"=C{row_idx}*0.06")
-                ws.cell(row=row_idx, column=22).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                # Маркетинг
+                ws1.cell(row=row_idx, column=22, value=float(row.get("marketing_expenses", 0)))
+                ws1.cell(row=row_idx, column=22).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # ИТОГО расходов = D + P + Q + R + S + T + U + V
-                ws.cell(row=row_idx, column=23, value=f"=D{row_idx}+P{row_idx}+Q{row_idx}+R{row_idx}+S{row_idx}+T{row_idx}+U{row_idx}+V{row_idx}")
-                ws.cell(row=row_idx, column=23).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-                ws.cell(row=row_idx, column=23).font = Font(bold=True)
+                # Упаковка
+                ws1.cell(row=row_idx, column=23, value=float(row.get("packaging_expenses", 0)))
+                ws1.cell(row=row_idx, column=23).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # ПРИБЫЛЬ = C - W
-                ws.cell(row=row_idx, column=24, value=f"=C{row_idx}-W{row_idx}")
-                ws.cell(row=row_idx, column=24).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-                ws.cell(row=row_idx, column=24).font = Font(bold=True, color="006600")
+                # Налог
+                ws1.cell(row=row_idx, column=24, value=f"=C{row_idx}*0.06")
+                ws1.cell(row=row_idx, column=24).fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 
-                # МАРЖА = (X / C) * 100
-                ws.cell(row=row_idx, column=25, value=f"=IF(C{row_idx}>0, (X{row_idx}/C{row_idx})*100, 0)")
-                ws.cell(row=row_idx, column=25).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-                ws.cell(row=row_idx, column=25).font = Font(bold=True)
-                ws.cell(row=row_idx, column=25).number_format = '0.00"%"'
+                # ИТОГО расходов (синяя)
+                ws1.cell(row=row_idx, column=25, value=f"=D{row_idx}+P{row_idx}+Q{row_idx}+R{row_idx}+S{row_idx}+T{row_idx}+U{row_idx}+V{row_idx}+W{row_idx}+X{row_idx}")
+                ws1.cell(row=row_idx, column=25).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+                ws1.cell(row=row_idx, column=25).font = Font(bold=True)
                 
-                # Рек. мин. цена = (D + J + R) / (1 - I/100 - 0.015 - 0.02 - 0.06 - 0.10)
-                ws.cell(row=row_idx, column=26, value=f"=MAX(0, (D{row_idx}+J{row_idx}+R{row_idx}) / MAX(0.01, (1 - I{row_idx}/100 - 0.015 - 0.02 - 0.06 - 0.10)))")
-                ws.cell(row=row_idx, column=26).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-                ws.cell(row=row_idx, column=26).font = Font(bold=True, color="CC0000")
+                # ПРИБЫЛЬ (зелёная)
+                ws1.cell(row=row_idx, column=26, value=f"=C{row_idx}-Y{row_idx}")
+                ws1.cell(row=row_idx, column=26).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+                ws1.cell(row=row_idx, column=26).font = Font(bold=True, color="006600")
                 
-            # === АВТОШИРИНА КОЛОНОК ===
-            for col_idx in range(1, 27):
-                ws.column_dimensions[get_column_letter(col_idx)].width = 15
+                # МАРЖА
+                ws1.cell(row=row_idx, column=27, value=f"=IF(C{row_idx}>0, (Z{row_idx}/C{row_idx})*100, 0)")
+                ws1.cell(row=row_idx, column=27).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+                ws1.cell(row=row_idx, column=27).font = Font(bold=True)
+                ws1.cell(row=row_idx, column=27).number_format = '0.00"%"'
                 
+                # ROI
+                ws1.cell(row=row_idx, column=28, value=f"=IF(D{row_idx}>0, (Z{row_idx}/D{row_idx})*100, 0)")
+                ws1.cell(row=row_idx, column=28).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+                ws1.cell(row=row_idx, column=28).number_format = '0.00"%"'
+                
+                # Рекомендуемая цена
+                ws1.cell(row=row_idx, column=29, value=f"=MAX(0, (D{row_idx}+J{row_idx}+R{row_idx}+V{row_idx}+W{row_idx}) / MAX(0.01, (1 - I{row_idx}/100 - 0.015 - 0.025 - 0.06 - 0.10)))")
+                ws1.cell(row=row_idx, column=29).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+                ws1.cell(row=row_idx, column=29).font = Font(bold=True, color="CC0000")
+                
+                # Точка безубыточности
+                ws1.cell(row=row_idx, column=30, value=f"=IF((C{row_idx}*(1-I{row_idx}/100-0.015-0.025-0.06))>0, (D{row_idx}+R{row_idx}+U{row_idx}+V{row_idx}+W{row_idx})/(C{row_idx}*(1-I{row_idx}/100-0.015-0.025-0.06)), 0)")
+                ws1.cell(row=row_idx, column=30).fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+                ws1.cell(row=row_idx, column=30).number_format = '0.00'
+            
+            # === ФОРМАТИРОВАНИЕ КОЛОНОК ===
+            for col_idx in range(1, 31):
+                ws1.column_dimensions[get_column_letter(col_idx)].width = 15
+            
             # === ЗАМОРОЗКА ПЕРВОЙ СТРОКИ ===
-            ws.freeze_panes = "A2"
+            ws1.freeze_panes = "A2"
             
             # === УСЛОВНОЕ ФОРМАТИРОВАНИЕ ===
+            # Красный для убыточных
             red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
             red_font = Font(color="9C0006")
-            ws.conditional_formatting.add(
-                f"X2:X{len(df_results) + 1}",
+            ws1.conditional_formatting.add(
+                f"Z2:Z{len(df_results) + 1}",
                 CellIsRule(operator="lessThan", formula=["0"], fill=red_fill, font=red_font)
             )
             
+            # Зелёный для прибыльных
+            green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            green_font = Font(color="006100")
+            ws1.conditional_formatting.add(
+                f"Z2:Z{len(df_results) + 1}",
+                CellIsRule(operator="greaterThan", formula=["0"], fill=green_fill, font=green_font)
+            )
+            
+            # === ЛИСТ 2: КРАТКИЙ ОТЧЁТ ===
+            ws2 = wb.create_sheet("Краткий отчёт")
+            
+            # Заголовок
+            ws2.merge_cells('A1:D1')
+            title_cell = ws2.cell(row=1, column=1, value=f"📊 Юнит-экономика {marketplace_name} - Краткий отчёт")
+            title_cell.font = Font(bold=True, size=14)
+            title_cell.alignment = Alignment(horizontal="center")
+            
+            # Статистика
+            stats = [
+                ["Показатель", "Значение", "Единица измерения"],
+                ["Всего SKU", len(df_results), "шт."],
+                ["Прибыльных SKU", (df_results['profit'] > 0).sum(), "шт."],
+                ["Убыточных SKU", (df_results['profit'] < 0).sum(), "шт."],
+                ["Средняя маржа", f"{df_results['margin_percent'].mean():.1f}", "%"],
+                ["Медианная маржа", f"{df_results['margin_percent'].median():.1f}", "%"],
+                ["Общая прибыль", f"{df_results['profit'].sum():,.0f}", "₽"],
+                ["Средний ROI", f"{df_results['roi'].mean():.1f}", "%"],
+                ["Средняя рекомендуемая цена", f"{df_results['recommended_min_price'].mean():.0f}", "₽"]
+            ]
+            
+            for row_idx, row_data in enumerate(stats, 3):
+                for col_idx, value in enumerate(row_data, 1):
+                    ws2.cell(row=row_idx, column=col_idx, value=value)
+            
+            # Форматирование
+            for col_idx in range(1, 4):
+                ws2.column_dimensions[get_column_letter(col_idx)].width = 25
+            
+            # === ЛИСТ 3: РЕКОМЕНДАЦИИ ===
+            ws3 = wb.create_sheet("Рекомендации")
+            
+            ws3.merge_cells('A1:C1')
+            title_cell = ws3.cell(row=1, column=1, value="💡 Рекомендации по оптимизации")
+            title_cell.font = Font(bold=True, size=14)
+            title_cell.alignment = Alignment(horizontal="center")
+            
+            # Анализ и рекомендации
+            unprofitable_pct = (df_results['profit'] < 0).sum() / len(df_results) * 100
+            median_margin = df_results['margin_percent'].median()
+            underpriced_pct = (df_results['price'] < df_results['recommended_min_price']).sum() / len(df_results) * 100
+            
+            recommendations = [
+                ["Категория", "Проблема", "Рекомендация"],
+            ]
+            
+            if unprofitable_pct > 10:
+                recommendations.append([
+                    "Убыточность",
+                    f"{unprofitable_pct:.1f}% товаров убыточны",
+                    "Пересмотрите цены или откажитесь от этих позиций"
+                ])
+            
+            if median_margin < 15:
+                recommendations.append([
+                    "Низкая маржа",
+                    f"Медианная маржа {median_margin:.1f}%",
+                    "Повысьте цены или снизьте закупочные цены"
+                ])
+            
+            if underpriced_pct > 20:
+                recommendations.append([
+                    "Недооценка",
+                    f"{underpriced_pct:.1f}% товаров недооценены",
+                    "Повысьте цены до рекомендуемого уровня"
+                ])
+            
+            if len(recommendations) == 1:
+                recommendations.append([
+                    "Отлично!",
+                    "Все показатели в норме",
+                    "Продолжайте мониторинг и оптимизацию"
+                ])
+            
+            for row_idx, row_data in enumerate(recommendations, 3):
+                for col_idx, value in enumerate(row_data, 1):
+                    ws3.cell(row=row_idx, column=col_idx, value=value)
+            
+            for col_idx in range(1, 4):
+                ws3.column_dimensions[get_column_letter(col_idx)].width = 30
+            
             # === СОХРАНЕНИЕ ===
             wb.save(output_path)
-            logger.info(f"✅ Excel с живыми формулами сохранён: {output_path}")
+            logger.info(f"✅ Профессиональный Excel с живыми формулами сохранён: {output_path}")
             return True
             
         except Exception as e:
@@ -1082,92 +1305,115 @@ class LiveExcelExporter:
             return False
 
 # ============================================================================
-# БЛОК 9: ВИЗУАЛИЗАЦИЯ ДАННЫХ
+# БЛОК 8: ПРОФЕССИОНАЛЬНАЯ ВИЗУАЛИЗАЦИЯ
 # ============================================================================
 
-class DataVisualizer:
+class ProfessionalVisualizer:
     """
-    Класс для визуализации данных юнит-экономики.
+    Профессиональная визуализация данных юнит-экономики.
     """
     
     @staticmethod
     def plot_margin_distribution(df: pd.DataFrame) -> go.Figure:
-        """
-        Создаёт гистограмму распределения маржи.
-        """
+        """Профессиональная визуализация распределения маржи."""
         if df.empty or 'margin_percent' not in df.columns:
             fig = go.Figure()
             fig.add_annotation(text="Нет данных для визуализации", showarrow=False)
             return fig
-            
-        fig = go.Figure()
-        fig.add_trace(go.Histogram(
-            x=df['margin_percent'],
-            nbinsx=30,
-            name='Маржа',
-            marker_color='#1f77b4',
-            hovertemplate='Маржа: %{x:.1f}%<br>Кол-во: %{y}'
-        ))
         
-        # Добавляем вертикальные линии
-        fig.add_vline(x=0, line_dash="dash", line_color="red", annotation_text="0% (Break-even)")
-        fig.add_vline(x=15, line_dash="dash", line_color="green", annotation_text="15% (Целевая)")
+        # Категории маржи
+        bins = [-100, -25, -10, 0, 5, 10, 15, 20, 30, 50, 100]
+        labels = ['<-25%', '-25% - -10%', '-10% - 0%', '0% - 5%', '5% - 10%', 
+                  '10% - 15%', '15% - 20%', '20% - 30%', '30% - 50%', '>50%']
+        
+        df['margin_category'] = pd.cut(df['margin_percent'], bins=bins, labels=labels)
+        distribution = df['margin_category'].value_counts().reindex(labels, fill_value=0)
+        
+        colors = ['#d62728', '#e6550d', '#fd8d3c', '#feb24c', '#fed976', 
+                  '#a8d08d', '#74c476', '#31a354', '#238b45', '#006d2c']
+        
+        fig = go.Figure(data=[go.Bar(
+            x=distribution.index,
+            y=distribution.values,
+            marker_color=colors,
+            text=distribution.values,
+            textposition='auto',
+            hovertemplate='Маржа: %{x}<br>Кол-во: %{y}<extra></extra>'
+        )])
+        
+        fig.add_hline(y=0, line_dash="dash", line_color="gray")
         
         fig.update_layout(
-            title="Распределение маржи по товарам",
-            xaxis_title="Маржа, %",
+            title=dict(
+                text="📊 Распределение маржи по товарам",
+                font=dict(size=18, color='#1a1a2e')
+            ),
+            xaxis_title="Диапазон маржи, %",
             yaxis_title="Количество товаров",
             template="plotly_white",
-            height=400
+            height=450,
+            showlegend=False,
+            bargap=0.1,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial, sans-serif")
         )
         
         return fig
     
     @staticmethod
-    def plot_profit_top(df: pd.DataFrame, n: int = 20) -> go.Figure:
-        """
-        Создаёт столбчатую диаграмму топ-N товаров по прибыли.
-        """
+    def plot_profit_analysis(df: pd.DataFrame) -> go.Figure:
+        """Профессиональный анализ прибыли."""
         if df.empty or 'profit' not in df.columns:
             fig = go.Figure()
             fig.add_annotation(text="Нет данных для визуализации", showarrow=False)
             return fig
-            
-        top_profit = df.nlargest(n, 'profit')[['Артикул', 'profit', 'margin_percent']]
-        top_profit = top_profit.sort_values('profit', ascending=True)
         
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            y=top_profit['Артикул'],
-            x=top_profit['profit'],
+        # Топ по прибыли и убыткам
+        top_profit = df.nlargest(15, 'profit')
+        top_loss = df.nsmallest(15, 'profit')
+        combined = pd.concat([top_loss, top_profit])
+        
+        colors = ['#d62728' if x < 0 else '#2ca02c' for x in combined['profit']]
+        
+        fig = go.Figure(data=[go.Bar(
+            y=combined['Артикул'],
+            x=combined['profit'],
             orientation='h',
-            marker_color='green',
-            text=top_profit['margin_percent'].apply(lambda x: f'{x:.1f}%'),
+            marker_color=colors,
+            text=combined['profit'].apply(lambda x: f'{x:,.0f} ₽'),
             textposition='outside',
-            name='Прибыль',
-            hovertemplate='Артикул: %{y}<br>Прибыль: %{x:.0f} ₽<br>Маржа: %{text}'
-        ))
+            hovertemplate='Артикул: %{y}<br>Прибыль: %{x:,.0f} ₽<br>Маржа: %{customdata:.1f}%',
+            customdata=combined['margin_percent']
+        )])
+        
+        fig.add_vline(x=0, line_dash="dash", line_color="gray", line_width=1)
         
         fig.update_layout(
-            title=f"Топ {n} товаров по прибыли",
+            title=dict(
+                text="📈 Топ товаров по прибыли и убыткам",
+                font=dict(size=18, color='#1a1a2e')
+            ),
             xaxis_title="Прибыль, ₽",
             yaxis_title="Артикул",
             template="plotly_white",
-            height=500
+            height=500,
+            showlegend=False,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial, sans-serif")
         )
         
         return fig
     
     @staticmethod
     def plot_cost_breakdown(result: Dict[str, Any]) -> go.Figure:
-        """
-        Создаёт круговую диаграмму структуры расходов.
-        """
+        """Профессиональная визуализация структуры расходов."""
         if not result:
             fig = go.Figure()
             fig.add_annotation(text="Нет данных", showarrow=False)
             return fig
-            
+        
         cost_categories = {
             'Себестоимость': result.get('cost', 0),
             'Комиссия МП': result.get('commission', 0),
@@ -1176,6 +1422,8 @@ class DataVisualizer:
             'Эквайринг': result.get('acquiring', 0),
             'Возвраты': result.get('returns', 0),
             'Налоги': result.get('tax', 0),
+            'Маркетинг': result.get('marketing_expenses', 0),
+            'Упаковка': result.get('packaging_expenses', 0),
             'Прочие': result.get('auto_parts_specific', 0)
         }
         
@@ -1187,37 +1435,83 @@ class DataVisualizer:
             fig.add_annotation(text="Нет данных", showarrow=False)
             return fig
         
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
         
         fig = go.Figure(data=[go.Pie(
             labels=list(cost_categories.keys()),
             values=list(cost_categories.values()),
-            hole=0.4,
+            hole=0.45,
             marker=dict(colors=colors[:len(cost_categories)]),
             textinfo='label+percent',
-            textposition='outside'
+            textposition='outside',
+            hovertemplate='%{label}<br>%{value:,.0f} ₽ (%{percent})<extra></extra>'
         )])
         
         fig.update_layout(
-            title="Структура расходов",
+            title=dict(
+                text="💰 Структура расходов",
+                font=dict(size=18, color='#1a1a2e')
+            ),
             template="plotly_white",
             height=450,
-            showlegend=False
+            showlegend=False,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial, sans-serif")
+        )
+        
+        return fig
+    
+    @staticmethod
+    def plot_marketplace_comparison(df: pd.DataFrame, marketplace: str) -> go.Figure:
+        """Сравнение показателей для маркетплейса."""
+        if df.empty:
+            fig = go.Figure()
+            fig.add_annotation(text="Нет данных", showarrow=False)
+            return fig
+        
+        metrics = {
+            'Средняя маржа': df['margin_percent'].mean(),
+            'Медианная маржа': df['margin_percent'].median(),
+            'Средний ROI': df['roi'].mean(),
+            '% прибыльных': (df['profit'] > 0).sum() / len(df) * 100,
+            'Средняя прибыль': df['profit'].mean()
+        }
+        
+        fig = go.Figure(data=[go.Bar(
+            x=list(metrics.keys()),
+            y=list(metrics.values()),
+            marker_color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'],
+            text=[f"{v:.1f}" for v in metrics.values()],
+            textposition='auto',
+            hovertemplate='%{x}<br>%{y:.1f}<extra></extra>'
+        )])
+        
+        fig.update_layout(
+            title=dict(
+                text=f"📊 Ключевые метрики для {marketplace}",
+                font=dict(size=18, color='#1a1a2e')
+            ),
+            yaxis_title="Значение",
+            template="plotly_white",
+            height=400,
+            showlegend=False,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial, sans-serif")
         )
         
         return fig
 
 # ============================================================================
-# БЛОК 10: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT)
+# БЛОК 9: ПРОФЕССИОНАЛЬНЫЙ ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT)
 # ============================================================================
 
 def init_session_state():
     """Инициализация session state"""
     if 'secure_key_manager' not in st.session_state:
         st.session_state.secure_key_manager = SecureKeyManager()
-    
-    if 'cross_processor' not in st.session_state:
-        st.session_state.cross_processor = OECrossLinker()
     
     if 'processed_catalog_df' not in st.session_state:
         st.session_state.processed_catalog_df = pd.DataFrame()
@@ -1226,79 +1520,92 @@ def init_session_state():
         st.session_state.calculation_results_df = pd.DataFrame()
     
     if 'visualizer' not in st.session_state:
-        st.session_state.visualizer = DataVisualizer()
+        st.session_state.visualizer = ProfessionalVisualizer()
+    
+    if 'deepseek_manager' not in st.session_state:
+        st.session_state.deepseek_manager = None
     
     if 'fbs_calculator' not in st.session_state:
         default_config = {
-            "commission_rate": 0.15,
-            "min_commission": 30.0,
-            "logistics_base": 50.0,
-            "logistics_per_kg": 15.0,
-            "storage_per_day": 0.3,
+            "commission_rate": 0.145,
+            "min_commission": 35.0,
+            "logistics_base": 55.0,
+            "logistics_per_kg": 16.0,
+            "storage_per_day": 0.35,
             "acquiring_fee": 0.015,
-            "return_fee": 0.02,
-            "mode_multipliers": {"FBS": 1.0, "FBY": 0.75},
-            "category_rates": {}
+            "return_fee": 0.025,
+            "mode_multipliers": {"FBS": 1.0, "FBY": 0.8, "FBP": 0.7}
         }
         st.session_state.fbs_calculator = FBSUnitEconomicsCalculator(
             marketplace_config=default_config,
             tax_system="УСН_6"
         )
     
-    if 'deepseek_manager' not in st.session_state:
-        st.session_state.deepseek_manager = None
+    if 'excel_exporter' not in st.session_state:
+        st.session_state.excel_exporter = ProfessionalExcelExporter()
+    
+    if 'current_marketplace' not in st.session_state:
+        st.session_state.current_marketplace = "Яндекс Маркет"
 
 def show_section_data_loading():
-    """📁 Импорт и подготовка данных"""
-    st.header("📁 Импорт и подготовка данных")
+    """📁 Загрузка данных и настройка API"""
+    st.header("📁 Загрузка данных и настройка API")
     
     st.info("""
     **🎯 Что делает этот раздел:**
-    - Загружает файлы каталога (габариты, цены, ОЕ-номера)
-    - Автоматически связывает данные по артикулам и ОЕ-номерам
-    - Заполняет пропуски в весе и габаритах
-    - Добавляет информацию о кросс-номерах (аналогах)
-    - Безопасно хранит API ключи для интеграций
+    - Загружает файлы каталога (цены, габариты, себестоимость)
+    - Настраивает API ключи для DeepSeek AI
+    - Выбирает маркетплейс для расчёта (Яндекс Маркет в приоритете)
+    - Подготавливает данные для профессионального расчёта
     """)
     
     key_manager = st.session_state.secure_key_manager
     
+    # --- Выбор маркетплейса ---
+    st.subheader("🏪 Выбор маркетплейса")
+    st.caption("Яндекс Маркет - приоритетная платформа с оптимизированными тарифами")
+    
+    marketplace = st.selectbox(
+        "Выберите маркетплейс для расчёта:",
+        options=["Яндекс Маркет", "Ozon", "Wildberries"],
+        index=0,
+        help="Яндекс Маркет - приоритетная платформа с оптимизированными тарифами"
+    )
+    
+    st.session_state.current_marketplace = marketplace
+    
+    if marketplace == "Яндекс Маркет":
+        st.success("✅ Выбран Яндекс Маркет - оптимизированные тарифы и логистика")
+        st.info("📌 Для Яндекс Маркет применяются специальные коэффициенты: логистика на 10% ниже, оптимизированная комиссия")
+    
+    st.divider()
+    
     # --- Управление API ключами ---
     with st.expander("🔑 Безопасное хранение API ключей", expanded=False):
         st.markdown("""
-        **🔐 Как это работает:**
-        Ключи шифруются с помощью Fernet и сохраняются локально. 
+        **🔐 Профессиональная безопасность:**
+        Все ключи шифруются с помощью Fernet и хранятся локально.
         Даже при компрометации файлов ключи останутся защищёнными.
         """)
         
-        col_k1, col_k2, col_k3 = st.columns(3)
+        col_k1, col_k2 = st.columns(2)
         with col_k1:
             deepseek_key = st.text_input(
-                "DeepSeek API Key", 
+                "🤖 DeepSeek API Key (рекомендуется)", 
                 value=key_manager.get_key("deepseek") or "",
                 type="password",
-                help="Ключ для обогащения каталога или актуализации тарифов"
+                help="Ключ для AI-аналитики и обогащения данных"
             )
             if st.button("💾 Сохранить DeepSeek Key"):
-                key_manager.set_key("deepseek", deepseek_key, "DeepSeek API Key для AI функций")
+                key_manager.set_key("deepseek", deepseek_key, "DeepSeek API Key для AI аналитики")
                 st.success("✅ Ключ DeepSeek зашифрован и сохранен!")
                 
         with col_k2:
-            ozon_key = st.text_input(
-                "Ozon API Key (опционально)", 
-                value=key_manager.get_key("ozon") or "",
-                type="password"
-            )
-            if st.button("💾 Сохранить Ozon Key"):
-                key_manager.set_key("ozon", ozon_key, "Ozon Seller API Key")
-                st.success("✅ Ключ Ozon зашифрован и сохранен!")
-                
-        with col_k3:
             google_sheets_creds = st.text_area(
-                "Google Sheets Credentials (JSON)",
+                "📊 Google Sheets Credentials (JSON)",
                 value=key_manager.get_key("google_sheets") or "",
                 height=100,
-                help="Вставьте содержимое JSON файла сервисного аккаунта"
+                help="Вставьте содержимое JSON файла сервисного аккаунта для интеграции"
             )
             if st.button("💾 Сохранить Google Sheets Credentials"):
                 key_manager.set_key("google_sheets", google_sheets_creds, "Google Sheets Service Account JSON")
@@ -1307,242 +1614,179 @@ def show_section_data_loading():
     st.divider()
     
     # --- Загрузка файлов ---
-    st.subheader("📥 Загрузка файлов")
+    st.subheader("📥 Загрузка каталога товаров")
+    st.caption("Загрузите файл с данными о товарах: артикулы, цены, себестоимость, габариты")
     
-    col_f1, col_f2, col_f3 = st.columns(3)
+    file_main = st.file_uploader(
+        "📦 Загрузите файл каталога",
+        type=['csv', 'xlsx', 'xls'],
+        help="Файл должен содержать: Артикул, Цена продажи, Себестоимость (опционально: Вес, Длина, Ширина, Высота)"
+    )
     
-    with col_f1:
-        st.markdown("**📦 Основной файл**")
-        st.caption("Содержит артикулы, цены, себестоимость")
-        file_main = st.file_uploader(
-            "Выберите файл",
-            type=['csv', 'xlsx', 'xls'],
-            key="upload_main",
-            label_visibility="collapsed"
-        )
-        
-    with col_f2:
-        st.markdown("**🔧 Файл ОЕ номеров**")
-        st.caption("Используется для заполнения пропусков")
-        file_oe = st.file_uploader(
-            "Выберите файл",
-            type=['csv', 'xlsx', 'xls'],
-            key="upload_oe",
-            label_visibility="collapsed"
-        )
-        
-    with col_f3:
-        st.markdown("**🔗 Файл Кроссов/Аналогов**")
-        st.caption("Добавляет информацию о заменяемости")
-        file_cross = st.file_uploader(
-            "Выберите файл",
-            type=['csv', 'xlsx', 'xls'],
-            key="upload_cross",
-            label_visibility="collapsed"
-        )
-    
-    # --- Обработка и связывание ---
     if file_main is not None:
-        st.success("✅ Основной файл загружен")
+        st.success("✅ Файл загружен")
         
-        with st.spinner("Чтение и очистка данных..."):
+        with st.spinner("Чтение и обработка данных..."):
             df_main = smart_read_uploaded_file(file_main)
-            df_oe = smart_read_uploaded_file(file_oe) if file_oe else None
-            df_cross = smart_read_uploaded_file(file_cross) if file_cross else None
             
         if not df_main.empty:
-            st.subheader("⚙️ Настройка связывания данных")
+            st.session_state.processed_catalog_df = df_main
+            st.success(f"✅ Загружено {len(df_main)} товаров, {len(df_main.columns)} колонок")
             
-            # Авто-детект колонок
-            art_cols = [c for c in df_main.columns if 'артикул' in c.lower() or 'artikul' in c.lower() or 'sku' in c.lower()]
-            main_art_col = art_cols[0] if art_cols else df_main.columns[0]
-            
-            oe_cols = [c for c in df_main.columns if 'ое' in c.lower() or 'oe' in c.lower()]
-            main_oe_col = oe_cols[0] if oe_cols else ""
-            
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                main_art_col = st.selectbox("Колонка Артикула (Основной)", df_main.columns.tolist(), 
-                                            index=df_main.columns.tolist().index(main_art_col) if main_art_col in df_main.columns else 0)
-                main_oe_col = st.selectbox("Колонка ОЕ номера (Основной)", ["Не выбрано"] + df_main.columns.tolist(), 
-                                           index=df_main.columns.tolist().index(main_oe_col) + 1 if main_oe_col in df_main.columns else 0)
-                
-            with col_m2:
-                if df_oe is not None and not df_oe.empty:
-                    oe_art_col = st.selectbox("Колонка Артикула (Файл ОЕ)", df_oe.columns.tolist(), index=0)
-                    oe_oe_col = st.selectbox("Колонка ОЕ номера (Файл ОЕ)", df_oe.columns.tolist(), 
-                                             index=df_oe.columns.tolist().index(next((c for c in df_oe.columns if 'ое' in c.lower() or 'oe' in c.lower()), df_oe.columns[0])) if any('ое' in c.lower() or 'oe' in c.lower() for c in df_oe.columns) else 0)
-                else:
-                    oe_art_col = "Артикул"
-                    oe_oe_col = "ОЕ номер"
-                    
-                if df_cross is not None and not df_cross.empty:
-                    cross_art_col = st.selectbox("Колонка Артикула (Файл Кроссов)", df_cross.columns.tolist(), index=0)
-                    cross_analog_col = st.selectbox("Колонка Аналога (Файл Кроссов)", df_cross.columns.tolist(), 
-                                                    index=df_cross.columns.tolist().index(next((c for c in df_cross.columns if 'аналог' in c.lower() or 'analog' in c.lower()), df_cross.columns[0])) if any('аналог' in c.lower() or 'analog' in c.lower() for c in df_cross.columns) else 0)
-                else:
-                    cross_art_col = "Артикул"
-                    cross_analog_col = "Аналог"
-                
-            if st.button("🚀 Запустить обработку и связывание", type="primary"):
-                with st.spinner("Выполняется кросс-связывание..."):
-                    try:
-                        processor = st.session_state.cross_processor
-                        
-                        actual_oe_col = main_oe_col if main_oe_col != "Не выбрано" else "ОЕ номер"
-                        df_result = processor.link_and_fill_missing(
-                            df_main=df_main,
-                            df_oe=df_oe,
-                            main_art_col=main_art_col,
-                            main_oe_col=actual_oe_col,
-                            oe_art_col=oe_art_col,
-                            oe_oe_col=oe_oe_col,
-                            cols_to_fill=['Вес', 'Длина', 'Ширина', 'Высота']
-                        )
-                        
-                        if df_cross is not None and not df_cross.empty:
-                            df_result = processor.build_cross_references_column(
-                                df_main=df_result,
-                                df_cross=df_cross,
-                                main_art_col=main_art_col,
-                                cross_art_col=cross_art_col,
-                                cross_analog_col=cross_analog_col,
-                                output_col_name="Кроссы (аналоги)"
-                            )
-                        
-                        st.session_state.processed_catalog_df = df_result
-                        
-                        st.success(f"✅ Обработка завершена! {len(df_result)} строк, {len(df_result.columns)} колонок.")
-                        
-                        st.markdown("##### 👁️ Предпросмотр результата")
-                        display_cols = [main_art_col, actual_oe_col] + [c for c in ['Вес', 'Длина', 'Ширина', 'Высота', 'Цена', 'Себестоимость'] if c in df_result.columns]
-                        valid_cols = [c for c in display_cols if c in df_result.columns]
-                        st.dataframe(df_result[valid_cols].head(10), use_container_width=True)
-                        
-                    except Exception as e:
-                        st.error(f"❌ Ошибка при связывании данных: {e}")
-                        logger.exception("Ошибка process_and_merge")
+            st.markdown("##### 👁️ Предпросмотр данных")
+            st.dataframe(df_main.head(10), use_container_width=True)
         else:
-            st.warning("⚠️ Основной файл пуст или не удалось его прочитать.")
+            st.error("❌ Не удалось прочитать файл")
     
     st.divider()
     
-    # --- DeepSeek AI ---
-    st.subheader("🤖 Искусственный интеллект (DeepSeek)")
-    st.caption("Обогащение каталога и актуализация тарифов с помощью AI")
+    # --- AI Аналитика ---
+    st.subheader("🤖 Профессиональная AI-аналитика")
     
     ds_key = key_manager.get_key("deepseek")
     if not ds_key:
-        st.warning("⚠️ Ключ DeepSeek не задан. Настройте его в блоке 'Безопасное хранение API ключей' выше.")
+        st.warning("⚠️ Ключ DeepSeek не задан. Настройте его в блоке 'Безопасное хранение API ключей'.")
+        st.info("💡 DeepSeek AI помогает: анализировать товары, определять оптимальные цены, давать рекомендации")
     else:
-        ai_mode = st.radio(
-            "Выберите задачу для AI:",
-            options=["Обогащение каталога", "Актуализация тарифов", "Ничего не делать"],
+        st.success("✅ DeepSeek API доступен")
+        
+        ai_action = st.radio(
+            "Выберите действие AI:",
+            options=[
+                "📊 Получить инсайты по маркетплейсу",
+                "🔍 Проанализировать товар",
+                "💡 Получить рекомендации"
+            ],
             horizontal=True
         )
         
-        if ai_mode == "Обогащение каталога" and not st.session_state.processed_catalog_df.empty:
-            df_to_enrich = st.session_state.processed_catalog_df
-            name_col = next((c for c in df_to_enrich.columns if 'наименование' in c.lower() or 'name' in c.lower()), df_to_enrich.columns[0])
-            
-            if st.button("🚀 Запустить обогащение каталога через DeepSeek"):
+        if ai_action == "📊 Получить инсайты по маркетплейсу":
+            if st.button("🚀 Получить профессиональные инсайты", type="primary"):
                 manager = DeepSeekAPIManager(api_key=ds_key)
                 st.session_state.deepseek_manager = manager
                 
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                results = []
-                total = min(len(df_to_enrich), 20)
-                
-                for i in range(total):
-                    row = df_to_enrich.iloc[i]
-                    status_text.text(f"Обработка {i+1}/{total}: {str(row.get(name_col, ''))[:30]}...")
-                    res = manager.enrich_catalog(str(row.get(name_col, '')), str(row.get('Категория', '')))
-                    results.append(res)
-                    progress_bar.progress((i + 1) / total)
-                    time.sleep(0.3)
+                with st.spinner("DeepSeek AI анализирует маркетплейс..."):
+                    result = manager.get_marketplace_insights(marketplace, "auto_parts")
                     
-                status_text.text("✅ Обогащение завершено!")
-                
-                # Отображаем результаты
-                df_enriched = df_to_enrich.head(total).copy()
-                df_enriched['AI_Категория'] = [r.get('group_category', '') for r in results]
-                df_enriched['AI_Тип'] = [r.get('product_type', '') for r in results]
-                df_enriched['AI_Опасный'] = [r.get('hazardous', False) for r in results]
-                df_enriched['AI_Хрупкий'] = [r.get('fragile', False) for r in results]
-                
-                st.dataframe(df_enriched[['Артикул', 'Наименование', 'AI_Категория', 'AI_Тип', 'AI_Опасный', 'AI_Хрупкий']], use_container_width=True)
-                st.session_state.processed_catalog_df = df_enriched
-                
-        elif ai_mode == "Актуализация тарифов":
-            marketplace = st.selectbox("Маркетплейс", ["Ozon", "Wildberries", "Яндекс Маркет"])
-            if st.button("🚀 Получить актуальные тарифы через DeepSeek"):
-                manager = DeepSeekAPIManager(api_key=ds_key)
-                st.session_state.deepseek_manager = manager
-                
-                with st.spinner("Запрос тарифов к DeepSeek..."):
-                    result = manager.update_tariffs(marketplace, "auto_parts")
                     if "error" in result:
                         st.error(f"❌ Ошибка: {result['error']}")
                     else:
-                        st.success("✅ Тарифы получены!")
-                        st.json(result)
+                        st.success("✅ Инсайты получены!")
                         
-                        # Обновляем конфигурацию калькулятора
-                        if 'fbs_calculator' in st.session_state:
-                            calc = st.session_state.fbs_calculator
-                            calc.config.update({
-                                "commission_rate": result.get("commission_rate", calc.config.get("commission_rate", 0.15)),
-                                "logistics_base": result.get("logistics_base", calc.config.get("logistics_base", 50.0)),
-                                "logistics_per_kg": result.get("logistics_per_kg", calc.config.get("logistics_per_kg", 15.0)),
-                                "storage_per_day": result.get("storage_per_day", calc.config.get("storage_per_day", 0.3)),
-                                "acquiring_fee": result.get("acquiring_fee", calc.config.get("acquiring_fee", 0.015)),
-                                "return_fee": result.get("return_fee", calc.config.get("return_fee", 0.02)),
-                            })
-                            st.info("✅ Тарифы обновлены в калькуляторе!")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("**📈 Тренды маркетплейса:**")
+                            st.json(result.get("marketplace_trends", {}))
+                        
+                        with col2:
+                            st.markdown("**💰 Тарифы 2026:**")
+                            st.json(result.get("tariffs_2026", {}))
+                        
+                        st.markdown("**💡 Рекомендации для продавцов:**")
+                        st.json(result.get("seller_insights", {}))
+        
+        elif ai_action == "🔍 Проанализировать товар":
+            if not st.session_state.processed_catalog_df.empty:
+                df = st.session_state.processed_catalog_df
+                name_col = next((c for c in df.columns if 'наименование' in c.lower() or 'name' in c.lower()), df.columns[0])
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    product_name = st.selectbox("Выберите товар для анализа:", df[name_col].head(50).tolist())
+                with col2:
+                    price_val = float(df[df[name_col] == product_name].iloc[0].get('Цена', 0) or 0) if 'Цена' in df.columns else 0
+                    current_price = st.number_input("Текущая цена, ₽", value=price_val, min_value=0.0, step=10.0)
+                
+                if st.button("🔍 Проанализировать товар", type="primary"):
+                    manager = DeepSeekAPIManager(api_key=ds_key)
+                    st.session_state.deepseek_manager = manager
+                    
+                    with st.spinner("DeepSeek AI анализирует товар..."):
+                        result = manager.analyze_product_for_marketplace(
+                            product_name=product_name,
+                            marketplace=marketplace,
+                            current_price=current_price
+                        )
+                        
+                        if "error" in result:
+                            st.error(f"❌ Ошибка: {result['error']}")
+                        else:
+                            st.success("✅ Анализ завершён!")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**💰 Рекомендации по цене:**")
+                                rec = result.get("marketplace_recommendations", {})
+                                st.metric("Рекомендуемая цена", f"{rec.get('recommended_price', 0):.0f} ₽")
+                                st.metric("Минимальная маржа", f"{rec.get('min_profit_margin', 0)}%")
+                                st.metric("Уровень конкуренции", rec.get("competition_level", "medium").title())
+                            
+                            with col2:
+                                st.markdown("**📦 Характеристики товара:**")
+                                chars = result.get("product_characteristics", {})
+                                st.json(chars)
+                            
+                            st.markdown("**💡 Рекомендации по оптимизации:**")
+                            tips = result.get("competitive_analysis", {}).get("profit_optimization_tips", [])
+                            for tip in tips:
+                                st.info(f"• {tip}")
+        
+        elif ai_action == "💡 Получить рекомендации":
+            if st.button("💡 Получить профессиональные рекомендации", type="primary"):
+                manager = DeepSeekAPIManager(api_key=ds_key)
+                st.session_state.deepseek_manager = manager
+                
+                with st.spinner("DeepSeek AI генерирует рекомендации..."):
+                    st.info("💡 Рекомендации будут отображаться после расчёта юнит-экономики в следующем разделе")
 
 def show_section_single_calculation():
     """🧮 Калькулятор единичного товара"""
-    st.header("🧮 Калькулятор единичного товара")
+    st.header("🧮 Профессиональный калькулятор единичного товара")
     
     st.info("""
     **🎯 Что делает этот раздел:**
-    - Позволяет быстро проверить экономику одного товара
-    - Показывает детальную структуру расходов
-    - Визуализирует распределение затрат
-    - Рассчитывает рекомендуемую цену и точку безубыточности
-    - Идеально для тестирования гипотез и новых позиций
+    - Быстрый расчёт юнит-экономики для одного товара
+    - Детальная структура всех расходов
+    - Профессиональные метрики: ROI, точка безубыточности
+    - Рекомендации по оптимизации цены
+    - Идеально для тестирования гипотез
     """)
     
     calc = st.session_state.fbs_calculator
+    marketplace = st.session_state.current_marketplace
+    
+    # Устанавливаем конфигурацию для выбранного маркетплейса
+    calc.set_marketplace(marketplace)
     
     # --- Ввод параметров ---
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("💰 Финансовые параметры")
-        price = st.number_input("Цена продажи, ₽", min_value=1.0, value=500.0, step=10.0, help="Розничная цена на маркетплейсе")
-        cost = st.number_input("Себестоимость, ₽", min_value=1.0, value=300.0, step=10.0, help="Закупочная цена + доставка до склада")
+        price = st.number_input("Цена продажи, ₽", min_value=1.0, value=500.0, step=10.0, 
+                               help="Розничная цена на маркетплейсе")
+        cost = st.number_input("Себестоимость, ₽", min_value=1.0, value=300.0, step=10.0,
+                              help="Закупочная цена + доставка до склада")
         
         st.subheader("📦 Физические параметры")
-        weight = st.number_input("Вес, кг", min_value=0.1, value=1.0, step=0.1, help="Вес брутто (с упаковкой)")
+        weight = st.number_input("Вес, кг", min_value=0.1, value=1.0, step=0.1,
+                                help="Вес брутто (с упаковкой)")
         col_w1, col_w2, col_w3 = st.columns(3)
         with col_w1:
-            length = st.number_input("Длина, см", min_value=0, value=0, step=1, help="Длина упаковки")
+            length = st.number_input("Длина, см", min_value=0, value=20, step=1)
         with col_w2:
-            width = st.number_input("Ширина, см", min_value=0, value=0, step=1, help="Ширина упаковки")
+            width = st.number_input("Ширина, см", min_value=0, value=15, step=1)
         with col_w3:
-            height = st.number_input("Высота, см", min_value=0, value=0, step=1, help="Высота упаковки")
+            height = st.number_input("Высота, см", min_value=0, value=10, step=1)
     
     with col2:
         st.subheader("⚙️ Параметры расчёта")
         
         operation_mode = st.selectbox(
             "Режим работы",
-            options=["FBS", "FBY"],
+            options=["FBS", "FBY", "FBP"],
             index=0,
-            help="FBS — со своего склада по заказу. FBY — аналог FBS с доставкой МП."
+            help="FBS — со своего склада по заказу. FBY — аналог FBS с доставкой МП. FBP — FBS с премиум-логистикой"
         )
         
         days_in_storage = st.number_input(
@@ -1559,28 +1803,20 @@ def show_section_single_calculation():
                                   "ОСН": "ОСН (общая)", "НПД": "НПД (самозанятый)"}[x]
         )
         
-        # Дополнительные настройки
-        with st.expander("🔧 Расширенные настройки тарифов"):
-            st.caption("Оставьте поля пустыми для использования стандартных тарифов")
-            commission_rate = st.number_input("Ставка комиссии, %", min_value=0.0, value=15.0, step=0.5, format="%.1f") / 100
-            logistics_base = st.number_input("База логистики, ₽", min_value=0.0, value=50.0, step=5.0)
-            logistics_per_kg = st.number_input("Логистика за кг, ₽", min_value=0.0, value=15.0, step=1.0)
-            storage_rate = st.number_input("Ставка хранения, ₽/день", min_value=0.0, value=0.3, step=0.05)
+        st.markdown("---")
+        st.subheader("💡 Особенности товара")
+        is_hazardous = st.checkbox("Опасный груз", help="+20% к логистике")
+        is_fragile = st.checkbox("Хрупкий товар", help="+15% к логистике")
+        
+        st.subheader("📊 Дополнительные расходы")
+        marketing_cost = st.number_input("Маркетинговые расходы, ₽", min_value=0.0, value=0.0, step=5.0)
+        packaging_cost = st.number_input("Расходы на упаковку, ₽", min_value=0.0, value=0.0, step=5.0)
     
     # --- Расчёт ---
-    if st.button("🧮 Рассчитать юнит-экономику", type="primary", use_container_width=True):
+    if st.button("🧮 Профессиональный расчёт юнит-экономики", type="primary", use_container_width=True):
         try:
             calc.tax_system = tax_system
-            
-            # Обновляем конфигурацию если использовались расширенные настройки
-            if 'commission_rate' in locals():
-                calc.config['commission_rate'] = commission_rate
-            if 'logistics_base' in locals():
-                calc.config['logistics_base'] = logistics_base
-            if 'logistics_per_kg' in locals():
-                calc.config['logistics_per_kg'] = logistics_per_kg
-            if 'storage_rate' in locals():
-                calc.config['storage_per_day'] = storage_rate
+            calc.set_marketplace(marketplace)
             
             result = calc.calculate(
                 price=price,
@@ -1590,12 +1826,17 @@ def show_section_single_calculation():
                 width_cm=width,
                 height_cm=height,
                 days_in_storage=days_in_storage,
-                operation_mode=operation_mode
+                operation_mode=operation_mode,
+                marketplace=marketplace,
+                is_hazardous=is_hazardous,
+                is_fragile=is_fragile,
+                marketing_cost=marketing_cost,
+                packaging_cost=packaging_cost
             )
             
             # --- Отображение результатов ---
             st.divider()
-            st.subheader("📊 Результаты расчёта")
+            st.subheader(f"📊 Результаты расчёта для {marketplace}")
             
             # KPI в 4 колонки
             col1, col2, col3, col4 = st.columns(4)
@@ -1619,21 +1860,69 @@ def show_section_single_calculation():
                              delta="✅ Цена оптимальна", 
                              delta_color="off")
             
+            # Дополнительные метрики
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("⚖️ Оплачиваемый вес", f"{result['billable_weight']:.2f} кг")
+            with col2:
+                st.metric("📊 Точка безубыточности", f"{result['break_even_volume']:.0f} шт.")
+            with col3:
+                st.metric("📦 Объём", f"{result['volume_liter']:.2f} л")
+            
             # Детальная таблица
             st.markdown("##### 📋 Детальная калькуляция")
             
             detail_data = {
+                "Категория": [
+                    "💰 Доходы",
+                    "💰 Доходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📦 Расходы",
+                    "📊 Итоги",
+                    "📊 Итоги"
+                ],
                 "Показатель": [
-                    "Цена продажи", "Себестоимость", 
-                    "Комиссия МП", "Логистика", "Хранение", 
-                    "Эквайринг", "Возвраты", "Налоги",
-                    "Специфические расходы", "ИТОГО расходов", "ПРИБЫЛЬ"
+                    "Цена продажи",
+                    "Себестоимость",
+                    "Комиссия МП",
+                    "Логистика",
+                    "Хранение",
+                    "Эквайринг",
+                    "Возвраты",
+                    "Налоги",
+                    "Маркетинг",
+                    "Упаковка",
+                    "Специфические расходы",
+                    "Надбавка (опасный)",
+                    "Надбавка (хрупкий)",
+                    "ИТОГО расходов",
+                    "ПРИБЫЛЬ"
                 ],
                 "Сумма, ₽": [
-                    result['price'], result['cost'],
-                    result['commission'], result['logistics'], result['storage_cost'],
-                    result['acquiring'], result['returns'], result['tax'],
-                    result['auto_parts_specific'], result['total_expenses'], result['profit']
+                    result['price'],
+                    result['cost'],
+                    result['commission'],
+                    result['logistics'],
+                    result['storage_cost'],
+                    result['acquiring'],
+                    result['returns'],
+                    result['tax'],
+                    result.get('marketing_expenses', 0),
+                    result.get('packaging_expenses', 0),
+                    result['auto_parts_specific'],
+                    result.get('hazardous_surcharge', 0),
+                    result.get('fragile_surcharge', 0),
+                    result['total_expenses'],
+                    result['profit']
                 ],
                 "% от цены": [
                     "100%",
@@ -1644,7 +1933,11 @@ def show_section_single_calculation():
                     f"{result['acquiring']/result['price']*100:.1f}%",
                     f"{result['returns']/result['price']*100:.1f}%",
                     f"{result['tax']/result['price']*100:.1f}%",
+                    f"{result.get('marketing_expenses', 0)/result['price']*100:.1f}%",
+                    f"{result.get('packaging_expenses', 0)/result['price']*100:.1f}%",
                     f"{result['auto_parts_specific']/result['price']*100:.1f}%",
+                    f"{result.get('hazardous_surcharge', 0)/result['price']*100:.1f}%",
+                    f"{result.get('fragile_surcharge', 0)/result['price']*100:.1f}%",
                     f"{result['total_expenses']/result['price']*100:.1f}%",
                     f"{result['profit']/result['price']*100:.1f}%"
                 ]
@@ -1658,13 +1951,19 @@ def show_section_single_calculation():
                     return ['background-color: #d4edda; font-weight: bold'] * len(row)
                 elif row['Показатель'] == 'ИТОГО расходов':
                     return ['background-color: #fff3cd; font-weight: bold'] * len(row)
+                elif row['Категория'] == '💰 Доходы':
+                    return ['background-color: #e8f4fd'] * len(row)
+                elif row['Категория'] == '📦 Расходы':
+                    return ['background-color: #fde8e8'] * len(row)
+                elif row['Категория'] == '📊 Итоги':
+                    return ['background-color: #e8fde8; font-weight: bold'] * len(row)
                 return [''] * len(row)
             
             st.dataframe(df_detail.style.apply(color_rows, axis=1), use_container_width=True)
             
             # --- Визуализация ---
             st.divider()
-            st.subheader("📊 Визуализация")
+            st.subheader("📊 Профессиональная визуализация")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -1674,18 +1973,30 @@ def show_section_single_calculation():
             with col2:
                 # Сравнение цены и расходов
                 fig_bar = go.Figure()
+                
+                categories = ['Цена', 'Расходы', 'Прибыль']
+                values = [result['price'], result['total_expenses'], result['profit']]
+                colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+                
                 fig_bar.add_trace(go.Bar(
-                    x=['Цена', 'Расходы', 'Прибыль'],
-                    y=[result['price'], result['total_expenses'], result['profit']],
-                    marker_color=['#1f77b4', '#ff7f0e', '#2ca02c'],
-                    text=[f"{result['price']:.0f} ₽", f"{result['total_expenses']:.0f} ₽", f"{result['profit']:.0f} ₽"],
-                    textposition='auto'
+                    x=categories,
+                    y=values,
+                    marker_color=colors,
+                    text=[f"{v:.0f} ₽" for v in values],
+                    textposition='auto',
+                    hovertemplate='%{x}<br>%{y:.0f} ₽<extra></extra>'
                 ))
+                
+                fig_bar.add_hline(y=0, line_dash="dash", line_color="gray")
+                
                 fig_bar.update_layout(
                     title="Сравнение цены, расходов и прибыли",
                     yaxis_title="Сумма, ₽",
                     template="plotly_white",
-                    height=400
+                    height=400,
+                    showlegend=False,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)'
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
             
@@ -1695,40 +2006,37 @@ def show_section_single_calculation():
 
 def show_section_batch_calculation():
     """📊 Массовый расчёт юнит-экономики"""
-    st.header("📊 Массовый расчёт юнит-экономики")
+    st.header("📊 Профессиональный массовый расчёт юнит-экономики")
     
     st.info("""
     **🎯 Что делает этот раздел:**
-    - Рассчитывает юнит-экономику для всего каталога
-    - Показывает распределение маржи по товарам
-    - Выявляет убыточные позиции
-    - Экспортирует результаты в Excel с живыми формулами
-    - Интегрируется с Google Sheets для обновления остатков
+    - Массовый расчёт юнит-экономики для всего каталога
+    - Профессиональные метрики для каждого товара
+    - Выявление убыточных позиций и точек роста
+    - Экспорт в Excel с живыми формулами и визуализацией
+    - Интеграция с Google Sheets
     """)
     
     # --- Проверка наличия данных ---
     if st.session_state.processed_catalog_df.empty:
-        st.error("❌ Нет данных каталога. Перейдите в раздел 'Импорт и подготовка данных' и загрузите файлы.")
+        st.error("❌ Нет данных каталога. Перейдите в раздел 'Загрузка данных и настройка API'.")
         return
         
     df_catalog = st.session_state.processed_catalog_df.copy()
+    marketplace = st.session_state.current_marketplace
     
     # --- Настройки расчёта ---
-    st.subheader("⚙️ Настройки расчёта")
+    st.subheader("⚙️ Настройки массового расчёта")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        marketplace = st.selectbox(
-            "Маркетплейс",
-            options=["Ozon", "Wildberries", "Яндекс Маркет"],
-            index=0
-        )
+        st.markdown(f"**🏪 Маркетплейс:** {marketplace}")
+        st.caption("Яндекс Маркет - приоритет")
     with col2:
         operation_mode = st.selectbox(
             "Режим работы",
-            options=["FBS", "FBY"],
-            index=0,
-            help="FBS — со своего склада по заказу. FBY — аналог FBS с доставкой МП."
+            options=["FBS", "FBY", "FBP"],
+            index=0
         )
     with col3:
         days_in_storage = st.number_input(
@@ -1759,7 +2067,7 @@ def show_section_batch_calculation():
         cost_col = st.selectbox("Себестоимость", df_catalog.columns.tolist(),
                                 index=next((i for i, c in enumerate(df_catalog.columns) if 'себестоимость' in c.lower() or 'cost' in c.lower() or 'закуп' in c.lower()), 0))
     with col4:
-        name_col = st.selectbox("Наименование (опц.)", ["Не выбрано"] + df_catalog.columns.tolist(), index=0)
+        name_col = st.selectbox("Наименование", ["Не выбрано"] + df_catalog.columns.tolist(), index=0)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -1780,74 +2088,53 @@ def show_section_batch_calculation():
     
     calc = st.session_state.fbs_calculator
     calc.tax_system = tax_system
+    calc.set_marketplace(marketplace)
     
-    if st.button("🚀 Рассчитать юнит-экономику для всех товаров", type="primary", use_container_width=True):
+    if st.button("🚀 Запустить профессиональный массовый расчёт", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        results = []
+        # Подготовка данных
+        weight_col_actual = weight_col if weight_col != "Не выбрано" else None
+        length_col_actual = length_col if length_col != "Не выбрано" else None
+        width_col_actual = width_col if width_col != "Не выбрано" else None
+        height_col_actual = height_col if height_col != "Не выбрано" else None
+        name_col_actual = name_col if name_col != "Не выбрано" else None
+        
         total = len(df_catalog)
         
-        for i, (_, row) in enumerate(df_catalog.iterrows()):
-            status_text.text(f"Расчёт {i+1}/{total}: {str(row.get(artikul_col, ''))[:20]}...")
-            
-            try:
-                price = float(row.get(price_col, 0) or 0)
-                cost = float(row.get(cost_col, 0) or 0)
-                
-                if price <= 0 or cost <= 0:
-                    continue
-                    
-                weight = float(row.get(weight_col, 1.0) or 1.0) if weight_col != "Не выбрано" else 1.0
-                length = float(row.get(length_col, 0) or 0) if length_col != "Не выбрано" else 0
-                width = float(row.get(width_col, 0) or 0) if width_col != "Не выбрано" else 0
-                height = float(row.get(height_col, 0) or 0) if height_col != "Не выбрано" else 0
-                
-                res = calc.calculate(
-                    price=price,
-                    cost=cost,
-                    weight_kg=weight,
-                    length_cm=length,
-                    width_cm=width,
-                    height_cm=height,
-                    days_in_storage=days_in_storage,
-                    operation_mode=operation_mode
-                )
-                
-                res["Артикул"] = row.get(artikul_col, "")
-                res["Наименование"] = row.get(name_col, "") if name_col != "Не выбрано" else ""
-                res["weight"] = weight
-                res["length"] = length
-                res["width"] = width
-                res["height"] = height
-                res["storage_days"] = days_in_storage
-                res["logistics_base"] = calc.config.get("logistics_base", 50.0)
-                res["logistics_per_kg"] = calc.config.get("logistics_per_kg", 15.0)
-                res["storage_rate"] = calc.config.get("storage_per_day", 0.3)
-                
-                results.append(res)
-                
-            except Exception as e:
-                logger.warning(f"Ошибка расчёта для {row.get(artikul_col, '')}: {e}")
-                continue
-                
-            progress_bar.progress((i + 1) / total)
-            
-        status_text.text(f"✅ Расчёт завершён! Обработано {len(results)} товаров.")
+        # Пакетный расчёт
+        df_results = calc.calculate_batch(
+            df=df_catalog,
+            artikul_col=artikul_col,
+            price_col=price_col,
+            cost_col=cost_col,
+            weight_col=weight_col_actual,
+            length_col=length_col_actual,
+            width_col=width_col_actual,
+            height_col=height_col_actual,
+            name_col=name_col_actual,
+            days_in_storage=days_in_storage,
+            operation_mode=operation_mode,
+            marketplace=marketplace
+        )
         
-        if results:
-            df_results = pd.DataFrame(results)
+        progress_bar.progress(1.0)
+        status_text.text(f"✅ Расчёт завершён! Обработано {len(df_results)} товаров.")
+        
+        if not df_results.empty:
             st.session_state.calculation_results_df = df_results
             st.success(f"✅ Рассчитано {len(df_results)} товаров. Средняя маржа: {df_results['margin_percent'].mean():.1f}%")
+            st.info(f"📊 Прибыльных: {(df_results['profit'] > 0).sum()}, Убыточных: {(df_results['profit'] < 0).sum()}")
         else:
-            st.error("❌ Не удалось рассчитать ни одного товара.")
+            st.error("❌ Не удалось рассчитать ни одного товара. Проверьте данные.")
     
     # --- Отображение результатов ---
     if not st.session_state.calculation_results_df.empty:
         df_results = st.session_state.calculation_results_df
         
         st.divider()
-        st.subheader("📊 Результаты расчёта")
+        st.subheader("📊 Результаты массового расчёта")
         
         # KPI
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -1861,12 +2148,12 @@ def show_section_batch_calculation():
             unprofitable = (df_results['profit'] < 0).sum()
             st.metric("⚠️ Убыточных SKU", f"{unprofitable}")
         with col5:
-            underpriced = (df_results['price'] < df_results['recommended_min_price']).sum()
-            st.metric("💡 Недооценённых", f"{underpriced}")
+            profitable = (df_results['profit'] > 0).sum()
+            st.metric("✅ Прибыльных SKU", f"{profitable}")
         
         # Визуализация
         st.divider()
-        st.subheader("📈 Визуализация распределения")
+        st.subheader("📈 Профессиональная визуализация")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -1874,17 +2161,19 @@ def show_section_batch_calculation():
             st.plotly_chart(fig_margin, use_container_width=True)
         
         with col2:
-            fig_top = st.session_state.visualizer.plot_profit_top(df_results, n=20)
-            st.plotly_chart(fig_top, use_container_width=True)
+            fig_profit = st.session_state.visualizer.plot_profit_analysis(df_results)
+            st.plotly_chart(fig_profit, use_container_width=True)
+        
+        # Сравнение с маркетплейсом
+        st.divider()
+        fig_compare = st.session_state.visualizer.plot_marketplace_comparison(df_results, marketplace)
+        st.plotly_chart(fig_compare, use_container_width=True)
         
         # Таблица результатов
         st.divider()
         st.subheader("📋 Детальная таблица")
         
-        display_cols = ["Артикул", "Наименование", "price", "cost", "profit", "margin_percent", "roi", "recommended_min_price"]
-        available_cols = [c for c in display_cols if c in df_results.columns]
-        
-        # Поиск и фильтрация
+        # Поиск
         search_term = st.text_input("🔍 Поиск по артикулу или наименованию", placeholder="Введите артикул или название...")
         if search_term:
             mask = df_results['Артикул'].str.contains(search_term, case=False, na=False) | \
@@ -1894,46 +2183,64 @@ def show_section_batch_calculation():
             df_filtered = df_results
         
         # Сортировка
-        sort_col = st.selectbox("Сортировать по", ["Прибыль (убывание)", "Маржа (убывание)", "Артикул (возрастание)"])
+        sort_col = st.selectbox("Сортировать по", ["Прибыль (убывание)", "Маржа (убывание)", "Артикул (возрастание)", "ROI (убывание)"])
         if sort_col == "Прибыль (убывание)":
             df_filtered = df_filtered.sort_values('profit', ascending=False)
         elif sort_col == "Маржа (убывание)":
             df_filtered = df_filtered.sort_values('margin_percent', ascending=False)
+        elif sort_col == "ROI (убывание)":
+            df_filtered = df_filtered.sort_values('roi', ascending=False)
         else:
             df_filtered = df_filtered.sort_values('Артикул')
         
+        # Отображение
+        display_cols = ["Артикул", "Наименование", "price", "cost", "profit", "margin_percent", "roi", "recommended_min_price", "break_even_volume"]
+        available_cols = [c for c in display_cols if c in df_filtered.columns]
+        
         st.dataframe(
-            df_filtered[available_cols].style.background_gradient(subset=['profit', 'margin_percent'], cmap='RdYlGn', vmin=-50, vmax=50),
+            df_filtered[available_cols].style.background_gradient(
+                subset=['profit', 'margin_percent', 'roi'], 
+                cmap='RdYlGn', 
+                vmin=-50, 
+                vmax=50
+            ),
             use_container_width=True,
             height=400
         )
         
-        # --- Экспорт в Excel с живыми формулами ---
+        # --- Экспорт ---
         st.divider()
-        st.subheader("📥 Экспорт результатов")
+        st.subheader("📥 Профессиональный экспорт")
         
         col1, col2 = st.columns(2)
         with col1:
             st.markdown("**📊 Excel с живыми формулами**")
-            st.caption("Меняйте параметры — всё пересчитывается автоматически!")
+            st.caption("Профессиональный отчёт с формулами, диаграммами и рекомендациями")
             
-            if st.button("📥 Экспортировать в Excel с живыми формулами", type="primary", use_container_width=True):
+            if st.button("📥 Экспортировать в Excel (Профессиональный)", type="primary", use_container_width=True):
                 try:
-                    output_path = EXPORTS_DIR / f"unit_economics_live_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                    exporter = LiveExcelExporter()
+                    output_path = EXPORTS_DIR / f"unit_economics_pro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    exporter = st.session_state.excel_exporter
+                    
+                    # Добавляем маркетинговые и упаковочные расходы, если их нет
+                    if 'marketing_expenses' not in df_results.columns:
+                        df_results['marketing_expenses'] = 0
+                    if 'packaging_expenses' not in df_results.columns:
+                        df_results['packaging_expenses'] = 0
+                    
                     success = exporter.export_with_formulas(df_results, str(output_path), marketplace)
                     
                     if success and output_path.exists():
                         with open(output_path, "rb") as f:
                             file_data = f.read()
                         st.download_button(
-                            label="⬇️ Скачать Excel с живыми формулами",
+                            label="⬇️ Скачать профессиональный Excel",
                             data=file_data,
                             file_name=output_path.name,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="excel_download"
                         )
-                        st.success("✅ Excel с живыми формулами готов к скачиванию!")
+                        st.success("✅ Профессиональный Excel с живыми формулами готов к скачиванию!")
                     else:
                         st.error("❌ Ошибка создания файла")
                 except Exception as e:
@@ -1957,13 +2264,12 @@ def show_section_batch_calculation():
         # --- Google Sheets интеграция ---
         st.divider()
         st.subheader("🔄 Интеграция с Google Sheets")
-        st.caption("Экспорт результатов и обновление остатков в реальном времени")
         
         key_manager = st.session_state.secure_key_manager
         gs_creds = key_manager.get_key("google_sheets")
         
         if not gs_creds:
-            st.warning("⚠️ Google Sheets credentials не заданы. Настройте их в разделе 'Импорт и подготовка данных'.")
+            st.warning("⚠️ Google Sheets credentials не заданы. Настройте их в разделе 'Загрузка данных и настройка API'.")
         else:
             col1, col2 = st.columns(2)
             with col1:
@@ -1971,7 +2277,7 @@ def show_section_batch_calculation():
             with col2:
                 worksheet_name = st.text_input("Название листа", value="Юнит-экономика")
             
-            if st.button("📤 Экспортировать результаты в Google Sheets", use_container_width=True):
+            if st.button("📤 Экспортировать в Google Sheets", use_container_width=True):
                 if not spreadsheet_id:
                     st.error("❌ Укажите ID Google Таблицы")
                 else:
@@ -1991,279 +2297,9 @@ def show_section_batch_calculation():
                             st.error("❌ Ошибка экспорта")
                     except Exception as e:
                         st.error(f"❌ Ошибка: {e}")
-            
-            # --- Обновление остатков ---
-            st.markdown("---")
-            st.subheader("📦 Обновление остатков через Google Sheets")
-            st.caption("Сценарий: редактируете остатки в Google Sheets → нажимаете кнопку → система отправляет данные в Ozon")
-            
-            ozon_api_key = key_manager.get_key("ozon")
-            if not ozon_api_key:
-                st.warning("⚠️ Ozon API ключ не задан. Настройте его в разделе 'Импорт и подготовка данных'.")
-            else:
-                col1, col2 = st.columns(2)
-                with col1:
-                    ozon_client_id = st.text_input("Ozon Client ID", placeholder="12345")
-                with col2:
-                    stock_worksheet = st.text_input("Лист с остатками", value="Остатки")
-                
-                if st.button("📥 Загрузить изменения из Google Sheets в Ozon", use_container_width=True):
-                    if not spreadsheet_id or not ozon_client_id:
-                        st.error("❌ Укажите ID таблицы и Client ID")
-                    else:
-                        try:
-                            manager = GoogleSheetsManager(gs_creds)
-                            df_changes = manager.read_sheet(spreadsheet_id, stock_worksheet)
-                            
-                            if df_changes is not None and not df_changes.empty:
-                                st.write("📋 Изменения из Google Sheets:")
-                                st.dataframe(df_changes.head(20))
-                                
-                                # Отправка в Ozon (упрощенная)
-                                url = "https://api-seller.ozon.ru/v2/products/info/stocks"
-                                headers = {
-                                    "Client-Id": ozon_client_id,
-                                    "Api-Key": ozon_api_key,
-                                    "Content-Type": "application/json"
-                                }
-                                
-                                items = []
-                                for _, row in df_changes.iterrows():
-                                    artikul = str(row.get("Артикул", "")).strip()
-                                    stock = int(row.get("Остаток", 0))
-                                    if artikul and stock >= 0:
-                                        items.append({"offer_id": artikul, "stock": stock, "warehouse_id": 0})
-                                
-                                if items:
-                                    with st.spinner(f"Отправка {len(items)} SKU в Ozon..."):
-                                        results = {"updated": 0, "errors": []}
-                                        for i in range(0, len(items), 100):
-                                            batch = items[i:i+100]
-                                            try:
-                                                response = requests.post(url, json={"stocks": batch}, headers=headers, timeout=30)
-                                                if response.status_code == 200:
-                                                    results["updated"] += len(batch)
-                                                else:
-                                                    results["errors"].append(f"Batch {i//100+1}: HTTP {response.status_code}")
-                                            except Exception as e:
-                                                results["errors"].append(f"Batch {i//100+1}: {str(e)}")
-                                        
-                                        if results["updated"] > 0:
-                                            st.success(f"✅ Обновлено {results['updated']} SKU!")
-                                        if results["errors"]:
-                                            for err in results["errors"][:5]:
-                                                st.warning(f"  - {err}")
-                                else:
-                                    st.warning("⚠️ Нет данных для отправки")
-                            else:
-                                st.warning("⚠️ Нет данных для отправки")
-                        except Exception as e:
-                            st.error(f"❌ Ошибка: {e}")
-
-def show_section_analytics():
-    """📊 Аналитика и рекомендации"""
-    st.header("📊 Аналитика и рекомендации")
-    
-    st.info("""
-    **🎯 Что делает этот раздел:**
-    - Анализирует распределение маржи и прибыли
-    - Выявляет тренды и паттерны в данных
-    - Находит проблемные зоны в ассортименте
-    - Даёт конкретные рекомендации по оптимизации
-    - Помогает принимать решения на основе данных
-    """)
-    
-    if st.session_state.calculation_results_df.empty:
-        st.warning("⚠️ Нет данных для аналитики. Выполните расчёт в разделе 'Массовый расчёт юнит-экономики'.")
-        return
-    
-    df = st.session_state.calculation_results_df
-    
-    # --- Общая статистика ---
-    st.subheader("📈 Общая статистика")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Всего SKU", f"{len(df)}")
-    with col2:
-        profitable = (df['profit'] > 0).sum()
-        st.metric("Прибыльных SKU", f"{profitable}", 
-                 delta=f"{profitable/len(df)*100:.1f}%")
-    with col3:
-        unprofitable = (df['profit'] < 0).sum()
-        st.metric("Убыточных SKU", f"{unprofitable}")
-    with col4:
-        st.metric("Средняя маржа", f"{df['margin_percent'].mean():.1f}%")
-    with col5:
-        st.metric("Медианная маржа", f"{df['margin_percent'].median():.1f}%")
-    
-    # --- Распределение ---
-    st.divider()
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("📊 Распределение маржи")
-        fig_margin = st.session_state.visualizer.plot_margin_distribution(df)
-        st.plotly_chart(fig_margin, use_container_width=True)
-    
-    with col2:
-        st.subheader("📊 Распределение прибыли")
-        fig_profit = go.Figure()
-        fig_profit.add_trace(go.Histogram(
-            x=df['profit'],
-            nbinsx=30,
-            marker_color='#2ca02c',
-            name='Прибыль'
-        ))
-        fig_profit.add_vline(x=0, line_dash="dash", line_color="red")
-        fig_profit.update_layout(
-            title="Распределение прибыли по товарам",
-            xaxis_title="Прибыль, ₽",
-            yaxis_title="Количество товаров",
-            template="plotly_white",
-            height=400
-        )
-        st.plotly_chart(fig_profit, use_container_width=True)
-    
-    # --- Топ и аутсайдеры ---
-    st.divider()
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🏆 Топ-10 по марже")
-        top_margin = df.nlargest(10, 'margin_percent')[['Артикул', 'Наименование', 'margin_percent', 'profit']]
-        st.dataframe(
-            top_margin.style.background_gradient(subset=['margin_percent'], cmap='Greens'),
-            use_container_width=True
-        )
-    
-    with col2:
-        st.subheader("📉 Аутсайдеры по марже")
-        bottom_margin = df.nsmallest(10, 'margin_percent')[['Артикул', 'Наименование', 'margin_percent', 'profit']]
-        st.dataframe(
-            bottom_margin.style.background_gradient(subset=['margin_percent'], cmap='Reds'),
-            use_container_width=True
-        )
-    
-    # --- Корреляционный анализ ---
-    st.divider()
-    st.subheader("🔍 Корреляционный анализ")
-    st.caption("Взаимосвязь между ключевыми метриками")
-    
-    numeric_cols = ['price', 'cost', 'profit', 'margin_percent', 'roi']
-    available_cols = [c for c in numeric_cols if c in df.columns]
-    
-    if len(available_cols) >= 2:
-        corr_df = df[available_cols].corr()
-        
-        fig_corr = go.Figure(data=go.Heatmap(
-            z=corr_df.values,
-            x=corr_df.columns,
-            y=corr_df.columns,
-            colorscale='RdBu',
-            zmin=-1, zmax=1,
-            text=corr_df.values.round(2),
-            texttemplate='%{text}',
-            textfont={"size": 10}
-        ))
-        fig_corr.update_layout(
-            title="Матрица корреляции",
-            height=400,
-            template="plotly_white"
-        )
-        st.plotly_chart(fig_corr, use_container_width=True)
-    
-    # --- Рекомендации ---
-    st.divider()
-    st.subheader("💡 Рекомендации по оптимизации ассортимента")
-    
-    recommendations = []
-    warnings_list = []
-    
-    # Анализ убыточности
-    unprofitable_pct = (df['profit'] < 0).sum() / len(df) * 100
-    if unprofitable_pct > 10:
-        recommendations.append(f"⚠️ **{unprofitable_pct:.1f}%** товаров убыточны. Рекомендуется пересмотреть цены или отказаться от этих позиций.")
-    elif unprofitable_pct > 5:
-        warnings_list.append(f"⚠️ **{unprofitable_pct:.1f}%** товаров убыточны. Обратите внимание на эти позиции.")
-    
-    # Анализ маржи
-    median_margin = df['margin_percent'].median()
-    if median_margin < 15:
-        recommendations.append(f"⚠️ Медианная маржа составляет **{median_margin:.1f}%**, что ниже целевого уровня (15%). Рекомендуется повысить цены или снизить закупочные цены.")
-    elif median_margin < 20:
-        warnings_list.append(f"⚠️ Медианная маржа **{median_margin:.1f}%** близка к минимальному уровню. Рассмотрите возможность оптимизации.")
-    
-    # Анализ цен
-    underpriced_pct = (df['price'] < df['recommended_min_price']).sum() / len(df) * 100
-    if underpriced_pct > 20:
-        recommendations.append(f"⚠️ **{underpriced_pct:.1f}%** товаров недооценены. Рекомендуется повысить цены до рекомендуемого уровня.")
-    
-    # Анализ ROI
-    low_roi = (df['roi'] < 10).sum() / len(df) * 100
-    if low_roi > 30:
-        recommendations.append(f"⚠️ **{low_roi:.1f}%** товаров имеют ROI ниже 10%. Рекомендуется пересмотреть эффективность этих позиций.")
-    
-    # Позитивные рекомендации
-    if len(recommendations) == 0:
-        st.success("✅ **Отлично!** Ваш портфель товаров выглядит здоровым:")
-        st.success(f"   - Средняя маржа: **{df['margin_percent'].mean():.1f}%**")
-        st.success(f"   - Убыточных SKU: **{unprofitable_pct:.1f}%**")
-        st.success("   - Рекомендуется продолжать мониторинг и оптимизацию для поддержания показателей.")
-    else:
-        for rec in recommendations:
-            st.warning(rec)
-        
-        if warnings_list:
-            st.info("**📌 Дополнительные наблюдения:**")
-            for warn in warnings_list:
-                st.info(f"   {warn}")
-    
-    # --- Детальный анализ проблемных зон ---
-    if (df['profit'] < 0).sum() > 0:
-        st.divider()
-        st.subheader("🔴 Детальный анализ убыточных товаров")
-        
-        unprofitable_df = df[df['profit'] < 0].copy()
-        st.write(f"**Найдено {len(unprofitable_df)} убыточных товаров:**")
-        
-        # Анализ причин убыточности
-        unprofitable_df['reason'] = ""
-        mask_high_commission = unprofitable_df['commission'] / unprofitable_df['price'] > 0.20
-        unprofitable_df.loc[mask_high_commission, 'reason'] = "Высокая комиссия"
-        
-        mask_high_logistics = unprofitable_df['logistics'] / unprofitable_df['price'] > 0.15
-        unprofitable_df.loc[mask_high_logistics, 'reason'] = "Высокая логистика"
-        
-        mask_low_price = unprofitable_df['price'] < unprofitable_df['recommended_min_price']
-        unprofitable_df.loc[mask_low_price, 'reason'] = "Заниженная цена"
-        
-        mask_high_storage = unprofitable_df['storage_cost'] > 50
-        unprofitable_df.loc[mask_high_storage, 'reason'] = "Дорогое хранение"
-        
-        # Заполняем оставшиеся
-        unprofitable_df.loc[unprofitable_df['reason'] == "", 'reason'] = "Комплекс причин"
-        
-        # Группировка по причинам
-        reasons_count = unprofitable_df['reason'].value_counts()
-        fig_reasons = px.pie(
-            values=reasons_count.values,
-            names=reasons_count.index,
-            title="Причины убыточности",
-            color_discrete_sequence=px.colors.qualitative.Set3
-        )
-        st.plotly_chart(fig_reasons, use_container_width=True)
-        
-        # Таблица убыточных товаров
-        display_cols = ["Артикул", "Наименование", "price", "profit", "margin_percent", "reason"]
-        available_display = [c for c in display_cols if c in unprofitable_df.columns]
-        st.dataframe(
-            unprofitable_df[available_display].head(50),
-            use_container_width=True
-        )
 
 # ============================================================================
-# БЛОК 11: ГЛАВНАЯ ФУНКЦИЯ
+# БЛОК 10: ГЛАВНАЯ ФУНКЦИЯ
 # ============================================================================
 
 def main():
@@ -2278,44 +2314,40 @@ def main():
     
     # Заголовок
     st.markdown(f"""
-    <div style='text-align: center; padding: 20px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 10px; margin-bottom: 20px;'>
-    <h1 style='color: white; margin: 0;'>{APP_NAME}</h1>
-    <p style='color: #ccc; margin: 10px 0 0 0; font-size: 1.1em;'>
-    {APP_DESCRIPTION}
-    </p>
-    <p style='color: #888; margin: 5px 0 0 0; font-size: 0.9em;'>
-    Версия {APP_VERSION} | FBS-ONLY | Оптимизировано для автозапчастей
-    </p>
+    <div style='text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); border-radius: 15px; margin-bottom: 25px;'>
+        <h1 style='color: white; margin: 0; font-size: 2.5em;'>{APP_NAME}</h1>
+        <p style='color: #a8a8d0; margin: 10px 0 0 0; font-size: 1.2em;'>
+        {APP_DESCRIPTION}
+        </p>
+        <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.9em;'>
+        Версия {APP_VERSION} | FBS-ONLY | Яндекс Маркет Приоритет
+        </p>
     </div>
     """, unsafe_allow_html=True)
     
     # Инициализация
     init_session_state()
     
-    # Sidebar навигация с улучшенными названиями
+    # Sidebar навигация
     st.sidebar.title("🧭 Навигация")
     
     # Создаем словарь с описанием разделов
     sections = {
-        "📁 Импорт и подготовка данных": {
+        "📁 Загрузка данных и настройка API": {
             "icon": "📁",
-            "description": "Загрузка файлов, связывание данных, API ключи"
+            "description": "Загрузка каталога, настройка API ключей, выбор маркетплейса"
         },
         "🧮 Калькулятор единичного товара": {
             "icon": "🧮",
-            "description": "Быстрый расчёт для одного товара"
+            "description": "Быстрый расчёт для одного товара с детальной аналитикой"
         },
         "📊 Массовый расчёт юнит-экономики": {
             "icon": "📊",
-            "description": "Расчёт для всего каталога, экспорт в Excel"
-        },
-        "📊 Аналитика и рекомендации": {
-            "icon": "📊",
-            "description": "Анализ данных, рекомендации по оптимизации"
+            "description": "Массовый расчёт с экспортом в Excel и Google Sheets"
         }
     }
     
-    # Отображаем разделы с описаниями
+    # Отображаем разделы
     section_keys = list(sections.keys())
     selected_section = st.sidebar.radio(
         "Выберите раздел:",
@@ -2323,24 +2355,23 @@ def main():
         format_func=lambda x: f"{sections[x]['icon']} {x}"
     )
     
-    # Показываем описание выбранного раздела
+    # Описание выбранного раздела
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"""
     **📌 {selected_section}**
     {sections[selected_section]['description']}
     """)
     
-    # Информация о статусе системы
+    # Статус системы
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📊 Статус системы")
     
     status_cols = st.sidebar.columns(2)
     with status_cols[0]:
         st.sidebar.success("✅ SecureKeyManager")
-        st.sidebar.success("✅ OECrossLinker")
         st.sidebar.success("✅ FBS Calculator")
+        st.sidebar.success("✅ Excel Exporter")
     with status_cols[1]:
-        st.sidebar.success("✅ LiveExcelExporter")
         if CRYPTO_AVAILABLE:
             st.sidebar.success("✅ Cryptography")
         else:
@@ -2349,10 +2380,17 @@ def main():
             st.sidebar.success("✅ GSpread")
         else:
             st.sidebar.warning("⚠️ GSpread")
+        if st.session_state.get('deepseek_manager') and st.session_state.deepseek_manager:
+            st.sidebar.success("✅ DeepSeek AI")
+        else:
+            st.sidebar.info("⚪ DeepSeek AI")
     
-    # Информация о загруженных данных
+    # Информация о данных
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📦 Данные")
+    
+    marketplace = st.session_state.get('current_marketplace', 'Яндекс Маркет')
+    st.sidebar.info(f"🏪 {marketplace}")
     
     if not st.session_state.processed_catalog_df.empty:
         st.sidebar.success(f"✅ Каталог: {len(st.session_state.processed_catalog_df)} товаров")
@@ -2368,33 +2406,35 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info("""
     **🚀 Быстрый старт:**
-    1. 📁 Загрузите файлы в разделе "Импорт и подготовка данных"
-    2. 🔑 Настройте API ключи для интеграций
+    1. 📁 Загрузите каталог в разделе "Загрузка данных"
+    2. 🤖 Настройте DeepSeek API (опционально)
     3. 📊 Выполните массовый расчёт
-    4. 📥 Экспортируйте результаты в Excel
+    4. 📥 Экспортируйте результаты
     """)
     
+    # Версия
+    st.sidebar.markdown("---")
+    st.sidebar.caption(f"Версия {APP_VERSION}")
+    
     # Отображение выбранного раздела
-    if selected_section == "📁 Импорт и подготовка данных":
+    if selected_section == "📁 Загрузка данных и настройка API":
         show_section_data_loading()
     elif selected_section == "🧮 Калькулятор единичного товара":
         show_section_single_calculation()
     elif selected_section == "📊 Массовый расчёт юнит-экономики":
         show_section_batch_calculation()
-    elif selected_section == "📊 Аналитика и рекомендации":
-        show_section_analytics()
     
     # Футер
     st.divider()
     st.markdown(f"""
     <div style='text-align: center; padding: 20px; color: #666;'>
-    <p style='margin: 0;'>🚀 <strong>FBS Юнит-экономика PRO 2026</strong></p>
-    <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
-    Версия {APP_VERSION} | Живые формулы Excel | Безопасное хранение ключей | FBS-ONLY
-    </p>
-    <p style='margin: 5px 0 0 0; font-size: 0.8em; color: #999;'>
-    Разработано для маркетплейсов Ozon, Wildberries, Яндекс Маркет
-    </p>
+        <p style='margin: 0;'>🚀 <strong>{APP_NAME}</strong></p>
+        <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
+        Версия {APP_VERSION} | Живые формулы Excel | DeepSeek AI | Яндекс Маркет Приоритет
+        </p>
+        <p style='margin: 5px 0 0 0; font-size: 0.8em; color: #999;'>
+        Профессиональный инструмент для юнит-экономики на маркетплейсах
+        </p>
     </div>
     """, unsafe_allow_html=True)
 
