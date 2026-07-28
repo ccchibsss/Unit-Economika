@@ -1,10 +1,22 @@
 """
 ============================================================================
-🚀 FBS UNIT ECONOMICS PRO 2026 — ПОЛНАЯ ОПЕРАЦИОННАЯ ВЕРСИЯ
+🚀 FBS UNIT ECONOMICS PRO 2026 — ПОЛНАЯ ОПЕРАЦИОННАЯ ВЕРСИЯ С УЛУЧШЕНИЯМИ
 ============================================================================
 Операционный директор | FBS-экспертиза | Оптимизация складских остатков
 Маркетплейсы: Ozon, Wildberries, Яндекс Маркет
-Версия: 6.0.0
+Версия: 6.1.0
+
+НОВЫЕ УЛУЧШЕНИЯ:
+1. Визуализация логистических зон риска
+2. Точка безубыточности по объему продаж
+3. Анализ сценариев "Что если"
+4. Экспорт в PDF с профессиональным дизайном
+5. Автоматические рекомендации для операционного директора
+6. Фильтры и поиск в дашборде
+7. Сезонная корректировка маржи
+8. Аудит действий пользователя
+9. Оптимизированный пакетный расчет с чанками
+10. Загрузка тарифов из CSV как fallback
 
 НИЧЕГО НЕ СОКРАЩЕНО — ПОЛНАЯ ВЕРСИЯ
 ============================================================================
@@ -39,6 +51,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import traceback
 from enum import Enum
+import getpass
 
 # Попытка импорта дополнительных библиотек
 try:
@@ -75,14 +88,28 @@ except ImportError:
     gspread = None
     print("⚠️ GSpread не установлен. Интеграция с Google Sheets будет недоступна.")
 
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import letter
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    print("⚠️ ReportLab не установлен. Экспорт в PDF будет недоступен.")
+
 warnings.filterwarnings('ignore')
 
 # ============================================================================
 # БЛОК 0: БАЗОВАЯ КОНФИГУРАЦИЯ И НАСТРОЙКИ
 # ============================================================================
 
-APP_VERSION = "6.0.0"
-APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Операционная версия"
+APP_VERSION = "6.1.0"
+APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Операционная версия с улучшениями"
 APP_DESCRIPTION = "Профессиональный расчет юнит-экономики для FBS-модели с оптимизацией складских остатков и логистических коридоров"
 
 # Настройка путей
@@ -200,6 +227,28 @@ class ProgressTracker:
     def get_eta(self) -> float:
         """Получение оставшегося времени"""
         return self.estimated_time_remaining
+
+class AuditLogger:
+    """Логирование действий пользователя для аудита"""
+    
+    def __init__(self):
+        self.audit_file = LOGS_DIR / "audit.log"
+        self._init_audit_file()
+    
+    def _init_audit_file(self):
+        if not self.audit_file.exists():
+            with open(self.audit_file, 'w', encoding='utf-8') as f:
+                f.write("timestamp,user,action,details\n")
+    
+    def log(self, action: str, details: Dict[str, Any]):
+        """Запись действия в аудит-лог"""
+        user = getpass.getuser()
+        timestamp = datetime.now().isoformat()
+        
+        with open(self.audit_file, 'a', encoding='utf-8') as f:
+            f.write(f"{timestamp},{user},{action},{json.dumps(details, ensure_ascii=False)}\n")
+        
+        logger.info(f"📝 Аудит: {user} - {action}")
 
 # ============================================================================
 # БЛОК 2: БЕЗОПАСНОЕ ХРАНЕНИЕ ДАННЫХ (ШИФРОВАНИЕ)
@@ -592,8 +641,29 @@ class MarketplaceTariffData:
         return cls(**data)
 
 # ============================================================================
-# БЛОК 5: API МЕНЕДЖЕР ДЛЯ ЗАГРУЗКИ ТАРИФОВ
+# БЛОК 5: API МЕНЕДЖЕР ДЛЯ ЗАГРУЗКИ ТАРИФОВ (УЛУЧШЕННЫЙ)
 # ============================================================================
+
+class APIRateLimiter:
+    """Управление лимитами запросов к API"""
+    
+    def __init__(self):
+        self.last_request_time: Dict[str, float] = {}
+        self.min_interval: Dict[str, float] = {
+            'ozon': 0.5,  # 2 запроса в секунду
+            'wildberries': 1.0,  # 1 запрос в секунду
+            'yandex_market': 1.0,
+            'deepseek': 0.5
+        }
+    
+    def wait_if_needed(self, service: str):
+        """Ожидание перед следующим запросом если необходимо"""
+        if service in self.last_request_time:
+            elapsed = time.time() - self.last_request_time[service]
+            min_wait = self.min_interval.get(service, 0.5)
+            if elapsed < min_wait:
+                time.sleep(min_wait - elapsed)
+        self.last_request_time[service] = time.time()
 
 class MarketplaceAPIManager:
     """
@@ -602,18 +672,21 @@ class MarketplaceAPIManager:
     Поддерживаемые источники:
     1. Прямое API маркетплейса (Ozon, Wildberries, Яндекс Маркет)
     2. DeepSeek AI (когда прямое API недоступно)
-    3. Встроенные дефолтные значения (фолбэк)
+    3. CSV файл (пользовательский импорт)
+    4. Встроенные дефолтные значения (фолбэк)
     
     Особенности:
     - Автоматическое кэширование на 1 час
     - Retry при ошибках сети
-    - Приоритет: API → DeepSeek → Default
+    - Rate limiting для соблюдения лимитов API
+    - Приоритет: API → DeepSeek → CSV → Default
     """
     
     def __init__(self, cache_manager: Optional[CacheManager] = None, 
                  secure_data: Optional[SecureDataManager] = None):
         self.cache_manager = cache_manager or CacheManager()
         self.secure_data = secure_data or SecureDataManager()
+        self.rate_limiter = APIRateLimiter()
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': f'FBS-Unit-Economy-Pro/{APP_VERSION}',
@@ -623,6 +696,7 @@ class MarketplaceAPIManager:
         self.progress_tracker = ProgressTracker()
         self._api_keys_cache: Dict[str, str] = {}
         self._load_api_keys()
+        self.audit_logger = AuditLogger()
     
     def _load_api_keys(self):
         """Загрузка API ключей из защищенного хранилища"""
@@ -664,6 +738,7 @@ class MarketplaceAPIManager:
         if self.secure_data.is_available():
             success = self.secure_data.store_api_key(service, api_key.strip())
             if success:
+                self.audit_logger.log('save_api_key', {'service': service})
                 logger.info(f"✅ API ключ для {service} сохранен в защищенное хранилище")
                 return True
         
@@ -676,6 +751,7 @@ class MarketplaceAPIManager:
                 os.chmod(key_file, 0o600)
             except OSError:
                 pass
+            self.audit_logger.log('save_api_key', {'service': service, 'method': 'json_fallback'})
             logger.info(f"✅ API ключ для {service} сохранен в файл")
             return True
         except Exception as e:
@@ -719,6 +795,51 @@ class MarketplaceAPIManager:
             'version': APP_VERSION
         })
         logger.info(f"💾 Тарифы {marketplace} сохранены в кэш")
+    
+    def load_tariffs_from_csv(self, marketplace: str, csv_content: str) -> Dict[str, Dict]:
+        """
+        Загрузка тарифов из CSV файла как альтернативный источник.
+        
+        Args:
+            marketplace: Название маркетплейса
+            csv_content: Содержимое CSV файла
+            
+        Returns:
+            Dict: Тарифы по категориям
+        """
+        tariffs = {}
+        try:
+            df = pd.read_csv(io.StringIO(csv_content))
+            
+            for _, row in df.iterrows():
+                category = str(row.get('category', 'default'))
+                
+                tariffs[category] = {
+                    'commission_rate': float(row.get('commission_rate', 0.15)),
+                    'min_commission': float(row.get('min_commission', 30.0)),
+                    'last_mile_base': float(row.get('last_mile_base', 50.0)),
+                    'last_mile_per_kg': float(row.get('last_mile_per_kg', 15.0)),
+                    'last_mile_per_km': float(row.get('last_mile_per_km', 3.5)),
+                    'acquiring_fee': float(row.get('acquiring_fee', 0.015)),
+                    'return_fee': float(row.get('return_fee', 0.02)),
+                    'penalty_rate': float(row.get('penalty_rate', 0.05)),
+                    'penalty_time_hours': float(row.get('penalty_time_hours', 24)),
+                    'fbo_multiplier': float(row.get('fbo_multiplier', 0.75)),
+                    'fbp_multiplier': float(row.get('fbp_multiplier', 0.60)),
+                    'storage_base_rate': float(row.get('storage_base_rate', 0.30)),
+                    'min_logistics': float(row.get('min_logistics', 25.0)),
+                    'source': 'csv_import',
+                    'last_updated': datetime.now().isoformat()
+                }
+            
+            logger.info(f"✅ Загружено {len(tariffs)} категорий из CSV")
+            self.audit_logger.log('load_tariffs_csv', {'marketplace': marketplace, 'count': len(tariffs)})
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки CSV: {e}")
+            tariffs = {}
+        
+        return tariffs
     
     def _get_default_tariffs(self, marketplace: str) -> Dict[str, Dict]:
         """
@@ -809,6 +930,9 @@ class MarketplaceAPIManager:
             logger.warning("⚠️ API ключи Ozon не найдены")
             return self._get_default_tariffs('ozon')
         
+        # Rate limiting
+        self.rate_limiter.wait_if_needed('ozon')
+        
         headers = {
             'Client-Id': client_id,
             'Api-Key': api_key,
@@ -831,6 +955,7 @@ class MarketplaceAPIManager:
                 
                 # Запрос способов доставки
                 logger.info("📡 Запрос тарифов доставки Ozon...")
+                self.rate_limiter.wait_if_needed('ozon')
                 delivery_response = self.session.post(
                     MarketplaceAPIEndpoint.OZON_DELIVERY.value,
                     headers=headers,
@@ -876,6 +1001,7 @@ class MarketplaceAPIManager:
                 
                 if tariffs:
                     logger.info(f"✅ Загружено {len(tariffs)} категорий тарифов Ozon через API")
+                    self.audit_logger.log('fetch_ozon_tariffs', {'count': len(tariffs), 'status': 'success'})
                 else:
                     logger.warning("⚠️ Не удалось распарсить тарифы Ozon")
                     tariffs = self._get_default_tariffs('ozon')
@@ -915,6 +1041,8 @@ class MarketplaceAPIManager:
             logger.warning("⚠️ API ключ Wildberries не найден")
             return self._get_default_tariffs('wildberries')
         
+        self.rate_limiter.wait_if_needed('wildberries')
+        
         headers = {
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json'
@@ -932,6 +1060,7 @@ class MarketplaceAPIManager:
             
             # Запрос комиссий
             logger.info("📡 Запрос комиссий Wildberries...")
+            self.rate_limiter.wait_if_needed('wildberries')
             commissions_response = self.session.get(
                 MarketplaceAPIEndpoint.WILDBERRIES_COMMISSIONS.value,
                 headers=headers,
@@ -985,6 +1114,7 @@ class MarketplaceAPIManager:
             
             if tariffs:
                 logger.info(f"✅ Загружено {len(tariffs)} категорий тарифов Wildberries через API")
+                self.audit_logger.log('fetch_wildberries_tariffs', {'count': len(tariffs), 'status': 'success'})
             else:
                 logger.warning("⚠️ Не удалось распарсить тарифы Wildberries")
                 tariffs = self._get_default_tariffs('wildberries')
@@ -1021,6 +1151,8 @@ class MarketplaceAPIManager:
         if not api_key or not campaign_id:
             logger.warning("⚠️ API ключи Яндекс Маркет не найдены")
             return self._get_default_tariffs('yandex_market')
+        
+        self.rate_limiter.wait_if_needed('yandex_market')
         
         headers = {
             'Authorization': f'Bearer {api_key}',
@@ -1067,6 +1199,7 @@ class MarketplaceAPIManager:
                 
                 if tariffs:
                     logger.info(f"✅ Загружено {len(tariffs)} категорий тарифов Яндекс Маркет через API")
+                    self.audit_logger.log('fetch_yandex_tariffs', {'count': len(tariffs), 'status': 'success'})
                 else:
                     logger.warning("⚠️ Не удалось распарсить тарифы Яндекс Маркет")
                     tariffs = self._get_default_tariffs('yandex_market')
@@ -1109,6 +1242,8 @@ class MarketplaceAPIManager:
         if not api_key:
             logger.warning("⚠️ DeepSeek API ключ не найден")
             return self._get_default_tariffs(marketplace.lower())
+        
+        self.rate_limiter.wait_if_needed('deepseek')
         
         try:
             # Формируем промпт для AI
@@ -1209,6 +1344,7 @@ class MarketplaceAPIManager:
                 
                 if tariffs:
                     logger.info(f"✅ DeepSeek предоставил тарифы для {len(tariffs)} категорий {marketplace}")
+                    self.audit_logger.log('fetch_deepseek_tariffs', {'marketplace': marketplace, 'count': len(tariffs)})
                 else:
                     logger.warning("⚠️ DeepSeek не предоставил тарифы")
                     tariffs = self._get_default_tariffs(marketplace.lower())
@@ -1230,7 +1366,7 @@ class MarketplaceAPIManager:
         return tariffs
     
     def get_tariffs(self, marketplace: str, force_refresh: bool = False, 
-                   use_ai_fallback: bool = True) -> Dict[str, Dict]:
+                   use_ai_fallback: bool = True, csv_content: Optional[str] = None) -> Dict[str, Dict]:
         """
         Основной метод получения тарифов.
         
@@ -1238,12 +1374,14 @@ class MarketplaceAPIManager:
         1. Кэш (если не force_refresh)
         2. Прямое API маркетплейса
         3. DeepSeek AI (если use_ai_fallback)
-        4. Встроенные дефолтные значения
+        4. CSV импорт (если предоставлен)
+        5. Встроенные дефолтные значения
         
         Args:
             marketplace: Название маркетплейса (Ozon, Wildberries, Яндекс Маркет)
             force_refresh: Принудительно обновить, игнорируя кэш
             use_ai_fallback: Использовать DeepSeek AI при недоступности API
+            csv_content: Содержимое CSV файла для импорта
             
         Returns:
             Dict: Тарифы по категориям
@@ -1291,13 +1429,21 @@ class MarketplaceAPIManager:
             except Exception as e:
                 logger.error(f"❌ DeepSeek также недоступен: {e}")
         
+        # Если AI не сработал - пробуем CSV
+        if (not tariffs or all(t.get('source') == 'default' for t in tariffs.values())) and csv_content:
+            logger.info(f"📄 Использую CSV импорт для {marketplace}")
+            csv_tariffs = self.load_tariffs_from_csv(marketplace, csv_content)
+            if csv_tariffs:
+                tariffs = csv_tariffs
+                logger.info(f"✅ Тарифы {marketplace} загружены из CSV")
+        
         # Если ничего не сработало - дефолтные значения
-        if not tariffs:
+        if not tariffs or all(t.get('source') == 'default' for t in tariffs.values()):
             logger.warning(f"⚠️ Все источники недоступны, использую дефолтные тарифы для {marketplace}")
             tariffs = self._get_default_tariffs(marketplace_lower)
         
         # Сохраняем в кэш
-        if tariffs:
+        if tariffs and not all(t.get('source') == 'default' for t in tariffs.values()):
             self.save_tariffs_to_cache(marketplace, tariffs)
         
         return tariffs
@@ -1361,7 +1507,7 @@ class MarketplaceAPIManager:
                     result['error'] = 'API ключи Ozon не настроены'
                 else:
                     tariffs = self.fetch_ozon_tariffs()
-                    result['status'] = 'success' if tariffs else 'empty_response'
+                    result['status'] = 'success' if tariffs and tariffs.get('source') != 'default' else 'empty_response'
             
             elif marketplace == "Wildberries":
                 if not self.has_api_key('wildberries'):
@@ -1369,7 +1515,7 @@ class MarketplaceAPIManager:
                     result['error'] = 'API ключ Wildberries не настроен'
                 else:
                     tariffs = self.fetch_wildberries_tariffs()
-                    result['status'] = 'success' if tariffs else 'empty_response'
+                    result['status'] = 'success' if tariffs and tariffs.get('source') != 'default' else 'empty_response'
             
             elif marketplace == "Яндекс Маркет":
                 if not self.has_api_key('yandex_market') or not self.has_api_key('yandex_campaign_id'):
@@ -1377,7 +1523,7 @@ class MarketplaceAPIManager:
                     result['error'] = 'API ключи Яндекс Маркет не настроены'
                 else:
                     tariffs = self.fetch_yandex_market_tariffs()
-                    result['status'] = 'success' if tariffs else 'empty_response'
+                    result['status'] = 'success' if tariffs and tariffs.get('source') != 'default' else 'empty_response'
             
             else:
                 result['status'] = 'unknown_marketplace'
@@ -1498,7 +1644,7 @@ class FBSResultData:
     """
     Результаты расчета FBS юнит-экономики.
     Содержит полную детализацию всех расходов и метрик.
-    РАСШИРЕНО: добавлены метрики складской оптимизации
+    РАСШИРЕНО: добавлены метрики складской оптимизации и логистических зон
     """
     # Основные идентификаторы
     artikul: str = ""
@@ -1529,14 +1675,15 @@ class FBSResultData:
     break_even_distance_km: float = 0.0  # Точка безубыточности по расстоянию First Mile
     max_discount_percent: float = 0.0  # Максимально возможная скидка (%)
     safety_margin_price: float = 0.0  # Запас прочности по цене (₽)
+    break_even_volume: float = 0.0  # Точка безубыточности по объему продаж (НОВОЕ)
     
     # LTV и CAC метрики
     ltv: float = 0.0  # Lifetime Value (жизненная ценность клиента)
     cac: float = 0.0  # Customer Acquisition Cost (стоимость привлечения клиента)
     ltv_cac_ratio: float = 0.0  # Соотношение LTV/CAC
-    romi: float = 0.0  # Return on Marketing Investment (НОВОЕ)
+    romi: float = 0.0  # Return on Marketing Investment
     
-    # Метрики складской оптимизации (НОВЫЕ)
+    # Метрики складской оптимизации
     optimal_stock_units: int = 0  # Оптимальный запас в единицах
     safety_stock_units: int = 0  # Страховой запас в единицах
     reorder_point_units: int = 0  # Точка заказа в единицах
@@ -1545,10 +1692,27 @@ class FBSResultData:
     days_of_inventory: float = 0.0  # Дни запаса
     holding_cost_per_unit: float = 0.0  # Стоимость хранения на единицу
     
-    # Рекомендации по оптимизации склада (НОВЫЕ)
+    # Рекомендации по оптимизации склада
     recommended_stock_depth_days: int = 0  # Рекомендуемая глубина запаса
     recommended_safety_stock_days: int = 0  # Рекомендуемый страховой запас
     stock_optimization_potential: float = 0.0  # Потенциал оптимизации запаса (%)
+    
+    # НОВЫЕ МЕТРИКИ ДЛЯ ОПТИМИЗАЦИИ
+    # Логистические зоны риска
+    logistic_zone: str = "unknown"  # red, yellow, green, blue
+    logistic_zone_label: str = ""
+    logistic_recommendation: str = ""
+    is_logistic_critical: bool = False
+    
+    # Эффективность использования пространства
+    space_efficiency_ratio: float = 0.0
+    revenue_per_sqm: float = 0.0
+    profit_per_sqm: float = 0.0
+    
+    # Сезонная корректировка
+    seasonal_factor: float = 1.0
+    adjusted_margin_percent: float = 0.0
+    seasonal_recommendation: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """Преобразование в словарь для сериализации"""
@@ -1572,7 +1736,10 @@ class FBSResultData:
             'ltv_cac_ratio': self.ltv_cac_ratio,
             'optimal_stock_units': self.optimal_stock_units,
             'stock_turnover_days': self.stock_turnover_days,
-            'stock_optimization_potential': self.stock_optimization_potential
+            'stock_optimization_potential': self.stock_optimization_potential,
+            'break_even_volume': self.break_even_volume,
+            'logistic_zone': self.logistic_zone_label,
+            'adjusted_margin_percent': self.adjusted_margin_percent
         }
 
 # ============================================================================
@@ -1614,6 +1781,30 @@ TAX_SYSTEMS = {
     }
 }
 
+# Коэффициенты сезонности по месяцам
+SEASONAL_COEFFICIENTS = {
+    1: 1.2,   # Январь - высокие продажи
+    2: 1.0,   # Февраль - средние
+    3: 0.9,   # Март - снижение
+    4: 0.8,   # Апрель - низкие
+    5: 0.9,
+    6: 1.1,   # Июнь - рост
+    7: 1.3,   # Июль - пик (летние распродажи)
+    8: 1.2,
+    9: 0.9,
+    10: 1.0,
+    11: 1.4,  # Ноябрь - Черная пятница
+    12: 1.5   # Декабрь - Новый год
+}
+
+# Логистические зоны риска
+LOGISTIC_ZONES = {
+    'red': {'max_km': 25, 'label': '🔴 Критическая зона', 'recommendation': 'Срочно оптимизировать логистику! Рассмотрите смену поставщика или увеличение загрузки паллет.'},
+    'yellow': {'max_km': 50, 'label': '🟡 Зона риска', 'recommendation': 'Рассмотрите смену поставщика логистики или оптимизацию маршрутов.'},
+    'green': {'max_km': 100, 'label': '🟢 Безопасная зона', 'recommendation': 'Логистика оптимальна. Продолжайте мониторинг.'},
+    'blue': {'max_km': float('inf'), 'label': '🔵 Идеальная зона', 'recommendation': 'Отличная логистическая стратегия! Рекомендуется масштабирование.'}
+}
+
 class FBSUnitEconomicsCalculator:
     """
     Профессиональный калькулятор юнит-экономики для FBS-модели.
@@ -1623,9 +1814,11 @@ class FBSUnitEconomicsCalculator:
     - Учитывает специфику FBS: двойную логистику, штрафы, Pick & Pack
     - Рассчитывает LTV, CAC, ROMI
     - ОПТИМИЗАЦИЯ СКЛАДСКИХ ОСТАТКОВ: оптимальный запас, страховой запас, точка заказа
-    - ЛОГИСТИЧЕСКИЕ КОРИДОРЫ: точки безубыточности по расстоянию
+    - ЛОГИСТИЧЕСКИЕ КОРИДОРЫ: точки безубыточности по расстоянию, зоны риска
     - Рекомендованные цены в отдельном столбце
     - Условное форматирование прибыльных/убыточных товаров
+    - СЕЗОННАЯ КОРРЕКТИРОВКА МАРЖИ (НОВОЕ)
+    - АНАЛИЗ ЭФФЕКТИВНОСТИ ИСПОЛЬЗОВАНИЯ ПРОСТРАНСТВА (НОВОЕ)
     """
     
     def __init__(self, api_manager: Optional[MarketplaceAPIManager] = None, 
@@ -1651,13 +1844,14 @@ class FBSUnitEconomicsCalculator:
         self.default_penalty_probability_no_night = 0.35  # вероятность просрочки без ночной смены
         self.default_penalty_probability_with_night = 0.05  # вероятность просрочки с ночной сменой
         
-        # Критические зоны для логистических коридоров (НОВЫЕ)
+        # Критические зоны для логистических коридоров
         self.CRITICAL_DISTANCE_KM = 25  # Красная зона
         self.WARNING_DISTANCE_KM = 50   # Желтая зона
         self.SAFE_DISTANCE_KM = 100     # Зеленая зона
         
         # Прогресс-трекер для пакетной обработки
         self.progress_tracker = ProgressTracker()
+        self.audit_logger = AuditLogger()
         
         # Загружаем тарифы при инициализации
         self.refresh_tariffs()
@@ -1671,22 +1865,25 @@ class FBSUnitEconomicsCalculator:
         """
         self.current_marketplace = marketplace_name
         self.refresh_tariffs()
+        self.audit_logger.log('set_marketplace', {'marketplace': marketplace_name})
         logger.info(f"🏪 Установлен маркетплейс: {marketplace_name}")
     
-    def refresh_tariffs(self, force: bool = False, use_ai: bool = False):
+    def refresh_tariffs(self, force: bool = False, use_ai: bool = False, csv_content: Optional[str] = None):
         """
         Обновление тарифов из API.
         
         Args:
             force: Принудительное обновление, игнорируя кэш
             use_ai: Использовать DeepSeek AI при недоступности API
+            csv_content: Содержимое CSV для импорта
         """
         logger.info(f"🔄 Обновление тарифов для {self.current_marketplace}...")
         
         self.current_tariffs = self.api_manager.get_tariffs(
             self.current_marketplace,
             force_refresh=force,
-            use_ai_fallback=use_ai
+            use_ai_fallback=use_ai,
+            csv_content=csv_content
         )
         
         self.tariffs_updated_at = datetime.now()
@@ -1699,6 +1896,8 @@ class FBSUnitEconomicsCalculator:
                 sources.add('api')
             elif 'deepseek' in source:
                 sources.add('deepseek')
+            elif 'csv' in source:
+                sources.add('csv')
             else:
                 sources.add('default')
         
@@ -1706,6 +1905,8 @@ class FBSUnitEconomicsCalculator:
             self.tariffs_source = 'api'
         elif 'deepseek' in sources:
             self.tariffs_source = 'deepseek'
+        elif 'csv' in sources:
+            self.tariffs_source = 'csv'
         else:
             self.tariffs_source = 'default'
         
@@ -1771,6 +1972,23 @@ class FBSUnitEconomicsCalculator:
             'last_updated': datetime.now().isoformat()
         }
     
+    def _get_logistic_zone(self, distance_km: float) -> Dict[str, Any]:
+        """Определяет зону логистического риска"""
+        for zone_name, zone_data in LOGISTIC_ZONES.items():
+            if distance_km <= zone_data['max_km']:
+                return {
+                    'zone': zone_name,
+                    'label': zone_data['label'],
+                    'recommendation': zone_data['recommendation'],
+                    'is_critical': zone_name == 'red'
+                }
+        return {
+            'zone': 'blue',
+            'label': '🔵 Идеальная зона',
+            'recommendation': 'Отличная логистическая стратегия! Рекомендуется масштабирование.',
+            'is_critical': False
+        }
+    
     @timing_decorator
     def calculate_unit_economics(self, input_data: FBSInputData) -> FBSResultData:
         """
@@ -1789,9 +2007,12 @@ class FBSUnitEconomicsCalculator:
         10. Складские расходы
         11. Налоги
         12. LTV, CAC, ROMI
-        13. ОПТИМИЗАЦИЯ СКЛАДСКИХ ОСТАТКОВ (НОВОЕ)
-        14. ЛОГИСТИЧЕСКИЕ КОРИДОРЫ (НОВОЕ)
-        15. РЕКОМЕНДОВАННЫЕ ЦЕНЫ (НОВОЕ)
+        13. ОПТИМИЗАЦИЯ СКЛАДСКИХ ОСТАТКОВ
+        14. ЛОГИСТИЧЕСКИЕ КОРИДОРЫ И ЗОНЫ РИСКА
+        15. РЕКОМЕНДОВАННЫЕ ЦЕНЫ
+        16. СЕЗОННАЯ КОРРЕКТИРОВКА (НОВОЕ)
+        17. ТОЧКА БЕЗУБЫТОЧНОСТИ ПО ОБЪЕМУ (НОВОЕ)
+        18. ЭФФЕКТИВНОСТЬ ИСПОЛЬЗОВАНИЯ ПРОСТРАНСТВА (НОВОЕ)
         
         Args:
             input_data: Входные данные товара
@@ -1985,7 +2206,16 @@ class FBSUnitEconomicsCalculator:
             result.break_even_distance_km = float('inf')
         
         # =====================================================================
-        # 14. ЗАПАС ПРОЧНОСТИ ПО ЦЕНЕ (ДЛЯ СЕЗОННЫХ РАСПРОДАЖ)
+        # 14. ЛОГИСТИЧЕСКИЕ ЗОНЫ РИСКА (НОВОЕ)
+        # =====================================================================
+        logistic_zone_info = self._get_logistic_zone(result.break_even_distance_km)
+        result.logistic_zone = logistic_zone_info['zone']
+        result.logistic_zone_label = logistic_zone_info['label']
+        result.logistic_recommendation = logistic_zone_info['recommendation']
+        result.is_logistic_critical = logistic_zone_info['is_critical']
+        
+        # =====================================================================
+        # 15. ЗАПАС ПРОЧНОСТИ ПО ЦЕНЕ (ДЛЯ СЕЗОННЫХ РАСПРОДАЖ)
         # =====================================================================
         # Расчет минимальной цены для безубыточности
         variable_costs_percent = (
@@ -2022,7 +2252,17 @@ class FBSUnitEconomicsCalculator:
             result.max_discount_percent = 0
         
         # =====================================================================
-        # 15. LTV (LIFETIME VALUE) И CAC (CUSTOMER ACQUISITION COST)
+        # 16. ТОЧКА БЕЗУБЫТОЧНОСТИ ПО ОБЪЕМУ ПРОДАЖ (НОВОЕ)
+        # =====================================================================
+        variable_costs = result.commission + result.last_mile_cost + result.acquiring_cost + result.return_cost + result.penalty_cost
+        
+        if (result.selling_price - variable_costs) > 0:
+            result.break_even_volume = fixed_costs_per_unit / (result.selling_price - variable_costs)
+        else:
+            result.break_even_volume = float('inf')
+        
+        # =====================================================================
+        # 17. LTV (LIFETIME VALUE) И CAC (CUSTOMER ACQUISITION COST)
         # =====================================================================
         # LTV = (Средний чек × Кол-во покупок в год × Коэффициент удержания) / (1 + Ставка дисконтирования)
         if (1 + input_data.discount_rate) > 0:
@@ -2056,7 +2296,22 @@ class FBSUnitEconomicsCalculator:
             result.romi = 0
         
         # =====================================================================
-        # 16. ОПТИМИЗАЦИЯ СКЛАДСКИХ ОСТАТКОВ (НОВОЕ)
+        # 18. СЕЗОННАЯ КОРРЕКТИРОВКА МАРЖИ (НОВОЕ)
+        # =====================================================================
+        current_month = datetime.now().month
+        seasonal_factor = SEASONAL_COEFFICIENTS.get(current_month, 1.0)
+        result.seasonal_factor = seasonal_factor
+        result.adjusted_margin_percent = result.margin_percent * seasonal_factor
+        
+        if result.adjusted_margin_percent < 10:
+            result.seasonal_recommendation = "⚠️ Низкая сезонная маржа - рассмотрите акции или повышение цен"
+        elif result.adjusted_margin_percent < 20:
+            result.seasonal_recommendation = "📊 Средняя сезонная маржа - стабильно, можно улучшить"
+        else:
+            result.seasonal_recommendation = "✅ Отличная сезонная маржа!"
+        
+        # =====================================================================
+        # 19. ОПТИМИЗАЦИЯ СКЛАДСКИХ ОСТАТКОВ
         # =====================================================================
         # Расчет оптимального запаса (EOQ - Economic Order Quantity)
         daily_demand = input_data.daily_sales
@@ -2111,7 +2366,16 @@ class FBSUnitEconomicsCalculator:
         result.holding_cost_per_unit = holding_cost_per_unit
         
         # =====================================================================
-        # 17. РЕКОМЕНДАЦИИ ПО ОПТИМИЗАЦИИ СКЛАДА (НОВОЕ)
+        # 20. ЭФФЕКТИВНОСТЬ ИСПОЛЬЗОВАНИЯ ПРОСТРАНСТВА (НОВОЕ)
+        # =====================================================================
+        if total_stock > 0 and input_data.warehouse_space_per_unit > 0:
+            total_sqm = total_stock * input_data.warehouse_space_per_unit
+            result.space_efficiency_ratio = total_stock / total_sqm if total_sqm > 0 else 0
+            result.revenue_per_sqm = (input_data.selling_price * input_data.daily_sales * 30) / total_sqm if total_sqm > 0 else 0
+            result.profit_per_sqm = (result.gross_profit * input_data.daily_sales * 30) / total_sqm if total_sqm > 0 else 0
+        
+        # =====================================================================
+        # 21. РЕКОМЕНДАЦИИ ПО ОПТИМИЗАЦИИ СКЛАДА
         # =====================================================================
         # Рекомендуемая глубина запаса
         if result.stock_turnover_rate > 12:
@@ -2137,6 +2401,14 @@ class FBSUnitEconomicsCalculator:
             result.stock_optimization_potential = ((current_stock - recommended_stock) / current_stock) * 100
         else:
             result.stock_optimization_potential = 0
+        
+        # Логирование аудита
+        self.audit_logger.log('calculate_unit', {
+            'artikul': input_data.artikul,
+            'profit': result.gross_profit,
+            'margin': result.margin_percent,
+            'logistic_zone': result.logistic_zone
+        })
         
         return result
     
@@ -2228,6 +2500,45 @@ class FBSUnitEconomicsCalculator:
         
         return results
     
+    @timing_decorator
+    def calculate_batch_optimized(self, input_data_list: List[FBSInputData], 
+                                chunk_size: int = 1000) -> List[FBSResultData]:
+        """
+        Оптимизированный пакетный расчет с чанками для больших объемов данных.
+        
+        Args:
+            input_data_list: Список входных данных товаров
+            chunk_size: Размер чанка для обработки
+            
+        Returns:
+            List[FBSResultData]: Список результатов расчета
+        """
+        results = []
+        total = len(input_data_list)
+        
+        if total == 0:
+            return results
+        
+        logger.info(f"📦 Оптимизированный расчет {total} товаров (чанк: {chunk_size})")
+        
+        for i in range(0, total, chunk_size):
+            chunk = input_data_list[i:i+chunk_size]
+            chunk_results = self.calculate_batch(chunk, use_parallel=True)
+            results.extend(chunk_results)
+            
+            progress = min((i + len(chunk)) / total, 1.0)
+            self.progress_tracker.update(
+                min(i + len(chunk), total),
+                f"Обработано {min(i + len(chunk), total)}/{total} товаров"
+            )
+            
+            logger.info(f"📊 Прогресс: {progress*100:.1f}% ({min(i + len(chunk), total)}/{total})")
+        
+        logger.info(f"✅ Оптимизированный расчет завершен. Всего: {len(results)} товаров")
+        self.audit_logger.log('batch_calculation', {'total': len(results), 'chunk_size': chunk_size})
+        
+        return results
+    
     def get_tariffs_summary(self) -> pd.DataFrame:
         """Получение сводки по текущим тарифам"""
         return self.api_manager.get_all_tariffs_as_dataframe(self.current_marketplace)
@@ -2247,6 +2558,136 @@ class FBSUnitEconomicsCalculator:
         }
         
         return results
+    
+    def run_what_if_analysis(self, base_data: FBSInputData, scenarios: List[Dict]) -> pd.DataFrame:
+        """
+        Анализ сценариев "Что если" для принятия решений.
+        
+        Args:
+            base_data: Базовые входные данные
+            scenarios: Список сценариев с изменениями параметров
+            
+        Returns:
+            pd.DataFrame: Результаты анализа сценариев
+        """
+        results = []
+        
+        for scenario in scenarios:
+            # Создаем копию данных с изменениями
+            test_data = FBSInputData(**base_data.to_dict())
+            
+            for param, value in scenario.items():
+                if param == 'name':
+                    continue
+                if hasattr(test_data, param):
+                    setattr(test_data, param, value)
+            
+            result = self.calculate_unit_economics(test_data)
+            results.append({
+                'Сценарий': scenario.get('name', 'Без названия'),
+                'Прибыль, ₽': round(result.gross_profit, 2),
+                'Маржа, %': round(result.margin_percent, 2),
+                'ROI, %': round(result.roi_percent, 2),
+                'Точка безубыт., км': round(result.break_even_distance_km, 1) if result.break_even_distance_km != float('inf') else '∞',
+                'Точка безубыт., шт': round(result.break_even_volume, 0) if result.break_even_volume != float('inf') else '∞',
+                'Опт. запас, шт': result.optimal_stock_units,
+                'Оборачиваемость, дн': round(result.stock_turnover_days, 1),
+                'Логистическая зона': result.logistic_zone_label,
+                'Скорр. маржа, %': round(result.adjusted_margin_percent, 2)
+            })
+        
+        self.audit_logger.log('what_if_analysis', {'scenarios': len(scenarios)})
+        return pd.DataFrame(results)
+    
+    def generate_recommendations(self, results: List[FBSResultData]) -> List[Dict]:
+        """
+        Генерация автоматических рекомендаций для операционного директора.
+        
+        Args:
+            results: Список результатов расчета
+            
+        Returns:
+            List[Dict]: Список рекомендаций с приоритетами
+        """
+        recommendations = []
+        
+        if not results:
+            return recommendations
+        
+        total = len(results)
+        
+        # 1. Анализ прибыльности
+        profitable = [r for r in results if r.gross_profit > 0]
+        unprofitable = [r for r in results if r.gross_profit <= 0]
+        
+        if len(unprofitable) / total > 0.2:
+            recommendations.append({
+                'priority': 'high',
+                'category': 'Прибыльность',
+                'icon': '⚠️',
+                'message': f'{len(unprofitable)} товаров ({len(unprofitable)/total*100:.0f}%) убыточны. '
+                          f'Рекомендуется пересмотреть цены или сократить затраты First Mile.',
+                'affected_products': [r.artikul for r in unprofitable[:5]]
+            })
+        elif len(unprofitable) > 0:
+            recommendations.append({
+                'priority': 'medium',
+                'category': 'Прибыльность',
+                'icon': '📊',
+                'message': f'{len(unprofitable)} товаров убыточны. Рассмотрите возможность повышения цен или оптимизации затрат.',
+                'affected_products': [r.artikul for r in unprofitable[:5]]
+            })
+        
+        # 2. Анализ логистики
+        high_distance = [r for r in results if r.is_logistic_critical and r.break_even_distance_km < 25]
+        if high_distance:
+            recommendations.append({
+                'priority': 'high',
+                'category': 'Логистика',
+                'icon': '🚚',
+                'message': f'{len(high_distance)} товаров находятся в критической логистической зоне (<25 км). '
+                          f'Рекомендуется оптимизировать маршруты или увеличить загрузку паллет.',
+                'affected_products': [r.artikul for r in high_distance[:5]]
+            })
+        
+        # 3. Анализ складских запасов
+        high_stock = [r for r in results if r.stock_turnover_days > 60]
+        if high_stock:
+            recommendations.append({
+                'priority': 'medium',
+                'category': 'Склад',
+                'icon': '📦',
+                'message': f'{len(high_stock)} товаров имеют низкую оборачиваемость (>60 дней). '
+                          f'Рекомендуется провести акции для ускорения оборота.',
+                'affected_products': [r.artikul for r in high_stock[:5]]
+            })
+        
+        # 4. Анализ LTV/CAC
+        low_ltv = [r for r in results if r.ltv_cac_ratio < 3 and r.ltv_cac_ratio > 0]
+        if low_ltv:
+            recommendations.append({
+                'priority': 'medium',
+                'category': 'Маркетинг',
+                'icon': '📈',
+                'message': f'{len(low_ltv)} товаров имеют низкое соотношение LTV/CAC (<3). '
+                          f'Рекомендуется оптимизировать маркетинговые расходы.',
+                'affected_products': [r.artikul for r in low_ltv[:5]]
+            })
+        
+        # 5. Анализ потенциала оптимизации склада
+        high_optimization = [r for r in results if r.stock_optimization_potential > 20]
+        if high_optimization:
+            recommendations.append({
+                'priority': 'low',
+                'category': 'Оптимизация склада',
+                'icon': '💡',
+                'message': f'{len(high_optimization)} товаров имеют потенциал оптимизации запаса >20%. '
+                          f'Рекомендуется пересмотреть глубину запаса.',
+                'affected_products': [r.artikul for r in high_optimization[:5]]
+            })
+        
+        self.audit_logger.log('generate_recommendations', {'count': len(recommendations)})
+        return recommendations
 
 # ============================================================================
 # БЛОК 8: ЭКСПОРТ В CSV И GOOGLE SHEETS
@@ -2262,6 +2703,7 @@ class DataExporter:
     
     def __init__(self):
         self.logger = logger
+        self.audit_logger = AuditLogger()
     
     def export_to_csv(self, results: List[FBSResultData], 
                      input_data_list: List[FBSInputData],
@@ -2309,6 +2751,7 @@ class DataExporter:
                     'Маржа, %': result.margin_percent,
                     'ROI, %': result.roi_percent,
                     'Точка безубыточности, км': result.break_even_distance_km,
+                    'Точка безубыточности, шт': result.break_even_volume,
                     'Макс. скидка, %': result.max_discount_percent,
                     'Запас прочности, ₽': result.safety_margin_price,
                     'LTV, ₽': result.ltv,
@@ -2319,7 +2762,11 @@ class DataExporter:
                     'Страховой запас, шт': result.safety_stock_units,
                     'Точка заказа, шт': result.reorder_point_units,
                     'Оборачиваемость, дней': result.stock_turnover_days,
-                    'Потенциал оптимизации, %': result.stock_optimization_potential
+                    'Потенциал оптимизации, %': result.stock_optimization_potential,
+                    'Логистическая зона': result.logistic_zone_label,
+                    'Скорр. маржа, %': result.adjusted_margin_percent,
+                    'Выручка на м², ₽': result.revenue_per_sqm,
+                    'Прибыль на м², ₽': result.profit_per_sqm
                 }
                 data.append(row)
             
@@ -2328,6 +2775,7 @@ class DataExporter:
             # Сохраняем в CSV
             df.to_csv(output_path, index=False, sep=delimiter, encoding='utf-8-sig')
             
+            self.audit_logger.log('export_csv', {'path': output_path, 'count': len(results)})
             self.logger.info(f"✅ Экспорт в CSV завершен: {output_path}")
             return True
             
@@ -2371,10 +2819,12 @@ class DataExporter:
                 'Pick & Pack, ₽', 'Упаковка, ₽', 'Эквайринг, ₽', 'Возвраты, ₽',
                 'Штрафы, ₽', 'Маркетинг, ₽', 'Склад, ₽', 'Налог, ₽',
                 'Итого расходов, ₽', 'Чистая прибыль, ₽', 'Маржа, %',
-                'ROI, %', 'Точка безубыточности, км', 'Макс. скидка, %',
-                'Запас прочности, ₽', 'LTV, ₽', 'CAC, ₽', 'LTV/CAC',
-                'ROMI, %', 'Оптимальный запас, шт', 'Страховой запас, шт',
-                'Точка заказа, шт', 'Оборачиваемость, дней', 'Потенциал оптимизации, %'
+                'ROI, %', 'Точка безубыт., км', 'Точка безубыт., шт',
+                'Макс. скидка, %', 'Запас прочности, ₽', 'LTV, ₽',
+                'CAC, ₽', 'LTV/CAC', 'ROMI, %', 'Оптимальный запас, шт',
+                'Страховой запас, шт', 'Точка заказа, шт',
+                'Оборачиваемость, дней', 'Потенциал оптимизации, %',
+                'Логистическая зона', 'Скорр. маржа, %'
             ]
             
             data.append(headers)
@@ -2402,6 +2852,7 @@ class DataExporter:
                     result.margin_percent,
                     result.roi_percent,
                     result.break_even_distance_km,
+                    result.break_even_volume,
                     result.max_discount_percent,
                     result.safety_margin_price,
                     result.ltv,
@@ -2412,7 +2863,9 @@ class DataExporter:
                     result.safety_stock_units,
                     result.reorder_point_units,
                     result.stock_turnover_days,
-                    result.stock_optimization_potential
+                    result.stock_optimization_potential,
+                    result.logistic_zone_label,
+                    result.adjusted_margin_percent
                 ]
                 data.append(row)
             
@@ -2446,14 +2899,14 @@ class DataExporter:
             worksheet.update(data, value_input_option='USER_ENTERED')
             
             # Форматирование
-            worksheet.format('A1:AF1', {
+            worksheet.format('A1:AI1', {
                 "backgroundColor": {"red": 0.1, "green": 0.1, "blue": 0.18},
                 "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True}
             })
             
+            self.audit_logger.log('export_gsheets', {'spreadsheet': spreadsheet_name, 'count': len(results)})
             self.logger.info(f"✅ Экспорт в Google Sheets завершен: {spreadsheet.url}")
             
-            # Возвращаем URL для доступа
             st.success(f"✅ Данные экспортированы в Google Sheets: {spreadsheet.url}")
             return True
             
@@ -2549,6 +3002,16 @@ class ProfessionalExcelExporter:
             end_color="D9E1F2", 
             fill_type="solid"
         )
+        self.critical_fill = PatternFill(
+            start_color="FFCCCC", 
+            end_color="FFCCCC", 
+            fill_type="solid"
+        )
+        self.good_fill = PatternFill(
+            start_color="CCFFCC", 
+            end_color="CCFFCC", 
+            fill_type="solid"
+        )
         
         # Границы
         self.thin_border = Border(
@@ -2575,6 +3038,8 @@ class ProfessionalExcelExporter:
             color="0563C1", 
             underline="single"
         )
+        
+        self.audit_logger = AuditLogger()
         
         # Для хранения ссылок на строки тарифов
         self._tariffs_start_row = 6
@@ -2628,6 +3093,8 @@ class ProfessionalExcelExporter:
             
             # Сохраняем файл
             wb.save(output_path)
+            
+            self.audit_logger.log('export_excel', {'path': output_path, 'count': len(results)})
             logger.info(f"✅ Профессиональный Excel отчет сохранен: {output_path}")
             return True
             
@@ -2637,10 +3104,7 @@ class ProfessionalExcelExporter:
             return False
     
     def _create_tariffs_sheet(self, ws, calculator: FBSUnitEconomicsCalculator, marketplace_name: str):
-        """
-        Создание листа с актуальными тарифами из API.
-        Этот лист является источником данных для формул на других листах.
-        """
+        """Создание листа с актуальными тарифами из API."""
         # Заголовок
         ws.merge_cells('A1:R1')
         title_cell = ws.cell(row=1, column=1, value=(
@@ -2773,6 +3237,8 @@ class ProfessionalExcelExporter:
                 source_cell.fill = PatternFill(start_color="E0FFE0", end_color="E0FFE0", fill_type="solid")
             elif 'deepseek' in source.lower():
                 source_cell.fill = PatternFill(start_color="E0E0FF", end_color="E0E0FF", fill_type="solid")
+            elif 'csv' in source.lower():
+                source_cell.fill = PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")
             else:
                 source_cell.fill = PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")
             
@@ -2820,17 +3286,6 @@ class ProfessionalExcelExporter:
             "Для загрузки свежих тарифов используйте приложение."
         ))
         note_cell.font = Font(italic=True, size=11, color="333333")
-        
-        # Условное форматирование для источника данных
-        if self._tariffs_last_row >= 7:
-            ws.conditional_formatting.add(
-                f"O7:O{self._tariffs_last_row}",
-                CellIsRule(
-                    operator="equal",
-                    formula=['"default"'],
-                    fill=PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")
-                )
-            )
     
     def _create_main_sheet_with_tariff_links(self, ws, results, input_data_list, 
                                              marketplace_name, calculator):
@@ -2841,13 +3296,14 @@ class ProfessionalExcelExporter:
         - Все расходы с формулами из листа тарифов
         - Рекомендованные цены в отдельном столбце
         - Условное форматирование прибыльных/убыточных товаров
-        - Полную детализацию юнит-экономики
+        - Логистические зоны риска
+        - Сезонную корректировку
         """
         # Название листа тарифов для формул
         tariff_sheet = "'📋 Тарифы МП'"
         
         # Заголовок
-        ws.merge_cells('A1:AW1')
+        ws.merge_cells('A1:BC1')
         title_cell = ws.cell(row=1, column=1, value=(
             f"🚀 Юнит-экономика FBS — {marketplace_name} — "
             f"{datetime.now().strftime('%d.%m.%Y %H:%M')}"
@@ -2857,11 +3313,12 @@ class ProfessionalExcelExporter:
         ws.row_dimensions[1].height = 45
         
         # Подзаголовок с легендой
-        ws.merge_cells('A2:AW2')
+        ws.merge_cells('A2:BC2')
         ws.cell(row=2, column=1, value=(
             "🟡 Вводные данные (редактируемые) | 🟣 Тарифы из API (лист '📋 Тарифы МП') | "
             "🟢 Расчетные формулы | 🔵 Итоговые показатели | "
-            "🟠 Рекомендованные цены | 📎 Формулы автоматически подтягивают данные из листа тарифов"
+            "🟠 Рекомендованные цены | 🔴 Критические зоны | "
+            "📎 Формулы автоматически подтягивают данные из листа тарифов"
         )).font = Font(size=9, italic=True, color="666666")
         
         # Определяем заголовки колонок (РАСШИРЕННЫЕ)
@@ -2878,9 +3335,9 @@ class ProfessionalExcelExporter:
             # Расчетные параметры (Q-V)
             ("Объемный вес, кг", 13), ("Оплачиваемый вес, кг", 16),
             ("Коэфф. ночной смены", 15), ("Вероятность просрочки", 16),
-            ("Ставка налога", 12), ("Параметр", 10),
+            ("Ставка налога", 12), ("Сезонный коэфф.", 14),
             
-            # Расходы (W-AG) - ВСЕ ССЫЛАЮТСЯ НА ЛИСТ ТАРИФОВ
+            # Расходы (W-AG)
             ("Комиссия МП, ₽", 14), ("First Mile, ₽", 13),
             ("Last Mile, ₽", 13), ("Pick & Pack, ₽", 14),
             ("Упаковка расч., ₽", 14), ("Эквайринг, ₽", 13),
@@ -2893,18 +3350,23 @@ class ProfessionalExcelExporter:
             ("МАРЖА, %", 10), ("ROI, %", 10),
             ("Мин. цена, ₽", 12),
             
-            # РЕКОМЕНДОВАННЫЕ ЦЕНЫ (AM-AN) - НОВОЕ
+            # Рекомендованные цены (AM-AN)
             ("Рек. цена (маржа 15%), ₽", 18),
             ("Рек. цена (маржа 25%), ₽", 18),
             
-            # FBS метрики (AO-AT)
-            ("Точка безубыт., км", 15), ("Макс. скидка, %", 13),
-            ("Запас прочности, ₽", 15), ("LTV, ₽", 12),
-            ("CAC, ₽", 12), ("LTV/CAC", 10),
+            # FBS метрики (AO-AU)
+            ("Точка безубыт., км", 15), ("Точка безубыт., шт", 15),
+            ("Макс. скидка, %", 13), ("Запас прочности, ₽", 15),
+            ("LTV, ₽", 12), ("CAC, ₽", 12), ("LTV/CAC", 10),
             
-            # Складская оптимизация (AU-AW) - НОВОЕ
+            # Складская оптимизация (AV-AX)
             ("Оптим. запас, шт", 14), ("Страх. запас, шт", 14),
-            ("Оборачиваемость, дн", 16)
+            ("Оборачиваемость, дн", 16),
+            
+            # НОВЫЕ МЕТРИКИ (AY-BC)
+            ("Логистическая зона", 18), ("Скорр. маржа, %", 14),
+            ("Выручка на м², ₽", 15), ("Прибыль на м², ₽", 15),
+            ("Потенциал оптимизации, %", 18)
         ]
         
         # Записываем заголовки
@@ -2987,10 +3449,18 @@ class ProfessionalExcelExporter:
             cell.border = self.thin_border
             cell.number_format = '0.00'
             
+            # Сезонный коэффициент (колонка 22 = V)
+            current_month = datetime.now().month
+            seasonal_factor = SEASONAL_COEFFICIENTS.get(current_month, 1.0)
+            cell = ws.cell(row=row_idx, column=22, value=seasonal_factor)
+            cell.fill = self.formula_fill
+            cell.border = self.thin_border
+            cell.number_format = '0.00'
+            
             # Получаем строку тарифа для категории
             tariff_row = get_tariff_row(input_data.category)
             
-            # === РАСХОДЫ С ССЫЛКАМИ НА ЛИСТ ТАРИФОВ (НЕ ЗАХАРДКОЖЕНЫ) ===
+            # === РАСХОДЫ С ССЫЛКАМИ НА ЛИСТ ТАРИФОВ ===
             
             # Комиссия МП (колонка 23 = W)
             formula = f"=MAX(D{row_idx}*{tariff_sheet}!B{tariff_row}/100, {tariff_sheet}!C{tariff_row})"
@@ -3118,7 +3588,7 @@ class ProfessionalExcelExporter:
             cell.border = self.thin_border
             cell.number_format = '#,##0.00'
             
-            # === РЕКОМЕНДОВАННЫЕ ЦЕНЫ (НОВОЕ) ===
+            # === РЕКОМЕНДОВАННЫЕ ЦЕНЫ ===
             # Рекомендуемая цена при марже 15% (колонка 39 = AM)
             formula = f"=IF((1-0.15)>0, AH{row_idx}/(1-0.15), D{row_idx})"
             cell = ws.cell(row=row_idx, column=39, value=formula)
@@ -3135,69 +3605,120 @@ class ProfessionalExcelExporter:
             cell.number_format = '#,##0.00'
             cell.font = Font(bold=True, color="0F4C81")
             
-            # Максимальная скидка (колонка 41 = AO)
-            formula = f"=IF(D{row_idx}>0, ((D{row_idx}-AL{row_idx})/D{row_idx})*100, 0)"
+            # Точка безубыточности по расстоянию (колонка 41 = AO)
+            formula = f"=IF(X{row_idx}>0, AI{row_idx}/(K{row_idx}*2/L{row_idx}), 999999)"
             cell = ws.cell(row=row_idx, column=41, value=formula)
             cell.fill = self.result_fill
             cell.border = self.thin_border
-            cell.number_format = '0.00"%"'
+            cell.number_format = '#,##0.0'
             
-            # Точка безубыточности (колонка 42 = AP)
-            formula = f"=IF(X{row_idx}>0, AI{row_idx}/(K{row_idx}*2/L{row_idx}), 999999)"
+            # Точка безубыточности по объему (колонка 42 = AP)
+            formula = f"=IF((D{row_idx}-(W{row_idx}+Y{row_idx}+AB{row_idx}+AC{row_idx}+AD{row_idx}))>0, "
+            f"(E{row_idx}+X{row_idx}+Z{row_idx}+AA{row_idx}+AE{row_idx}+AF{row_idx})/"
+            f"(D{row_idx}-(W{row_idx}+Y{row_idx}+AB{row_idx}+AC{row_idx}+AD{row_idx})), 999999)"
             cell = ws.cell(row=row_idx, column=42, value=formula)
             cell.fill = self.result_fill
             cell.border = self.thin_border
             cell.number_format = '#,##0.0'
             
-            # Запас прочности (колонка 43 = AQ)
-            formula = f"=D{row_idx}-AL{row_idx}"
+            # Максимальная скидка (колонка 43 = AQ)
+            formula = f"=IF(D{row_idx}>0, ((D{row_idx}-AL{row_idx})/D{row_idx})*100, 0)"
             cell = ws.cell(row=row_idx, column=43, value=formula)
             cell.fill = self.result_fill
             cell.border = self.thin_border
-            cell.number_format = '#,##0.00'
+            cell.number_format = '0.00"%"'
             
-            # LTV (колонка 44 = AR)
-            formula = f"=D{row_idx}*{input_data.avg_purchases_per_year}*{input_data.customer_retention_rate}/(1+{input_data.discount_rate})"
+            # Запас прочности (колонка 44 = AR)
+            formula = f"=D{row_idx}-AL{row_idx}"
             cell = ws.cell(row=row_idx, column=44, value=formula)
             cell.fill = self.result_fill
             cell.border = self.thin_border
             cell.number_format = '#,##0.00'
             
-            # CAC (колонка 45 = AS)
-            formula = f"=(AE{row_idx}+AD{row_idx}+X{row_idx})/0.3"
+            # LTV (колонка 45 = AS)
+            formula = f"=D{row_idx}*{input_data.avg_purchases_per_year}*{input_data.customer_retention_rate}/(1+{input_data.discount_rate})"
             cell = ws.cell(row=row_idx, column=45, value=formula)
             cell.fill = self.result_fill
             cell.border = self.thin_border
             cell.number_format = '#,##0.00'
             
-            # LTV/CAC (колонка 46 = AT)
-            formula = f"=IF(AS{row_idx}>0, AR{row_idx}/AS{row_idx}, 999)"
+            # CAC (колонка 46 = AT)
+            formula = f"=(AE{row_idx}+AD{row_idx}+X{row_idx})/0.3"
             cell = ws.cell(row=row_idx, column=46, value=formula)
+            cell.fill = self.result_fill
+            cell.border = self.thin_border
+            cell.number_format = '#,##0.00'
+            
+            # LTV/CAC (колонка 47 = AU)
+            formula = f"=IF(AT{row_idx}>0, AS{row_idx}/AT{row_idx}, 999)"
+            cell = ws.cell(row=row_idx, column=47, value=formula)
             cell.fill = self.result_fill
             cell.border = self.thin_border
             cell.number_format = '0.0'
             
-            # === СКЛАДСКАЯ ОПТИМИЗАЦИЯ (НОВОЕ) ===
-            # Оптимальный запас (колонка 47 = AU)
+            # === СКЛАДСКАЯ ОПТИМИЗАЦИЯ ===
+            # Оптимальный запас (колонка 48 = AV)
             formula = f"=ROUNDUP(SQRT((2*P{row_idx}*365*500)/(U{row_idx}*0.01*12)), 0)"
-            cell = ws.cell(row=row_idx, column=47, value=formula)
-            cell.fill = self.formula_fill
-            cell.border = self.thin_border
-            cell.number_format = '#,##0'
-            
-            # Страховой запас (колонка 48 = AV)
-            formula = f"=CEILING((P{row_idx}*1.5*3)-(P{row_idx}*3), 1)"
             cell = ws.cell(row=row_idx, column=48, value=formula)
             cell.fill = self.formula_fill
             cell.border = self.thin_border
             cell.number_format = '#,##0'
             
-            # Оборачиваемость (колонка 49 = AW)
-            formula = f"=IF(AU{row_idx}>0, AU{row_idx}/P{row_idx}, 0)"
+            # Страховой запас (колонка 49 = AW)
+            formula = f"=CEILING((P{row_idx}*1.5*3)-(P{row_idx}*3), 1)"
             cell = ws.cell(row=row_idx, column=49, value=formula)
             cell.fill = self.formula_fill
             cell.border = self.thin_border
+            cell.number_format = '#,##0'
+            
+            # Оборачиваемость (колонка 50 = AX)
+            formula = f"=IF(AV{row_idx}>0, AV{row_idx}/P{row_idx}, 0)"
+            cell = ws.cell(row=row_idx, column=50, value=formula)
+            cell.fill = self.formula_fill
+            cell.border = self.thin_border
             cell.number_format = '0.0'
+            
+            # === НОВЫЕ МЕТРИКИ ===
+            # Логистическая зона (колонка 51 = AY)
+            if result.is_logistic_critical:
+                zone_text = result.logistic_zone_label
+                cell = ws.cell(row=row_idx, column=51, value=zone_text)
+                cell.fill = self.critical_fill
+                cell.font = Font(bold=True, color="9C0006")
+                cell.border = self.thin_border
+            else:
+                cell = ws.cell(row=row_idx, column=51, value=result.logistic_zone_label)
+                if '🔵' in result.logistic_zone_label:
+                    cell.fill = self.good_fill
+                cell.border = self.thin_border
+            
+            # Скорректированная маржа (колонка 52 = AZ)
+            formula = f"=AJ{row_idx}*V{row_idx}"
+            cell = ws.cell(row=row_idx, column=52, value=formula)
+            cell.fill = self.formula_fill
+            cell.border = self.thin_border
+            cell.number_format = '0.00"%"'
+            
+            # Выручка на м² (колонка 53 = BA)
+            formula = f"=IF((P{row_idx}*30*0.01)>0, D{row_idx}*P{row_idx}*30/(P{row_idx}*30*0.01), 0)"
+            cell = ws.cell(row=row_idx, column=53, value=formula)
+            cell.fill = self.formula_fill
+            cell.border = self.thin_border
+            cell.number_format = '#,##0.00'
+            
+            # Прибыль на м² (колонка 54 = BB)
+            formula = f"=IF((P{row_idx}*30*0.01)>0, AI{row_idx}*P{row_idx}*30/(P{row_idx}*30*0.01), 0)"
+            cell = ws.cell(row=row_idx, column=54, value=formula)
+            cell.fill = self.formula_fill
+            cell.border = self.thin_border
+            cell.number_format = '#,##0.00'
+            
+            # Потенциал оптимизации (колонка 55 = BC)
+            formula = f"=IF((P{row_idx}*30)>0, ((P{row_idx}*30-(MAX(14, P{row_idx}-5)*P{row_idx}))/(P{row_idx}*30))*100, 0)"
+            cell = ws.cell(row=row_idx, column=55, value=formula)
+            cell.fill = self.formula_fill
+            cell.border = self.thin_border
+            cell.number_format = '0.00"%"'
         
         # === УСЛОВНОЕ ФОРМАТИРОВАНИЕ ===
         last_data_row = len(results) + 4
@@ -3233,20 +3754,20 @@ class ProfessionalExcelExporter:
                 )
             )
             
-            # Рекомендованные цены: выделение если выше текущей
+            # Критическая логистическая зона
             ws.conditional_formatting.add(
-                f"AM5:AM{last_data_row}",
+                f"AY5:AY{last_data_row}",
                 CellIsRule(
-                    operator="greaterThan",
-                    formula=[f"D5"],
-                    fill=PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid"),
-                    font=Font(color="006100", bold=True)
+                    operator="containsText",
+                    formula=['"🔴"'],
+                    fill=PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"),
+                    font=Font(color="9C0006", bold=True)
                 )
             )
     
     def _create_dashboard_sheet(self, ws, results, marketplace_name):
         """Создание дашборда со сводной статистикой"""
-        ws.merge_cells('A1:H1')
+        ws.merge_cells('A1:L1')
         ws.cell(row=1, column=1, value=f"📈 Дашборд юнит-экономики — {marketplace_name}").font = self.title_font
         
         if not results:
@@ -3270,12 +3791,20 @@ class ProfessionalExcelExporter:
         avg_turnover_days = np.mean([r.stock_turnover_days for r in results if r.stock_turnover_days > 0])
         avg_optimization_potential = np.mean([r.stock_optimization_potential for r in results])
         
+        # Логистические зоны
+        critical_items = len([r for r in results if r.is_logistic_critical])
+        
+        # Сезонная корректировка
+        avg_adjusted_margin = np.mean([r.adjusted_margin_percent for r in results])
+        
         # Строка 3-4: Основные метрики
         metrics_row1 = [
             ("Всего товаров", f"{total_items}", "A3"),
             ("Прибыльных", f"{profitable_items} ({profitable_items/total_items*100:.0f}%)", "C3"),
             ("Убыточных", f"{unprofitable_items} ({unprofitable_items/total_items*100:.0f}%)", "E3"),
             ("Общая прибыль", f"{total_profit:,.0f} ₽", "G3"),
+            ("Критич. логистика", f"{critical_items} ({critical_items/total_items*100:.0f}%)", "I3"),
+            ("Скорр. маржа", f"{avg_adjusted_margin:.1f}%", "K3")
         ]
         
         for title, value, cell_ref in metrics_row1:
@@ -3294,6 +3823,8 @@ class ProfessionalExcelExporter:
             ("Общие расходы", f"{total_costs:,.0f} ₽", "C6"),
             ("Средняя маржа", f"{avg_margin:.1f}%", "E6"),
             ("Средний ROI", f"{avg_roi:.1f}%", "G6"),
+            ("Средний ROMI", f"{avg_romi:.1f}%", "I6"),
+            ("LTV/CAC", f"{avg_ltv_cac:.1f}x", "K6")
         ]
         
         for title, value, cell_ref in metrics_row2:
@@ -3306,12 +3837,13 @@ class ProfessionalExcelExporter:
             value_cell = ws.cell(row=row+1, column=col, value=value)
             value_cell.font = Font(bold=True, size=16, color="1a1a2e")
         
-        # Строка 9-10: Клиентские метрики
+        # Строка 9-10: Складские метрики
         metrics_row3 = [
-            ("Средний LTV/CAC", f"{avg_ltv_cac:.1f}x", "A9"),
-            ("Средний ROMI", f"{avg_romi:.1f}%", "C9"),
-            ("Оптимальный запас", f"{avg_optimal_stock:.0f} шт", "E9"),
-            ("Оборачиваемость", f"{avg_turnover_days:.1f} дн", "G9"),
+            ("Оптимальный запас", f"{avg_optimal_stock:.0f} шт", "A9"),
+            ("Оборачиваемость", f"{avg_turnover_days:.1f} дн", "C9"),
+            ("Потенциал оптимизации", f"{avg_optimization_potential:.1f}%", "E9"),
+            ("Выручка на м²", f"{np.mean([r.revenue_per_sqm for r in results if r.revenue_per_sqm > 0]):.0f} ₽", "G9"),
+            ("Прибыль на м²", f"{np.mean([r.profit_per_sqm for r in results if r.profit_per_sqm > 0]):.0f} ₽", "I9")
         ]
         
         for title, value, cell_ref in metrics_row3:
@@ -3324,29 +3856,31 @@ class ProfessionalExcelExporter:
             value_cell = ws.cell(row=row+1, column=col, value=value)
             value_cell.font = Font(bold=True, size=16, color="1a1a2e")
         
-        # Строка 12: Потенциал оптимизации
-        ws.merge_cells('A12:H12')
-        optimization_cell = ws.cell(row=12, column=1, value=(
-            f"💡 Потенциал оптимизации складских остатков: {avg_optimization_potential:.1f}% "
-            f"({sum(1 for r in results if r.stock_optimization_potential > 0)} из {total_items} товаров можно оптимизировать)"
+        # Строка 12: Сезонная рекомендация
+        ws.merge_cells('A12:L12')
+        seasonal_note = ws.cell(row=12, column=1, value=(
+            f"📅 Сезонная корректировка (месяц {datetime.now().month}): "
+            f"Средняя скорректированная маржа {avg_adjusted_margin:.1f}% "
+            f"(коэффициент {SEASONAL_COEFFICIENTS.get(datetime.now().month, 1.0)})"
         ))
-        if avg_optimization_potential > 10:
-            optimization_cell.font = Font(bold=True, size=12, color="006100")
-            optimization_cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        elif avg_optimization_potential > 0:
-            optimization_cell.font = Font(bold=True, size=12, color="856404")
-            optimization_cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+        if avg_adjusted_margin < 10:
+            seasonal_note.font = Font(bold=True, size=12, color="9C0006")
+            seasonal_note.fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
+        elif avg_adjusted_margin < 20:
+            seasonal_note.font = Font(bold=True, size=12, color="856404")
+            seasonal_note.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
         else:
-            optimization_cell.font = Font(bold=True, size=12, color="666666")
+            seasonal_note.font = Font(bold=True, size=12, color="006100")
+            seasonal_note.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
         
         # Топ-5 товаров по прибыли
         if len(results) >= 5:
-            ws.merge_cells('A14:H14')
+            ws.merge_cells('A14:L14')
             ws.cell(row=14, column=1, value="🏆 Топ-5 товаров по прибыли").font = Font(bold=True, size=12)
             
             top_results = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:5]
             
-            headers = ["№", "Артикул", "Прибыль, ₽", "Маржа, %", "LTV/CAC", "Оптим. запас", "Оборач., дн"]
+            headers = ["№", "Артикул", "Прибыль, ₽", "Маржа, %", "LTV/CAC", "Оптим. запас", "Оборач., дн", "Лог. зона"]
             for col_idx, header in enumerate(headers, 1):
                 cell = ws.cell(row=15, column=col_idx, value=header)
                 cell.font = Font(bold=True)
@@ -3364,9 +3898,193 @@ class ProfessionalExcelExporter:
                 ws.cell(row=15+i, column=5, value=f"{r.ltv_cac_ratio:.1f}x").border = self.thin_border
                 ws.cell(row=15+i, column=6, value=r.optimal_stock_units).border = self.thin_border
                 ws.cell(row=15+i, column=7, value=f"{r.stock_turnover_days:.1f}").border = self.thin_border
+                log_zone_cell = ws.cell(row=15+i, column=8, value=r.logistic_zone_label)
+                log_zone_cell.border = self.thin_border
+                if r.is_logistic_critical:
+                    log_zone_cell.fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
 
 # ============================================================================
-# БЛОК 10: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) — ПОЛНАЯ ВЕРСИЯ
+# БЛОК 10: ЭКСПОРТ В PDF (НОВОЕ)
+# ============================================================================
+
+class PDFExporter:
+    """Экспорт отчетов в PDF с профессиональным дизайном"""
+    
+    def __init__(self):
+        self.logger = logger
+        self.audit_logger = AuditLogger()
+    
+    def export_to_pdf(self, results: List[FBSResultData], 
+                     input_data_list: List[FBSInputData],
+                     marketplace_name: str,
+                     output_path: str) -> bool:
+        """
+        Экспорт отчета в PDF с профессиональным дизайном.
+        
+        Args:
+            results: Список результатов расчета
+            input_data_list: Список входных данных
+            marketplace_name: Название маркетплейса
+            output_path: Путь для сохранения
+            
+        Returns:
+            bool: True если экспорт успешен
+        """
+        if not REPORTLAB_AVAILABLE:
+            self.logger.error("❌ ReportLab не установлен. Установите: pip install reportlab")
+            return False
+        
+        try:
+            if not results:
+                self.logger.warning("⚠️ Нет данных для экспорта в PDF")
+                return False
+            
+            doc = SimpleDocTemplate(
+                output_path, 
+                pagesize=landscape(A4),
+                rightMargin=2*cm,
+                leftMargin=2*cm,
+                topMargin=2*cm,
+                bottomMargin=2*cm
+            )
+            
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            # Стили
+            title_style = ParagraphStyle(
+                'CustomTitle', 
+                parent=styles['Heading1'],
+                fontSize=24, 
+                textColor=colors.HexColor('#1a1a2e'),
+                alignment=TA_CENTER,
+                spaceAfter=20
+            )
+            
+            subtitle_style = ParagraphStyle(
+                'CustomSubtitle',
+                parent=styles['Heading2'],
+                fontSize=14,
+                textColor=colors.HexColor('#444444'),
+                alignment=TA_CENTER,
+                spaceAfter=30
+            )
+            
+            # Заголовок
+            elements.append(Paragraph("🚀 FBS Юнит-экономика PRO — Отчет", title_style))
+            elements.append(Paragraph(
+                f"Маркетплейс: {marketplace_name} | "
+                f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')} | "
+                f"Товаров: {len(results)}",
+                subtitle_style
+            ))
+            
+            # Сводка ключевых метрик
+            total_profit = sum(r.gross_profit for r in results)
+            avg_margin = np.mean([r.margin_percent for r in results])
+            avg_roi = np.mean([r.roi_percent for r in results])
+            profitable = len([r for r in results if r.gross_profit > 0])
+            critical_logistics = len([r for r in results if r.is_logistic_critical])
+            
+            summary_data = [
+                ['📊 Показатель', 'Значение'],
+                ['Всего товаров', str(len(results))],
+                ['Прибыльных товаров', f"{profitable} ({profitable/len(results)*100:.0f}%)"],
+                ['Общая прибыль', f"{total_profit:,.0f} ₽"],
+                ['Средняя маржа', f"{avg_margin:.1f}%"],
+                ['Средний ROI', f"{avg_roi:.1f}%"],
+                ['Критическая логистика', f"{critical_logistics} ({critical_logistics/len(results)*100:.0f}%)"],
+                ['LTV/CAC (средний)', f"{np.mean([r.ltv_cac_ratio for r in results if r.ltv_cac_ratio < 999]):.1f}x"],
+                ['Скорр. маржа (средняя)', f"{np.mean([r.adjusted_margin_percent for r in results]):.1f}%"],
+                ['Опт. запас (средний)', f"{np.mean([r.optimal_stock_units for r in results]):.0f} шт"],
+                ['Оборачиваемость (средняя)', f"{np.mean([r.stock_turnover_days for r in results if r.stock_turnover_days > 0]):.1f} дн"]
+            ]
+            
+            summary_table = Table(summary_data, colWidths=[8*cm, 8*cm])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 6)
+            ]))
+            elements.append(summary_table)
+            elements.append(Spacer(1, 1*cm))
+            
+            # Таблица с детальными данными (топ-20)
+            elements.append(Paragraph("📋 Детальные данные (топ-20)", styles['Heading2']))
+            elements.append(Spacer(1, 0.5*cm))
+            
+            detail_data = [['№', 'Артикул', 'Прибыль, ₽', 'Маржа, %', 'ROI, %', 'LTV/CAC', 'Опт. запас', 'Оборач., дн', 'Зона']]
+            
+            for i, r in enumerate(results[:20], 1):
+                detail_data.append([
+                    str(i),
+                    r.artikul[:15],
+                    f"{r.gross_profit:,.0f}",
+                    f"{r.margin_percent:.1f}%",
+                    f"{r.roi_percent:.1f}%",
+                    f"{r.ltv_cac_ratio:.1f}x",
+                    str(r.optimal_stock_units),
+                    f"{r.stock_turnover_days:.1f}",
+                    r.logistic_zone_label[:10]
+                ])
+            
+            # Настройка ширины колонок для детальной таблицы
+            col_widths = [1.5*cm, 3*cm, 3*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm]
+            detail_table = Table(detail_data, colWidths=col_widths, repeatRows=1)
+            detail_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+            ]))
+            
+            # Цветовая подсветка прибыльных/убыточных
+            for i in range(1, len(detail_data)):
+                profit_value = detail_data[i][2].replace(',', '').replace('₽', '').strip()
+                try:
+                    if float(profit_value) > 0:
+                        detail_table.setStyle(TableStyle([
+                            ('BACKGROUND', (2, i), (2, i), colors.HexColor('#C6EFCE'))
+                        ]))
+                    else:
+                        detail_table.setStyle(TableStyle([
+                            ('BACKGROUND', (2, i), (2, i), colors.HexColor('#FFC7CE'))
+                        ]))
+                except:
+                    pass
+            
+            elements.append(detail_table)
+            
+            # Построение PDF
+            doc.build(elements)
+            
+            self.audit_logger.log('export_pdf', {'path': output_path, 'count': len(results)})
+            self.logger.info(f"✅ PDF отчет создан: {output_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка создания PDF: {e}")
+            self.logger.exception(e)
+            return False
+
+# ============================================================================
+# БЛОК 11: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) — ПОЛНАЯ ВЕРСИЯ С УЛУЧШЕНИЯМИ
 # ============================================================================
 
 def init_session_state():
@@ -3385,6 +4103,9 @@ def init_session_state():
             st.session_state.exporter = ProfessionalExcelExporter()
         except ImportError:
             st.session_state.exporter = None
+    
+    if 'pdf_exporter' not in st.session_state:
+        st.session_state.pdf_exporter = PDFExporter()
     
     if 'data_exporter' not in st.session_state:
         st.session_state.data_exporter = DataExporter()
@@ -3406,6 +4127,12 @@ def init_session_state():
     
     if 'current_section' not in st.session_state:
         st.session_state.current_section = 'main'
+    
+    if 'recommendations' not in st.session_state:
+        st.session_state.recommendations = []
+    
+    if 'what_if_scenarios' not in st.session_state:
+        st.session_state.what_if_scenarios = []
 
 def render_sidebar():
     """Отрисовка боковой панели навигации"""
@@ -3415,7 +4142,7 @@ def render_sidebar():
         <div style='text-align: center; padding: 20px 15px; background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460); border-radius: 12px; margin-bottom: 25px;'>
             <h1 style='color: white; margin: 0; font-size: 1.5em;'>🚀 FBS PRO</h1>
             <p style='color: #a8a8d0; margin: 8px 0 0 0; font-size: 0.9em;'>Операционная версия</p>
-            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v6.0.0 | Оптимизация склада</p>
+            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v6.1.0 | Оптимизация склада</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -3426,6 +4153,8 @@ def render_sidebar():
             "🧮 Калькулятор FBS": "calculator",
             "📋 Тарифы маркетплейсов": "tariffs",
             "📈 Дашборд": "dashboard",
+            "🎯 Анализ сценариев": "what_if",
+            "💡 Рекомендации": "recommendations",
             "📥 Экспорт": "export",
             "⚙️ Настройки": "settings"
         }
@@ -3453,11 +4182,15 @@ def render_sidebar():
             st.success("🔌 Тарифы: API")
         elif calculator.tariffs_source == 'deepseek':
             st.info("🤖 Тарифы: DeepSeek AI")
+        elif calculator.tariffs_source == 'csv':
+            st.info("📄 Тарифы: CSV")
         else:
             st.warning("⚠️ Тарифы: Дефолтные")
         
         if st.session_state.results:
             st.success(f"✅ Рассчитано: {len(st.session_state.results)} товаров")
+            profitable = len([r for r in st.session_state.results if r.gross_profit > 0])
+            st.metric("Прибыльных", f"{profitable} из {len(st.session_state.results)}")
         else:
             st.info("ℹ️ Расчеты не выполнялись")
         
@@ -3473,12 +4206,66 @@ def render_sidebar():
         if st.button("🗑️ Очистить результаты", width="stretch"):
             st.session_state.results = []
             st.session_state.input_data_list = []
+            st.session_state.recommendations = []
             st.success("✅ Результаты очищены!")
             st.rerun()
 
 # ============================================================================
-# БЛОК 11: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ПОЛНАЯ)
+# БЛОК 12: ГЛАВНАЯ ФУНКЦИЯ ПРИЛОЖЕНИЯ (ПОЛНАЯ)
 # ============================================================================
+
+def render_dashboard_with_filters(results: List[FBSResultData]):
+    """Дашборд с фильтрацией и поиском"""
+    
+    if not results:
+        st.warning("⚠️ Нет данных для отображения")
+        return
+    
+    st.markdown("### 🔍 Фильтры")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        min_margin = st.slider("Минимальная маржа, %", -50, 100, -10)
+    with col2:
+        search_artikul = st.text_input("Поиск по артикулу", placeholder="Введите артикул...")
+    with col3:
+        sort_by = st.selectbox(
+            "Сортировка", 
+            ["Прибыль", "Маржа", "ROI", "Оборачиваемость", "Прибыль на м²"]
+        )
+    with col4:
+        filter_zone = st.selectbox(
+            "Логистическая зона",
+            ["Все", "🔴 Критическая", "🟡 Зона риска", "🟢 Безопасная", "🔵 Идеальная"]
+        )
+    
+    # Применение фильтров
+    filtered = [r for r in results if r.margin_percent >= min_margin]
+    
+    if search_artikul:
+        filtered = [r for r in filtered if search_artikul.lower() in r.artikul.lower()]
+    
+    if filter_zone != "Все":
+        filtered = [r for r in filtered if filter_zone in r.logistic_zone_label]
+    
+    # Сортировка
+    sort_map = {
+        "Прибыль": "gross_profit",
+        "Маржа": "margin_percent",
+        "ROI": "roi_percent",
+        "Оборачиваемость": "stock_turnover_days",
+        "Прибыль на м²": "profit_per_sqm"
+    }
+    if sort_by in sort_map:
+        filtered.sort(key=lambda x: getattr(x, sort_map[sort_by]), reverse=True)
+    
+    # Отображение
+    if filtered:
+        df = pd.DataFrame([r.get_summary() for r in filtered])
+        st.dataframe(df, width="stretch", height=400)
+        st.caption(f"📊 Показано {len(filtered)} из {len(results)} товаров")
+    else:
+        st.info("ℹ️ Нет товаров, соответствующих фильтрам")
 
 def main():
     """Главная функция запуска приложения"""
@@ -3494,6 +4281,7 @@ def main():
     render_sidebar()
     
     current_section = st.session_state.get('current_section', 'main')
+    calculator = st.session_state.calculator
     
     if current_section == 'main':
         st.markdown("""
@@ -3505,18 +4293,21 @@ def main():
             <p style='color: #6666aa; font-size: 1em; margin: 10px 0;'>
                 Ozon • Wildberries • Яндекс Маркет | API Integration | DeepSeek AI
             </p>
+            <p style='color: #8888cc; font-size: 0.9em; margin: 10px 0;'>
+                🆕 НОВОЕ: Анализ сценариев "Что если" • Автоматические рекомендации • Логистические зоны риска • Сезонная корректировка
+            </p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("### 🎯 Ключевые возможности")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.markdown("""
-            <div style='background: linear-gradient(135deg, #0984e3, #6c5ce7); padding: 25px; border-radius: 15px; color: white; height: 100%;'>
-                <h3 style='margin-top: 0;'>📦 Оптимизация склада</h3>
-                <ul>
+            <div style='background: linear-gradient(135deg, #0984e3, #6c5ce7); padding: 20px; border-radius: 15px; color: white; height: 100%;'>
+                <h4 style='margin-top: 0;'>📦 Оптимизация склада</h4>
+                <ul style='font-size: 0.9em; padding-left: 18px;'>
                     <li>Оптимальный запас (EOQ)</li>
                     <li>Страховой запас</li>
                     <li>Точка заказа</li>
@@ -3528,31 +4319,80 @@ def main():
         
         with col2:
             st.markdown("""
-            <div style='background: linear-gradient(135deg, #00b894, #00cec9); padding: 25px; border-radius: 15px; color: white; height: 100%;'>
-                <h3 style='margin-top: 0;'>🚚 Логистические коридоры</h3>
-                <ul>
+            <div style='background: linear-gradient(135deg, #00b894, #00cec9); padding: 20px; border-radius: 15px; color: white; height: 100%;'>
+                <h4 style='margin-top: 0;'>🚚 Логистические коридоры</h4>
+                <ul style='font-size: 0.9em; padding-left: 18px;'>
                     <li>Точка безубыточности</li>
                     <li>Критические зоны (25, 50, 100 км)</li>
-                    <li>Оптимизация First Mile</li>
-                    <li>Загрузка паллет</li>
-                    <li>Маршрутная оптимизация</li>
+                    <li>Зоны риска</li>
+                    <li>Авто-рекомендации</li>
+                    <li>Оптимизация маршрутов</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             st.markdown("""
-            <div style='background: linear-gradient(135deg, #e17055, #d63031); padding: 25px; border-radius: 15px; color: white; height: 100%;'>
-                <h3 style='margin-top: 0;'>📊 Юнит-экономика</h3>
-                <ul>
-                    <li>FBS полный расчет</li>
+            <div style='background: linear-gradient(135deg, #fdcb6e, #e17055); padding: 20px; border-radius: 15px; color: white; height: 100%;'>
+                <h4 style='margin-top: 0;'>🎯 Анализ сценариев</h4>
+                <ul style='font-size: 0.9em; padding-left: 18px;'>
+                    <li>"Что если" анализ</li>
+                    <li>Сезонная корректировка</li>
                     <li>Рекомендованные цены</li>
-                    <li>LTV, CAC, ROMI</li>
-                    <li>Условное форматирование</li>
-                    <li>Экспорт в Excel/CSV/GS</li>
+                    <li>Точка безубыточности</li>
+                    <li>Сравнение стратегий</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown("""
+            <div style='background: linear-gradient(135deg, #a29bfe, #6c5ce7); padding: 20px; border-radius: 15px; color: white; height: 100%;'>
+                <h4 style='margin-top: 0;'>📊 Юнит-экономика</h4>
+                <ul style='font-size: 0.9em; padding-left: 18px;'>
+                    <li>FBS полный расчет</li>
+                    <li>LTV, CAC, ROMI</li>
+                    <li>Экспорт Excel/CSV/PDF</li>
+                    <li>Условное форматирование</li>
+                    <li>Авто-рекомендации</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Статистика
+        if st.session_state.results:
+            st.markdown("---")
+            st.markdown("### 📊 Последние результаты")
+            results = st.session_state.results
+            
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                st.metric("📦 Товаров", len(results))
+            with col2:
+                profitable = len([r for r in results if r.gross_profit > 0])
+                st.metric("✅ Прибыльных", f"{profitable} ({profitable/len(results)*100:.0f}%)")
+            with col3:
+                total_profit = sum(r.gross_profit for r in results)
+                st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
+            with col4:
+                avg_margin = np.mean([r.margin_percent for r in results])
+                st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
+            with col5:
+                critical = len([r for r in results if r.is_logistic_critical])
+                st.metric("🔴 Критич. логистика", f"{critical}")
+            
+            st.markdown("### 🏆 Топ-5 по прибыли")
+            top_results = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:5]
+            data = []
+            for r in top_results:
+                data.append({
+                    'Артикул': r.artikul,
+                    'Прибыль, ₽': r.gross_profit,
+                    'Маржа, %': r.margin_percent,
+                    'LTV/CAC': r.ltv_cac_ratio,
+                    'Лог. зона': r.logistic_zone_label
+                })
+            st.dataframe(pd.DataFrame(data), width="stretch")
     
     elif current_section == 'calculator':
         st.markdown("## 🧮 Калькулятор FBS юнит-экономики")
@@ -3563,12 +4403,14 @@ def main():
         - 📦 **Last Mile** — доставка МП до клиента
         - 📊 **Оптимизация склада** — EOQ, страховой запас, точка заказа
         - 💰 **Рекомендованные цены** — при разных уровнях маржи
+        - 🔴 **Логистические зоны риска** — критические/желтые/зеленые
+        - 📅 **Сезонная корректировка** — учет текущего месяца
         - ⚠️ **Условное форматирование** — прибыльные/убыточные товары
         """)
         
         calc_mode = st.radio(
             "Режим расчета:",
-            ["📱 Расчет одного товара", "📊 Массовый расчет из файла"],
+            ["📱 Расчет одного товара", "📊 Массовый расчет из файла", "🎯 Анализ сценариев"],
             horizontal=True
         )
         
@@ -3577,7 +4419,7 @@ def main():
             with col1:
                 artikul = st.text_input("Артикул", "SKU-001")
                 product_name = st.text_input("Наименование", "Тестовый товар")
-                category = st.selectbox("Категория", list(st.session_state.calculator.current_tariffs.keys()) or ["default"])
+                category = st.selectbox("Категория", list(calculator.current_tariffs.keys()) or ["default"])
                 selling_price = st.number_input("Цена продажи, ₽", 5000.0, step=100.0)
                 cogs = st.number_input("Себестоимость, ₽", 3000.0, step=100.0)
             
@@ -3587,6 +4429,8 @@ def main():
                 width = st.number_input("Ширина, см", 15, step=1)
                 height = st.number_input("Высота, см", 10, step=1)
                 warehouse_distance = st.number_input("Расстояние до МП, км", 50.0, step=1.0)
+                daily_sales = st.number_input("Продаж в день, шт", 5, step=1)
+                has_night = st.checkbox("Ночная смена")
             
             if st.button("🚀 Рассчитать", type="primary"):
                 input_data = FBSInputData(
@@ -3599,17 +4443,20 @@ def main():
                     length_cm=length,
                     width_cm=width,
                     height_cm=height,
-                    warehouse_distance_km=warehouse_distance
+                    warehouse_distance_km=warehouse_distance,
+                    daily_sales=daily_sales,
+                    has_night_shift=has_night
                 )
                 
-                result = st.session_state.calculator.calculate_unit_economics(input_data)
+                result = calculator.calculate_unit_economics(input_data)
                 st.session_state.results = [result]
                 st.session_state.input_data_list = [input_data]
                 
                 st.markdown("---")
                 st.markdown("## 📊 Результаты расчета")
                 
-                col1, col2, col3, col4 = st.columns(4)
+                # Основные метрики
+                col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
                     st.metric("💰 Прибыль", f"{result.gross_profit:,.0f} ₽", f"{result.margin_percent:.1f}% маржи")
                 with col2:
@@ -3618,6 +4465,42 @@ def main():
                     st.metric("📈 ROI", f"{result.roi_percent:.1f}%")
                 with col4:
                     st.metric("👥 LTV/CAC", f"{result.ltv_cac_ratio:.1f}x")
+                with col5:
+                    st.metric("🔴 Лог. зона", result.logistic_zone_label, 
+                             delta=result.logistic_recommendation[:15] + "...")
+                
+                # Подробные метрики
+                st.markdown("### 📋 Детализация")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**💰 Финансовые показатели**")
+                    st.metric("Комиссия МП", f"{result.commission:,.0f} ₽")
+                    st.metric("First Mile", f"{result.first_mile_cost:,.0f} ₽")
+                    st.metric("Last Mile", f"{result.last_mile_cost:,.0f} ₽")
+                    st.metric("Pick & Pack", f"{result.pick_pack_cost:,.0f} ₽")
+                    st.metric("Эквайринг", f"{result.acquiring_cost:,.0f} ₽")
+                    st.metric("Возвраты", f"{result.return_cost:,.0f} ₽")
+                    st.metric("Штрафы", f"{result.penalty_cost:,.0f} ₽")
+                    st.metric("Складские", f"{result.warehouse_cost:,.0f} ₽")
+                    st.metric("Налог", f"{result.tax_cost:,.0f} ₽")
+                
+                with col2:
+                    st.markdown("**📊 Оптимизация склада**")
+                    st.metric("Оптимальный запас (EOQ)", f"{result.optimal_stock_units} шт")
+                    st.metric("Страховой запас", f"{result.safety_stock_units} шт")
+                    st.metric("Точка заказа", f"{result.reorder_point_units} шт")
+                    st.metric("Оборачиваемость", f"{result.stock_turnover_days:.1f} дн")
+                    st.metric("Потенциал оптимизации", f"{result.stock_optimization_potential:.1f}%")
+                    
+                    st.markdown("**🚚 Логистика**")
+                    st.metric("Точка безубыт. (км)", f"{result.break_even_distance_km:.0f} км")
+                    st.metric("Точка безубыт. (шт)", f"{result.break_even_volume:.0f} шт")
+                    st.metric("Рекомендация", result.logistic_recommendation[:50] + "...")
+                    
+                    st.markdown("**📅 Сезонность**")
+                    st.metric("Сезонный коэффициент", f"{result.seasonal_factor:.1f}x")
+                    st.metric("Скорр. маржа", f"{result.adjusted_margin_percent:.1f}%")
+                    st.metric("Рекомендация", result.seasonal_recommendation)
                 
                 st.markdown("### 💰 Рекомендованные цены")
                 col1, col2, col3 = st.columns(3)
@@ -3631,26 +4514,9 @@ def main():
                     rec_price_25 = result.total_expenses / (1 - 0.25)
                     st.metric("При марже 25%", f"{rec_price_25:,.0f} ₽",
                              delta=f"{rec_price_25 - result.selling_price:,.0f} ₽")
-                
-                st.markdown("### 📦 Оптимизация складских остатков")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Оптимальный запас (EOQ)", f"{result.optimal_stock_units} шт")
-                with col2:
-                    st.metric("Страховой запас", f"{result.safety_stock_units} шт")
-                with col3:
-                    st.metric("Точка заказа", f"{result.reorder_point_units} шт")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Оборачиваемость", f"{result.stock_turnover_days:.1f} дней")
-                with col2:
-                    st.metric("Потенциал оптимизации", f"{result.stock_optimization_potential:.1f}%")
     
     elif current_section == 'tariffs':
         st.markdown("## 📋 Актуальные тарифы маркетплейсов")
-        
-        calculator = st.session_state.calculator
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -3658,12 +4524,24 @@ def main():
         with col2:
             force_refresh = st.checkbox("🔄 Принудительное обновление")
         with col3:
+            use_ai = st.checkbox("🤖 DeepSeek AI как fallback", value=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
             if st.button("📥 Загрузить тарифы", type="primary"):
                 with st.spinner(f"Загрузка тарифов {marketplace}..."):
                     calculator.set_marketplace(marketplace)
-                    calculator.refresh_tariffs(force=force_refresh)
+                    calculator.refresh_tariffs(force=force_refresh, use_ai=use_ai)
                     st.success(f"✅ Тарифы {marketplace} загружены!")
                     st.rerun()
+        
+        with col2:
+            csv_file = st.file_uploader("📄 Или загрузите CSV с тарифами", type=['csv'])
+            if csv_file and st.button("📥 Загрузить из CSV"):
+                csv_content = csv_file.getvalue().decode('utf-8')
+                calculator.refresh_tariffs(force=True, csv_content=csv_content)
+                st.success("✅ Тарифы загружены из CSV!")
+                st.rerun()
         
         if calculator.current_tariffs:
             df = calculator.api_manager.get_all_tariffs_as_dataframe(marketplace)
@@ -3682,37 +4560,288 @@ def main():
         
         results = st.session_state.results
         
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # Быстрые метрики
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         with col1:
             st.metric("📦 Товаров", len(results))
         with col2:
             profitable = len([r for r in results if r.gross_profit > 0])
-            st.metric("✅ Прибыльных", f"{profitable}")
+            st.metric("✅ Прибыльных", f"{profitable} ({profitable/len(results)*100:.0f}%)")
         with col3:
             total_profit = sum(r.gross_profit for r in results)
-            st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
+            st.metric("💰 Прибыль", f"{total_profit:,.0f} ₽")
         with col4:
             avg_margin = np.mean([r.margin_percent for r in results])
-            st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
+            st.metric("📊 Маржа", f"{avg_margin:.1f}%")
         with col5:
             avg_ltv_cac = np.mean([r.ltv_cac_ratio for r in results if r.ltv_cac_ratio < 999])
             st.metric("👥 LTV/CAC", f"{avg_ltv_cac:.1f}x")
+        with col6:
+            critical = len([r for r in results if r.is_logistic_critical])
+            st.metric("🔴 Крит. логистика", f"{critical} ({critical/len(results)*100:.0f}%)")
         
         st.markdown("---")
-        st.markdown("### 📊 Топ-10 товаров по прибыли")
         
-        top_results = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:10]
-        data = []
-        for r in top_results:
-            data.append({
-                'Артикул': r.artikul,
-                'Прибыль, ₽': r.gross_profit,
-                'Маржа, %': r.margin_percent,
-                'LTV/CAC': r.ltv_cac_ratio,
-                'Опт. запас': r.optimal_stock_units,
-                'Оборач., дн': r.stock_turnover_days
+        # Фильтры и таблица
+        render_dashboard_with_filters(results)
+        
+        # Графики
+        st.markdown("### 📊 Визуализация")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            # Распределение маржи
+            margins = [r.margin_percent for r in results]
+            fig = px.histogram(
+                margins, 
+                title="Распределение маржинальности",
+                labels={'value': 'Маржа, %', 'count': 'Количество товаров'},
+                nbins=20,
+                color_discrete_sequence=['#6c5ce7']
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Топ-10 по прибыли
+            top = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:10]
+            df = pd.DataFrame({
+                'Артикул': [r.artikul for r in top],
+                'Прибыль, ₽': [r.gross_profit for r in top]
             })
-        st.dataframe(pd.DataFrame(data), width="stretch")
+            fig = px.bar(
+                df, 
+                x='Артикул', 
+                y='Прибыль, ₽',
+                title="Топ-10 по прибыли",
+                color='Прибыль, ₽',
+                color_continuous_scale='viridis'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Логистические зоны
+        st.markdown("### 🚚 Логистические зоны риска")
+        zones = {'Критическая': 0, 'Зона риска': 0, 'Безопасная': 0, 'Идеальная': 0}
+        for r in results:
+            if '🔴' in r.logistic_zone_label:
+                zones['Критическая'] += 1
+            elif '🟡' in r.logistic_zone_label:
+                zones['Зона риска'] += 1
+            elif '🟢' in r.logistic_zone_label:
+                zones['Безопасная'] += 1
+            else:
+                zones['Идеальная'] += 1
+        
+        df_zones = pd.DataFrame({
+            'Зона': list(zones.keys()),
+            'Количество': list(zones.values())
+        })
+        fig = px.pie(
+            df_zones, 
+            values='Количество', 
+            names='Зона',
+            title="Распределение по логистическим зонам",
+            color_discrete_sequence=['#FF6B6B', '#FFD93D', '#6BCB77', '#4D96FF']
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    elif current_section == 'what_if':
+        st.markdown("## 🎯 Анализ сценариев 'Что если'")
+        
+        if not st.session_state.input_data_list:
+            st.warning("⚠️ Сначала выполните расчет в разделе 'Калькулятор FBS'.")
+            return
+        
+        base_data = st.session_state.input_data_list[0] if st.session_state.input_data_list else None
+        
+        if base_data is None:
+            st.warning("⚠️ Нет базовых данных для анализа.")
+            return
+        
+        st.markdown("### 📋 Базовые параметры")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Артикул", base_data.artikul)
+            st.metric("Цена продажи", f"{base_data.selling_price:,.0f} ₽")
+        with col2:
+            st.metric("Себестоимость", f"{base_data.cogs:,.0f} ₽")
+            st.metric("Вес", f"{base_data.weight_kg:.1f} кг")
+        with col3:
+            st.metric("Расстояние до МП", f"{base_data.warehouse_distance_km:.0f} км")
+            st.metric("Продаж в день", f"{base_data.daily_sales} шт")
+        
+        st.markdown("---")
+        st.markdown("### 🎯 Настройка сценариев")
+        
+        # Пресеты сценариев
+        preset_scenarios = [
+            {
+                'name': '📈 Повышение цены на 20%',
+                'params': {'selling_price': base_data.selling_price * 1.2}
+            },
+            {
+                'name': '📉 Снижение цены на 15%',
+                'params': {'selling_price': base_data.selling_price * 0.85}
+            },
+            {
+                'name': '🚚 Увеличение расстояния на 50%',
+                'params': {'warehouse_distance_km': base_data.warehouse_distance_km * 1.5}
+            },
+            {
+                'name': '📦 Оптимизация паллет (x2)',
+                'params': {'pallet_capacity': base_data.pallet_capacity * 2}
+            },
+            {
+                'name': '🕒 Внедрение ночной смены',
+                'params': {'has_night_shift': True}
+            },
+            {
+                'name': '💰 Снижение себестоимости на 10%',
+                'params': {'cogs': base_data.cogs * 0.9}
+            }
+        ]
+        
+        selected_presets = st.multiselect(
+            "Выберите сценарии для анализа:",
+            [s['name'] for s in preset_scenarios],
+            default=[s['name'] for s in preset_scenarios[:3]]
+        )
+        
+        # Выбранные сценарии
+        scenarios_to_run = [s for s in preset_scenarios if s['name'] in selected_presets]
+        
+        # Добавление кастомного сценария
+        st.markdown("#### ➕ Добавить свой сценарий")
+        col1, col2 = st.columns(2)
+        with col1:
+            custom_name = st.text_input("Название сценария", "Мой сценарий")
+        with col2:
+            custom_param = st.selectbox(
+                "Параметр для изменения",
+                ["selling_price", "cogs", "warehouse_distance_km", "pallet_capacity", 
+                 "daily_sales", "packaging_cost", "marketing_budget_per_unit"]
+            )
+        custom_value = st.number_input("Новое значение", value=base_data.selling_price)
+        
+        if st.button("➕ Добавить сценарий"):
+            scenarios_to_run.append({
+                'name': custom_name,
+                'params': {custom_param: custom_value}
+            })
+            st.success(f"✅ Сценарий '{custom_name}' добавлен!")
+        
+        if st.button("🚀 Запустить анализ", type="primary"):
+            if not scenarios_to_run:
+                st.warning("⚠️ Выберите хотя бы один сценарий.")
+            else:
+                with st.spinner("Выполнение анализа..."):
+                    # Формируем сценарии для запуска
+                    scenarios = []
+                    for s in scenarios_to_run:
+                        scenario_dict = {'name': s['name']}
+                        scenario_dict.update(s['params'])
+                        scenarios.append(scenario_dict)
+                    
+                    df_results = calculator.run_what_if_analysis(base_data, scenarios)
+                    st.markdown("### 📊 Результаты анализа")
+                    st.dataframe(df_results, width="stretch")
+                    
+                    # Визуализация
+                    st.markdown("### 📈 Визуализация сценариев")
+                    fig = make_subplots(rows=1, cols=2, subplot_titles=("Прибыль по сценариям", "Маржа по сценариям"))
+                    
+                    fig.add_trace(
+                        go.Bar(x=df_results['Сценарий'], y=df_results['Прибыль, ₽'], 
+                               name='Прибыль', marker_color='#6c5ce7'),
+                        row=1, col=1
+                    )
+                    fig.add_trace(
+                        go.Bar(x=df_results['Сценарий'], y=df_results['Маржа, %'], 
+                               name='Маржа', marker_color='#00b894'),
+                        row=1, col=2
+                    )
+                    
+                    fig.update_layout(height=400, showlegend=True)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Лучший сценарий
+                    best_profit = df_results.loc[df_results['Прибыль, ₽'].idxmax()]
+                    st.success(f"🏆 Лучший сценарий: **{best_profit['Сценарий']}** "
+                              f"(Прибыль: {best_profit['Прибыль, ₽']:,.0f} ₽, Маржа: {best_profit['Маржа, %']:.1f}%)")
+    
+    elif current_section == 'recommendations':
+        st.markdown("## 💡 Автоматические рекомендации")
+        
+        if not st.session_state.results:
+            st.warning("⚠️ Нет данных. Выполните расчет в разделе 'Калькулятор FBS'.")
+            return
+        
+        results = st.session_state.results
+        
+        # Генерируем рекомендации
+        if st.button("🔄 Сгенерировать рекомендации", type="primary") or st.session_state.recommendations:
+            if not st.session_state.recommendations:
+                with st.spinner("Генерация рекомендаций..."):
+                    st.session_state.recommendations = calculator.generate_recommendations(results)
+            
+            if not st.session_state.recommendations:
+                st.success("✅ Все показатели в норме! Рекомендаций нет.")
+            else:
+                st.markdown("### 📋 Рекомендации по приоритету")
+                
+                # Сортировка по приоритету
+                priority_order = {'high': 0, 'medium': 1, 'low': 2}
+                sorted_recommendations = sorted(
+                    st.session_state.recommendations,
+                    key=lambda x: priority_order.get(x['priority'], 3)
+                )
+                
+                for rec in sorted_recommendations:
+                    priority_icon = "🔴" if rec['priority'] == 'high' else "🟡" if rec['priority'] == 'medium' else "🟢"
+                    with st.expander(f"{priority_icon} [{rec['priority'].upper()}] {rec['category']} - {rec['icon']} {rec['message'][:80]}..."):
+                        st.markdown(f"**{rec['message']}**")
+                        
+                        if rec.get('affected_products'):
+                            st.markdown("**📦 Затронутые товары:**")
+                            st.write(", ".join(rec['affected_products'][:10]))
+                            if len(rec['affected_products']) > 10:
+                                st.caption(f"... и еще {len(rec['affected_products']) - 10} товаров")
+                        
+                        # Дополнительные действия
+                        if rec['priority'] == 'high':
+                            st.warning("⚠️ Это критическая рекомендация. Требует немедленного внимания.")
+                        elif rec['priority'] == 'medium':
+                            st.info("ℹ️ Рекомендация средней важности. Планируйте внедрение в ближайшее время.")
+                        else:
+                            st.success("✅ Рекомендация низкой важности. Можно рассмотреть в долгосрочной перспективе.")
+        
+        # Статистика рекомендаций
+        if st.session_state.recommendations:
+            st.markdown("---")
+            st.markdown("### 📊 Статистика рекомендаций")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                high = len([r for r in st.session_state.recommendations if r['priority'] == 'high'])
+                st.metric("🔴 Критические", high)
+            with col2:
+                medium = len([r for r in st.session_state.recommendations if r['priority'] == 'medium'])
+                st.metric("🟡 Средние", medium)
+            with col3:
+                low = len([r for r in st.session_state.recommendations if r['priority'] == 'low'])
+                st.metric("🟢 Низкие", low)
+            
+            # Категории рекомендаций
+            categories = {}
+            for r in st.session_state.recommendations:
+                cat = r['category']
+                categories[cat] = categories.get(cat, 0) + 1
+            
+            st.markdown("### 📂 По категориям")
+            df_cat = pd.DataFrame({
+                'Категория': list(categories.keys()),
+                'Количество': list(categories.values())
+            })
+            st.dataframe(df_cat, width="stretch")
     
     elif current_section == 'export':
         st.markdown("## 📥 Экспорт данных")
@@ -3726,7 +4855,7 @@ def main():
         
         st.success(f"✅ Доступно для экспорта: {len(results)} товаров")
         
-        tab1, tab2, tab3 = st.tabs(["📊 Excel (с формулами)", "📄 CSV", "🌐 Google Sheets"])
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Excel (с формулами)", "📄 CSV", "🌐 Google Sheets", "📄 PDF"])
         
         with tab1:
             if st.session_state.exporter is None:
@@ -3749,7 +4878,7 @@ def main():
                         if success and output_path.exists():
                             with open(output_path, "rb") as f:
                                 st.download_button(
-                                    label="⬇️ Скачать",
+                                    label="⬇️ Скачать Excel",
                                     data=f.read(),
                                     file_name=filename,
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -3812,11 +4941,37 @@ def main():
                         st.success("✅ Экспорт в Google Sheets выполнен!")
                     else:
                         st.error("❌ Ошибка экспорта. Проверьте credentials.json")
+        
+        with tab4:
+            if not REPORTLAB_AVAILABLE:
+                st.error("❌ ReportLab не установлен. Выполните: pip install reportlab")
+            else:
+                if st.button("📄 Скачать PDF-отчет", type="primary"):
+                    with st.spinner("Создание PDF-отчета..."):
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        filename = f"FBS_Report_{st.session_state.marketplace}_{timestamp}.pdf"
+                        output_path = EXPORTS_DIR / filename
+                        
+                        success = st.session_state.pdf_exporter.export_to_pdf(
+                            results=results,
+                            input_data_list=input_data_list,
+                            marketplace_name=st.session_state.marketplace,
+                            output_path=str(output_path)
+                        )
+                        
+                        if success and output_path.exists():
+                            with open(output_path, "rb") as f:
+                                st.download_button(
+                                    label="⬇️ Скачать PDF",
+                                    data=f.read(),
+                                    file_name=filename,
+                                    mime="application/pdf"
+                                )
     
     elif current_section == 'settings':
         st.markdown("## ⚙️ Настройки")
         
-        tab1, tab2 = st.tabs(["🔑 API Ключи", "🏪 Маркетплейс и налоги"])
+        tab1, tab2, tab3 = st.tabs(["🔑 API Ключи", "🏪 Маркетплейс и налоги", "📄 Импорт тарифов CSV"])
         
         with tab1:
             st.markdown("### 🔑 Настройка API ключей")
@@ -3857,6 +5012,22 @@ def main():
                     api_manager.save_api_key('yandex_market', ym_token)
                     api_manager.save_api_key('yandex_campaign_id', ym_campaign)
                     st.success("✅ Ключи Яндекс Маркет сохранены!")
+            
+            st.markdown("---")
+            
+            st.markdown("#### 🤖 DeepSeek AI")
+            ds_key = st.text_input("DeepSeek API Key", value=api_manager.get_api_key('deepseek') or '', type="password")
+            if st.button("💾 Сохранить DeepSeek"):
+                if ds_key:
+                    api_manager.save_api_key('deepseek', ds_key)
+                    st.success("✅ Ключ DeepSeek сохранен!")
+            
+            st.markdown("---")
+            if st.button("🗑️ Очистить все API ключи", type="secondary"):
+                if st.checkbox("Подтвердите удаление всех ключей"):
+                    api_manager.secure_data.clear_all_keys()
+                    st.success("✅ Все API ключи удалены!")
+                    st.rerun()
         
         with tab2:
             st.markdown("### 🏪 Настройки маркетплейса и налогов")
@@ -3885,6 +5056,51 @@ def main():
                     st.session_state.tax_system = tax_system
                     st.session_state.calculator.tax_system = tax_system
                     st.success(f"✅ Налоговая система '{tax_system}' сохранена!")
+            
+            st.markdown("---")
+            st.markdown("### 📅 Текущая сезонность")
+            current_month = datetime.now().month
+            st.info(f"""
+            **Месяц:** {datetime.now().strftime('%B')}  
+            **Сезонный коэффициент:** {SEASONAL_COEFFICIENTS.get(current_month, 1.0)}x  
+            **Описание:** {SEASONAL_COEFFICIENTS.get(current_month, 1.0) > 1.2 and 'Высокий сезон' or 
+                          SEASONAL_COEFFICIENTS.get(current_month, 1.0) > 0.9 and 'Средний сезон' or 'Низкий сезон'}
+            """)
+        
+        with tab3:
+            st.markdown("### 📄 Импорт тарифов из CSV")
+            st.markdown("""
+            **Формат CSV файла:**
+            - Обязательные колонки: `category`, `commission_rate`, `min_commission`, `last_mile_base`
+            - Опциональные колонки: `last_mile_per_kg`, `last_mile_per_km`, `acquiring_fee`, `return_fee`
+            - Разделитель: запятая или точка с запятой
+            - Кодировка: UTF-8
+            """)
+            
+            csv_import_file = st.file_uploader(
+                "📁 Загрузите CSV с тарифами",
+                type=['csv'],
+                key="tariffs_csv_import"
+            )
+            
+            if csv_import_file and st.button("📥 Загрузить тарифы из CSV", type="primary"):
+                try:
+                    csv_content = csv_import_file.getvalue().decode('utf-8')
+                    # Проверка формата
+                    df_test = pd.read_csv(io.StringIO(csv_content))
+                    required_cols = ['category', 'commission_rate', 'min_commission', 'last_mile_base']
+                    missing_cols = [col for col in required_cols if col not in df_test.columns]
+                    
+                    if missing_cols:
+                        st.error(f"❌ Отсутствуют обязательные колонки: {', '.join(missing_cols)}")
+                        st.info(f"Доступные колонки: {', '.join(df_test.columns)}")
+                    else:
+                        calculator.refresh_tariffs(force=True, csv_content=csv_content)
+                        st.success(f"✅ Тарифы загружены из CSV! ({len(df_test)} категорий)")
+                        st.dataframe(df_test, width="stretch")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка загрузки CSV: {e}")
 
 if __name__ == "__main__":
     main()
