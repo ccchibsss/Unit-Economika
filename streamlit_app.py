@@ -1248,23 +1248,28 @@ def init_session_state():
     if 'deepseek_manager' not in st.session_state:
         st.session_state.deepseek_manager = None
 
-def show_section1_data_loading():
-    """Раздел 1: Загрузка и связывание данных"""
-    st.header("📁 Раздел 1: Загрузка и связывание данных")
+def show_section_data_loading():
+    """📁 Импорт и подготовка данных"""
+    st.header("📁 Импорт и подготовка данных")
     
     st.info("""
-    **В этом разделе:**
-    1. Загрузите файлы каталога (Габариты, ОЕ, Кроссы)
-    2. Настройте кросс-связывание для заполнения пропусков
-    3. Сохраните API ключи в зашифрованном виде
-    4. Выберите режим работы DeepSeek AI
+    **🎯 Что делает этот раздел:**
+    - Загружает файлы каталога (габариты, цены, ОЕ-номера)
+    - Автоматически связывает данные по артикулам и ОЕ-номерам
+    - Заполняет пропуски в весе и габаритах
+    - Добавляет информацию о кросс-номерах (аналогах)
+    - Безопасно хранит API ключи для интеграций
     """)
     
     key_manager = st.session_state.secure_key_manager
     
     # --- Управление API ключами ---
-    with st.expander("🔑 Управление API ключами (Безопасное хранение)", expanded=False):
-        st.markdown("Ключи шифруются и сохраняются локально.")
+    with st.expander("🔑 Безопасное хранение API ключей", expanded=False):
+        st.markdown("""
+        **🔐 Как это работает:**
+        Ключи шифруются с помощью Fernet и сохраняются локально. 
+        Даже при компрометации файлов ключи останутся защищёнными.
+        """)
         
         col_k1, col_k2, col_k3 = st.columns(3)
         with col_k1:
@@ -1302,36 +1307,43 @@ def show_section1_data_loading():
     st.divider()
     
     # --- Загрузка файлов ---
-    st.subheader("📥 Загрузка файлов каталога")
+    st.subheader("📥 Загрузка файлов")
+    
     col_f1, col_f2, col_f3 = st.columns(3)
     
     with col_f1:
+        st.markdown("**📦 Основной файл**")
+        st.caption("Содержит артикулы, цены, себестоимость")
         file_main = st.file_uploader(
-            "📦 Основной файл (Габариты/Цены)",
+            "Выберите файл",
             type=['csv', 'xlsx', 'xls'],
             key="upload_main",
-            help="Должен содержать Артикул, Цену, Себестоимость"
+            label_visibility="collapsed"
         )
         
     with col_f2:
+        st.markdown("**🔧 Файл ОЕ номеров**")
+        st.caption("Используется для заполнения пропусков")
         file_oe = st.file_uploader(
-            "🔧 Файл ОЕ номеров (опционально)",
+            "Выберите файл",
             type=['csv', 'xlsx', 'xls'],
             key="upload_oe",
-            help="Используется для заполнения пропусков (вес, габариты)"
+            label_visibility="collapsed"
         )
         
     with col_f3:
+        st.markdown("**🔗 Файл Кроссов/Аналогов**")
+        st.caption("Добавляет информацию о заменяемости")
         file_cross = st.file_uploader(
-            "🔗 Файл Кроссов/Аналогов (опционально)",
+            "Выберите файл",
             type=['csv', 'xlsx', 'xls'],
             key="upload_cross",
-            help="Используется для создания столбца 'Кроссы (аналоги)'"
+            label_visibility="collapsed"
         )
     
     # --- Обработка и связывание ---
     if file_main is not None:
-        st.success("✅ Основной файл загружен.")
+        st.success("✅ Основной файл загружен")
         
         with st.spinner("Чтение и очистка данных..."):
             df_main = smart_read_uploaded_file(file_main)
@@ -1339,7 +1351,7 @@ def show_section1_data_loading():
             df_cross = smart_read_uploaded_file(file_cross) if file_cross else None
             
         if not df_main.empty:
-            st.subheader("⚙️ Настройка кросс-связывания")
+            st.subheader("⚙️ Настройка связывания данных")
             
             # Авто-детект колонок
             art_cols = [c for c in df_main.columns if 'артикул' in c.lower() or 'artikul' in c.lower() or 'sku' in c.lower()]
@@ -1372,7 +1384,7 @@ def show_section1_data_loading():
                     cross_art_col = "Артикул"
                     cross_analog_col = "Аналог"
                 
-            if st.button("🚀 Обработать и связать данные", type="primary"):
+            if st.button("🚀 Запустить обработку и связывание", type="primary"):
                 with st.spinner("Выполняется кросс-связывание..."):
                     try:
                         processor = st.session_state.cross_processor
@@ -1416,10 +1428,12 @@ def show_section1_data_loading():
     st.divider()
     
     # --- DeepSeek AI ---
-    st.subheader("🤖 DeepSeek AI")
+    st.subheader("🤖 Искусственный интеллект (DeepSeek)")
+    st.caption("Обогащение каталога и актуализация тарифов с помощью AI")
+    
     ds_key = key_manager.get_key("deepseek")
     if not ds_key:
-        st.warning("⚠️ Ключ DeepSeek не задан. Настройте его в блоке 'Управление API ключами' выше.")
+        st.warning("⚠️ Ключ DeepSeek не задан. Настройте его в блоке 'Безопасное хранение API ключей' выше.")
     else:
         ai_mode = st.radio(
             "Выберите задачу для AI:",
@@ -1488,16 +1502,17 @@ def show_section1_data_loading():
                             })
                             st.info("✅ Тарифы обновлены в калькуляторе!")
 
-def show_section2_single_calculation():
-    """Раздел 2: Быстрый расчёт единичного товара"""
-    st.header("🧮 Раздел 2: Быстрый расчёт единичного товара")
+def show_section_single_calculation():
+    """🧮 Калькулятор единичного товара"""
+    st.header("🧮 Калькулятор единичного товара")
     
     st.info("""
-    **В этом разделе:**
-    - Вручную введите параметры товара
-    - Получите детальный расчёт юнит-экономики
-    - Визуализация структуры расходов
-    - Мгновенный анализ рентабельности
+    **🎯 Что делает этот раздел:**
+    - Позволяет быстро проверить экономику одного товара
+    - Показывает детальную структуру расходов
+    - Визуализирует распределение затрат
+    - Рассчитывает рекомендуемую цену и точку безубыточности
+    - Идеально для тестирования гипотез и новых позиций
     """)
     
     calc = st.session_state.fbs_calculator
@@ -1507,18 +1522,18 @@ def show_section2_single_calculation():
     
     with col1:
         st.subheader("💰 Финансовые параметры")
-        price = st.number_input("Цена продажи, ₽", min_value=1.0, value=500.0, step=10.0)
-        cost = st.number_input("Себестоимость, ₽", min_value=1.0, value=300.0, step=10.0)
+        price = st.number_input("Цена продажи, ₽", min_value=1.0, value=500.0, step=10.0, help="Розничная цена на маркетплейсе")
+        cost = st.number_input("Себестоимость, ₽", min_value=1.0, value=300.0, step=10.0, help="Закупочная цена + доставка до склада")
         
-        st.subheader("📦 Габариты")
-        weight = st.number_input("Вес, кг", min_value=0.1, value=1.0, step=0.1)
+        st.subheader("📦 Физические параметры")
+        weight = st.number_input("Вес, кг", min_value=0.1, value=1.0, step=0.1, help="Вес брутто (с упаковкой)")
         col_w1, col_w2, col_w3 = st.columns(3)
         with col_w1:
-            length = st.number_input("Длина, см", min_value=0, value=0, step=1)
+            length = st.number_input("Длина, см", min_value=0, value=0, step=1, help="Длина упаковки")
         with col_w2:
-            width = st.number_input("Ширина, см", min_value=0, value=0, step=1)
+            width = st.number_input("Ширина, см", min_value=0, value=0, step=1, help="Ширина упаковки")
         with col_w3:
-            height = st.number_input("Высота, см", min_value=0, value=0, step=1)
+            height = st.number_input("Высота, см", min_value=0, value=0, step=1, help="Высота упаковки")
     
     with col2:
         st.subheader("⚙️ Параметры расчёта")
@@ -1532,7 +1547,8 @@ def show_section2_single_calculation():
         
         days_in_storage = st.number_input(
             "Дней хранения",
-            min_value=1, max_value=365, value=30, step=1
+            min_value=1, max_value=365, value=30, step=1,
+            help="Среднее время хранения на складе маркетплейса"
         )
         
         tax_system = st.selectbox(
@@ -1544,14 +1560,15 @@ def show_section2_single_calculation():
         )
         
         # Дополнительные настройки
-        with st.expander("🔧 Расширенные настройки"):
-            commission_rate = st.number_input("Ставка комиссии, %", min_value=0.0, value=15.0, step=0.5) / 100
+        with st.expander("🔧 Расширенные настройки тарифов"):
+            st.caption("Оставьте поля пустыми для использования стандартных тарифов")
+            commission_rate = st.number_input("Ставка комиссии, %", min_value=0.0, value=15.0, step=0.5, format="%.1f") / 100
             logistics_base = st.number_input("База логистики, ₽", min_value=0.0, value=50.0, step=5.0)
             logistics_per_kg = st.number_input("Логистика за кг, ₽", min_value=0.0, value=15.0, step=1.0)
             storage_rate = st.number_input("Ставка хранения, ₽/день", min_value=0.0, value=0.3, step=0.05)
     
     # --- Расчёт ---
-    if st.button("🧮 Рассчитать юнит-экономику", type="primary"):
+    if st.button("🧮 Рассчитать юнит-экономику", type="primary", use_container_width=True):
         try:
             calc.tax_system = tax_system
             
@@ -1580,7 +1597,7 @@ def show_section2_single_calculation():
             st.divider()
             st.subheader("📊 Результаты расчёта")
             
-            # KPI в 3 колонки
+            # KPI в 4 колонки
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 profit_color = "green" if result['profit'] > 0 else "red"
@@ -1592,13 +1609,14 @@ def show_section2_single_calculation():
             with col3:
                 st.metric("📈 ROI", f"{result['roi']:.1f}%")
             with col4:
-                if result['price'] < result['recommended_min_price']:
-                    st.metric("💡 Рек. цена", f"{result['recommended_min_price']:.0f} ₽", 
-                             delta=f"+{result['recommended_min_price'] - result['price']:.0f} ₽", 
+                price_diff = result['recommended_min_price'] - result['price']
+                if price_diff > 0:
+                    st.metric("💡 Рекомендуемая цена", f"{result['recommended_min_price']:.0f} ₽", 
+                             delta=f"+{price_diff:.0f} ₽", 
                              delta_color="inverse")
                 else:
-                    st.metric("💡 Рек. цена", f"{result['recommended_min_price']:.0f} ₽", 
-                             delta="✅ OK", 
+                    st.metric("💡 Рекомендуемая цена", f"{result['recommended_min_price']:.0f} ₽", 
+                             delta="✅ Цена оптимальна", 
                              delta_color="off")
             
             # Детальная таблица
@@ -1646,7 +1664,7 @@ def show_section2_single_calculation():
             
             # --- Визуализация ---
             st.divider()
-            st.subheader("📊 Визуализация структуры расходов")
+            st.subheader("📊 Визуализация")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -1675,21 +1693,22 @@ def show_section2_single_calculation():
             st.error(f"❌ Ошибка расчёта: {e}")
             logger.exception("Ошибка в single calculation")
 
-def show_section4_calculation():
-    """Раздел 4: Расчёт юнит-экономики (FBS)"""
-    st.header("🧮 Раздел 4: Расчёт юнит-экономики (FBS)")
+def show_section_batch_calculation():
+    """📊 Массовый расчёт юнит-экономики"""
+    st.header("📊 Массовый расчёт юнит-экономики")
     
     st.info("""
-    **В этом разделе:**
-    1. Рассчитайте юнит-экономику для всех товаров в режиме FBS
-    2. Экспортируйте результаты в Excel с живыми формулами
-    3. Интеграция с Google Sheets для обновления остатков
-    4. Визуализация распределения маржи
+    **🎯 Что делает этот раздел:**
+    - Рассчитывает юнит-экономику для всего каталога
+    - Показывает распределение маржи по товарам
+    - Выявляет убыточные позиции
+    - Экспортирует результаты в Excel с живыми формулами
+    - Интегрируется с Google Sheets для обновления остатков
     """)
     
     # --- Проверка наличия данных ---
     if st.session_state.processed_catalog_df.empty:
-        st.error("❌ Нет данных каталога. Перейдите в Раздел 1 и загрузите файлы.")
+        st.error("❌ Нет данных каталога. Перейдите в раздел 'Импорт и подготовка данных' и загрузите файлы.")
         return
         
     df_catalog = st.session_state.processed_catalog_df.copy()
@@ -1726,7 +1745,8 @@ def show_section4_calculation():
         )
     
     # --- Определение колонок ---
-    st.subheader("🔍 Определение колонок")
+    st.subheader("🔍 Настройка колонок")
+    st.caption("Укажите, какие колонки в вашем файле соответствуют параметрам расчёта")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -1761,7 +1781,7 @@ def show_section4_calculation():
     calc = st.session_state.fbs_calculator
     calc.tax_system = tax_system
     
-    if st.button("🚀 Рассчитать юнит-экономику для всех товаров", type="primary"):
+    if st.button("🚀 Рассчитать юнит-экономику для всех товаров", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
@@ -1846,7 +1866,7 @@ def show_section4_calculation():
         
         # Визуализация
         st.divider()
-        st.subheader("📈 Визуализация")
+        st.subheader("📈 Визуализация распределения")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -1865,13 +1885,22 @@ def show_section4_calculation():
         available_cols = [c for c in display_cols if c in df_results.columns]
         
         # Поиск и фильтрация
-        search_term = st.text_input("🔍 Поиск по артикулу или наименованию", "")
+        search_term = st.text_input("🔍 Поиск по артикулу или наименованию", placeholder="Введите артикул или название...")
         if search_term:
             mask = df_results['Артикул'].str.contains(search_term, case=False, na=False) | \
                    df_results['Наименование'].str.contains(search_term, case=False, na=False)
             df_filtered = df_results[mask]
         else:
             df_filtered = df_results
+        
+        # Сортировка
+        sort_col = st.selectbox("Сортировать по", ["Прибыль (убывание)", "Маржа (убывание)", "Артикул (возрастание)"])
+        if sort_col == "Прибыль (убывание)":
+            df_filtered = df_filtered.sort_values('profit', ascending=False)
+        elif sort_col == "Маржа (убывание)":
+            df_filtered = df_filtered.sort_values('margin_percent', ascending=False)
+        else:
+            df_filtered = df_filtered.sort_values('Артикул')
         
         st.dataframe(
             df_filtered[available_cols].style.background_gradient(subset=['profit', 'margin_percent'], cmap='RdYlGn', vmin=-50, vmax=50),
@@ -1881,19 +1910,14 @@ def show_section4_calculation():
         
         # --- Экспорт в Excel с живыми формулами ---
         st.divider()
-        st.subheader("📥 Экспорт в Excel с живыми формулами")
-        st.info("""
-        **💡 КАК ЭТО РАБОТАЕТ:**
-        - Жёлтые ячейки — вводные данные (можно менять)
-        - Зелёные ячейки — расчётные (пересчитываются автоматически)
-        - Синие ячейки — итоговые (прибыль, маржа, рек. цена)
-        
-        Меняйте цену, вес или ставку комиссии — и вся экономика пересчитается!
-        """)
+        st.subheader("📥 Экспорт результатов")
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("📥 Экспортировать в Excel с живыми формулами", type="primary"):
+            st.markdown("**📊 Excel с живыми формулами**")
+            st.caption("Меняйте параметры — всё пересчитывается автоматически!")
+            
+            if st.button("📥 Экспортировать в Excel с живыми формулами", type="primary", use_container_width=True):
                 try:
                     output_path = EXPORTS_DIR / f"unit_economics_live_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                     exporter = LiveExcelExporter()
@@ -1917,8 +1941,10 @@ def show_section4_calculation():
                     logger.exception("Ошибка экспорта")
         
         with col2:
-            # Экспорт в CSV
-            if st.button("📄 Экспортировать в CSV"):
+            st.markdown("**📄 CSV для анализа**")
+            st.caption("Универсальный формат для загрузки в другие системы")
+            
+            if st.button("📄 Экспортировать в CSV", use_container_width=True):
                 csv_data = df_results.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
                     label="⬇️ Скачать CSV",
@@ -1931,12 +1957,13 @@ def show_section4_calculation():
         # --- Google Sheets интеграция ---
         st.divider()
         st.subheader("🔄 Интеграция с Google Sheets")
+        st.caption("Экспорт результатов и обновление остатков в реальном времени")
         
         key_manager = st.session_state.secure_key_manager
         gs_creds = key_manager.get_key("google_sheets")
         
         if not gs_creds:
-            st.warning("⚠️ Google Sheets credentials не заданы. Настройте их в Разделе 1.")
+            st.warning("⚠️ Google Sheets credentials не заданы. Настройте их в разделе 'Импорт и подготовка данных'.")
         else:
             col1, col2 = st.columns(2)
             with col1:
@@ -1944,7 +1971,7 @@ def show_section4_calculation():
             with col2:
                 worksheet_name = st.text_input("Название листа", value="Юнит-экономика")
             
-            if st.button("📤 Экспортировать результаты в Google Sheets"):
+            if st.button("📤 Экспортировать результаты в Google Sheets", use_container_width=True):
                 if not spreadsheet_id:
                     st.error("❌ Укажите ID Google Таблицы")
                 else:
@@ -1968,15 +1995,11 @@ def show_section4_calculation():
             # --- Обновление остатков ---
             st.markdown("---")
             st.subheader("📦 Обновление остатков через Google Sheets")
-            st.info("""
-            **Сценарий:**
-            1. Отредактируйте остатки/цены в Google Sheets
-            2. Нажмите "Загрузить изменения в МП" — система отправит данные через API
-            """)
+            st.caption("Сценарий: редактируете остатки в Google Sheets → нажимаете кнопку → система отправляет данные в Ozon")
             
             ozon_api_key = key_manager.get_key("ozon")
             if not ozon_api_key:
-                st.warning("⚠️ Ozon API ключ не задан. Настройте его в Разделе 1.")
+                st.warning("⚠️ Ozon API ключ не задан. Настройте его в разделе 'Импорт и подготовка данных'.")
             else:
                 col1, col2 = st.columns(2)
                 with col1:
@@ -1984,7 +2007,7 @@ def show_section4_calculation():
                 with col2:
                     stock_worksheet = st.text_input("Лист с остатками", value="Остатки")
                 
-                if st.button("📥 Загрузить изменения из Google Sheets в Ozon"):
+                if st.button("📥 Загрузить изменения из Google Sheets в Ozon", use_container_width=True):
                     if not spreadsheet_id or not ozon_client_id:
                         st.error("❌ Укажите ID таблицы и Client ID")
                     else:
@@ -2037,20 +2060,21 @@ def show_section4_calculation():
                         except Exception as e:
                             st.error(f"❌ Ошибка: {e}")
 
-def show_section5_analytics():
-    """Раздел 5: Аналитика и дашборды"""
-    st.header("📊 Раздел 5: Аналитика и дашборды")
+def show_section_analytics():
+    """📊 Аналитика и рекомендации"""
+    st.header("📊 Аналитика и рекомендации")
     
     st.info("""
-    **В этом разделе:**
-    - Анализ распределения маржи и прибыли
-    - Тренды и паттерны в данных
-    - Выявление проблемных зон
-    - Рекомендации по оптимизации
+    **🎯 Что делает этот раздел:**
+    - Анализирует распределение маржи и прибыли
+    - Выявляет тренды и паттерны в данных
+    - Находит проблемные зоны в ассортименте
+    - Даёт конкретные рекомендации по оптимизации
+    - Помогает принимать решения на основе данных
     """)
     
     if st.session_state.calculation_results_df.empty:
-        st.warning("⚠️ Нет данных для аналитики. Выполните расчёт в Разделе 4.")
+        st.warning("⚠️ Нет данных для аналитики. Выполните расчёт в разделе 'Массовый расчёт юнит-экономики'.")
         return
     
     df = st.session_state.calculation_results_df
@@ -2062,10 +2086,12 @@ def show_section5_analytics():
     with col1:
         st.metric("Всего SKU", f"{len(df)}")
     with col2:
-        st.metric("Прибыльных SKU", f"{(df['profit'] > 0).sum()}", 
-                 delta=f"{(df['profit'] > 0).sum()/len(df)*100:.1f}%")
+        profitable = (df['profit'] > 0).sum()
+        st.metric("Прибыльных SKU", f"{profitable}", 
+                 delta=f"{profitable/len(df)*100:.1f}%")
     with col3:
-        st.metric("Убыточных SKU", f"{(df['profit'] < 0).sum()}")
+        unprofitable = (df['profit'] < 0).sum()
+        st.metric("Убыточных SKU", f"{unprofitable}")
     with col4:
         st.metric("Средняя маржа", f"{df['margin_percent'].mean():.1f}%")
     with col5:
@@ -2122,6 +2148,7 @@ def show_section5_analytics():
     # --- Корреляционный анализ ---
     st.divider()
     st.subheader("🔍 Корреляционный анализ")
+    st.caption("Взаимосвязь между ключевыми метриками")
     
     numeric_cols = ['price', 'cost', 'profit', 'margin_percent', 'roi']
     available_cols = [c for c in numeric_cols if c in df.columns]
@@ -2148,24 +2175,92 @@ def show_section5_analytics():
     
     # --- Рекомендации ---
     st.divider()
-    st.subheader("💡 Рекомендации по оптимизации")
+    st.subheader("💡 Рекомендации по оптимизации ассортимента")
     
     recommendations = []
+    warnings_list = []
     
-    if (df['profit'] < 0).sum() > len(df) * 0.1:
-        recommendations.append("⚠️ Более 10% товаров убыточны. Пересмотрите ценовую политику.")
+    # Анализ убыточности
+    unprofitable_pct = (df['profit'] < 0).sum() / len(df) * 100
+    if unprofitable_pct > 10:
+        recommendations.append(f"⚠️ **{unprofitable_pct:.1f}%** товаров убыточны. Рекомендуется пересмотреть цены или отказаться от этих позиций.")
+    elif unprofitable_pct > 5:
+        warnings_list.append(f"⚠️ **{unprofitable_pct:.1f}%** товаров убыточны. Обратите внимание на эти позиции.")
     
-    if df['margin_percent'].median() < 15:
-        recommendations.append("⚠️ Медианная маржа ниже 15%. Целевая маржа для автозапчастей должна быть 20-30%.")
+    # Анализ маржи
+    median_margin = df['margin_percent'].median()
+    if median_margin < 15:
+        recommendations.append(f"⚠️ Медианная маржа составляет **{median_margin:.1f}%**, что ниже целевого уровня (15%). Рекомендуется повысить цены или снизить закупочные цены.")
+    elif median_margin < 20:
+        warnings_list.append(f"⚠️ Медианная маржа **{median_margin:.1f}%** близка к минимальному уровню. Рассмотрите возможность оптимизации.")
     
-    if (df['price'] < df['recommended_min_price']).sum() > len(df) * 0.2:
-        recommendations.append("⚠️ Более 20% товаров недооценены. Рекомендуется повысить цены.")
+    # Анализ цен
+    underpriced_pct = (df['price'] < df['recommended_min_price']).sum() / len(df) * 100
+    if underpriced_pct > 20:
+        recommendations.append(f"⚠️ **{underpriced_pct:.1f}%** товаров недооценены. Рекомендуется повысить цены до рекомендуемого уровня.")
     
+    # Анализ ROI
+    low_roi = (df['roi'] < 10).sum() / len(df) * 100
+    if low_roi > 30:
+        recommendations.append(f"⚠️ **{low_roi:.1f}%** товаров имеют ROI ниже 10%. Рекомендуется пересмотреть эффективность этих позиций.")
+    
+    # Позитивные рекомендации
     if len(recommendations) == 0:
-        st.success("✅ Ваш портфель товаров выглядит здоровым! Основные метрики в норме.")
+        st.success("✅ **Отлично!** Ваш портфель товаров выглядит здоровым:")
+        st.success(f"   - Средняя маржа: **{df['margin_percent'].mean():.1f}%**")
+        st.success(f"   - Убыточных SKU: **{unprofitable_pct:.1f}%**")
+        st.success("   - Рекомендуется продолжать мониторинг и оптимизацию для поддержания показателей.")
     else:
         for rec in recommendations:
             st.warning(rec)
+        
+        if warnings_list:
+            st.info("**📌 Дополнительные наблюдения:**")
+            for warn in warnings_list:
+                st.info(f"   {warn}")
+    
+    # --- Детальный анализ проблемных зон ---
+    if (df['profit'] < 0).sum() > 0:
+        st.divider()
+        st.subheader("🔴 Детальный анализ убыточных товаров")
+        
+        unprofitable_df = df[df['profit'] < 0].copy()
+        st.write(f"**Найдено {len(unprofitable_df)} убыточных товаров:**")
+        
+        # Анализ причин убыточности
+        unprofitable_df['reason'] = ""
+        mask_high_commission = unprofitable_df['commission'] / unprofitable_df['price'] > 0.20
+        unprofitable_df.loc[mask_high_commission, 'reason'] = "Высокая комиссия"
+        
+        mask_high_logistics = unprofitable_df['logistics'] / unprofitable_df['price'] > 0.15
+        unprofitable_df.loc[mask_high_logistics, 'reason'] = "Высокая логистика"
+        
+        mask_low_price = unprofitable_df['price'] < unprofitable_df['recommended_min_price']
+        unprofitable_df.loc[mask_low_price, 'reason'] = "Заниженная цена"
+        
+        mask_high_storage = unprofitable_df['storage_cost'] > 50
+        unprofitable_df.loc[mask_high_storage, 'reason'] = "Дорогое хранение"
+        
+        # Заполняем оставшиеся
+        unprofitable_df.loc[unprofitable_df['reason'] == "", 'reason'] = "Комплекс причин"
+        
+        # Группировка по причинам
+        reasons_count = unprofitable_df['reason'].value_counts()
+        fig_reasons = px.pie(
+            values=reasons_count.values,
+            names=reasons_count.index,
+            title="Причины убыточности",
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        st.plotly_chart(fig_reasons, use_container_width=True)
+        
+        # Таблица убыточных товаров
+        display_cols = ["Артикул", "Наименование", "price", "profit", "margin_percent", "reason"]
+        available_display = [c for c in display_cols if c in unprofitable_df.columns]
+        st.dataframe(
+            unprofitable_df[available_display].head(50),
+            use_container_width=True
+        )
 
 # ============================================================================
 # БЛОК 11: ГЛАВНАЯ ФУНКЦИЯ
@@ -2189,7 +2284,7 @@ def main():
     {APP_DESCRIPTION}
     </p>
     <p style='color: #888; margin: 5px 0 0 0; font-size: 0.9em;'>
-    Версия {APP_VERSION} | FBS-ONLY
+    Версия {APP_VERSION} | FBS-ONLY | Оптимизировано для автозапчастей
     </p>
     </div>
     """, unsafe_allow_html=True)
@@ -2197,20 +2292,45 @@ def main():
     # Инициализация
     init_session_state()
     
-    # Sidebar навигация
+    # Sidebar навигация с улучшенными названиями
     st.sidebar.title("🧭 Навигация")
     
-    section = st.sidebar.radio(
+    # Создаем словарь с описанием разделов
+    sections = {
+        "📁 Импорт и подготовка данных": {
+            "icon": "📁",
+            "description": "Загрузка файлов, связывание данных, API ключи"
+        },
+        "🧮 Калькулятор единичного товара": {
+            "icon": "🧮",
+            "description": "Быстрый расчёт для одного товара"
+        },
+        "📊 Массовый расчёт юнит-экономики": {
+            "icon": "📊",
+            "description": "Расчёт для всего каталога, экспорт в Excel"
+        },
+        "📊 Аналитика и рекомендации": {
+            "icon": "📊",
+            "description": "Анализ данных, рекомендации по оптимизации"
+        }
+    }
+    
+    # Отображаем разделы с описаниями
+    section_keys = list(sections.keys())
+    selected_section = st.sidebar.radio(
         "Выберите раздел:",
-        [
-            "📁 Раздел 1: Загрузка и связывание данных",
-            "🧮 Раздел 2: Быстрый расчёт единичного товара",
-            "🧮 Раздел 4: Расчёт юнит-экономики (FBS)",
-            "📊 Раздел 5: Аналитика и дашборды"
-        ]
+        section_keys,
+        format_func=lambda x: f"{sections[x]['icon']} {x}"
     )
     
-    # Информация в sidebar
+    # Показываем описание выбранного раздела
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(f"""
+    **📌 {selected_section}**
+    {sections[selected_section]['description']}
+    """)
+    
+    # Информация о статусе системы
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📊 Статус системы")
     
@@ -2230,24 +2350,39 @@ def main():
         else:
             st.sidebar.warning("⚠️ GSpread")
     
+    # Информация о загруженных данных
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📦 Данные")
+    
+    if not st.session_state.processed_catalog_df.empty:
+        st.sidebar.success(f"✅ Каталог: {len(st.session_state.processed_catalog_df)} товаров")
+    else:
+        st.sidebar.warning("⚠️ Каталог не загружен")
+    
+    if not st.session_state.calculation_results_df.empty:
+        st.sidebar.success(f"✅ Рассчитано: {len(st.session_state.calculation_results_df)} товаров")
+    else:
+        st.sidebar.warning("⚠️ Расчёт не выполнен")
+    
+    # Быстрый старт
     st.sidebar.markdown("---")
     st.sidebar.info("""
-    **Быстрый старт:**
-    1. 📁 Загрузите файлы (Раздел 1)
-    2. 🔑 Настройте API ключи (Раздел 1)
-    3. 🧮 Рассчитайте юнит-экономику (Раздел 4)
-    4. 📥 Экспортируйте в Excel с живыми формулами
+    **🚀 Быстрый старт:**
+    1. 📁 Загрузите файлы в разделе "Импорт и подготовка данных"
+    2. 🔑 Настройте API ключи для интеграций
+    3. 📊 Выполните массовый расчёт
+    4. 📥 Экспортируйте результаты в Excel
     """)
     
     # Отображение выбранного раздела
-    if section == "📁 Раздел 1: Загрузка и связывание данных":
-        show_section1_data_loading()
-    elif section == "🧮 Раздел 2: Быстрый расчёт единичного товара":
-        show_section2_single_calculation()
-    elif section == "🧮 Раздел 4: Расчёт юнит-экономики (FBS)":
-        show_section4_calculation()
-    elif section == "📊 Раздел 5: Аналитика и дашборды":
-        show_section5_analytics()
+    if selected_section == "📁 Импорт и подготовка данных":
+        show_section_data_loading()
+    elif selected_section == "🧮 Калькулятор единичного товара":
+        show_section_single_calculation()
+    elif selected_section == "📊 Массовый расчёт юнит-экономики":
+        show_section_batch_calculation()
+    elif selected_section == "📊 Аналитика и рекомендации":
+        show_section_analytics()
     
     # Футер
     st.divider()
@@ -2256,6 +2391,9 @@ def main():
     <p style='margin: 0;'>🚀 <strong>FBS Юнит-экономика PRO 2026</strong></p>
     <p style='margin: 5px 0 0 0; font-size: 0.9em;'>
     Версия {APP_VERSION} | Живые формулы Excel | Безопасное хранение ключей | FBS-ONLY
+    </p>
+    <p style='margin: 5px 0 0 0; font-size: 0.8em; color: #999;'>
+    Разработано для маркетплейсов Ozon, Wildberries, Яндекс Маркет
     </p>
     </div>
     """, unsafe_allow_html=True)
