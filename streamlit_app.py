@@ -1525,24 +1525,30 @@ def init_session_state():
     if 'deepseek_manager' not in st.session_state:
         st.session_state.deepseek_manager = None
     
+    # Инициализация калькулятора с настройками по умолчанию
+    default_config = {
+        "commission_rate": 0.145,
+        "min_commission": 35.0,
+        "logistics_base": 55.0,
+        "logistics_per_kg": 16.0,
+        "storage_per_day": 0.35,
+        "acquiring_fee": 0.015,
+        "return_fee": 0.025,
+        "mode_multipliers": {"FBS": 1.0, "FBY": 0.8, "FBP": 0.7}
+    }
+    
     if 'fbs_calculator' not in st.session_state:
-        default_config = {
-            "commission_rate": 0.145,
-            "min_commission": 35.0,
-            "logistics_base": 55.0,
-            "logistics_per_kg": 16.0,
-            "storage_per_day": 0.35,
-            "acquiring_fee": 0.015,
-            "return_fee": 0.025,
-            "mode_multipliers": {"FBS": 1.0, "FBY": 0.8, "FBP": 0.7}
-        }
         st.session_state.fbs_calculator = FBSUnitEconomicsCalculator(
             marketplace_config=default_config,
             tax_system="УСН_6"
         )
     
     if 'excel_exporter' not in st.session_state:
-        st.session_state.excel_exporter = ProfessionalExcelExporter()
+        try:
+            st.session_state.excel_exporter = ProfessionalExcelExporter()
+        except ImportError:
+            st.session_state.excel_exporter = None
+            st.warning("⚠️ OpenPyXL не установлен. Экспорт в Excel недоступен.")
     
     if 'current_marketplace' not in st.session_state:
         st.session_state.current_marketplace = "Яндекс Маркет"
@@ -1752,11 +1758,21 @@ def show_section_single_calculation():
     - Идеально для тестирования гипотез
     """)
     
+    # Получаем калькулятор из session state
     calc = st.session_state.fbs_calculator
     marketplace = st.session_state.current_marketplace
     
+    # Проверяем, что калькулятор инициализирован
+    if calc is None:
+        st.error("❌ Калькулятор не инициализирован. Пожалуйста, перезагрузите страницу.")
+        return
+    
     # Устанавливаем конфигурацию для выбранного маркетплейса
-    calc.set_marketplace(marketplace)
+    try:
+        calc.set_marketplace(marketplace)
+    except Exception as e:
+        st.error(f"❌ Ошибка настройки маркетплейса: {e}")
+        return
     
     # --- Ввод параметров ---
     col1, col2 = st.columns(2)
@@ -1815,9 +1831,10 @@ def show_section_single_calculation():
     # --- Расчёт ---
     if st.button("🧮 Профессиональный расчёт юнит-экономики", type="primary", use_container_width=True):
         try:
+            # Обновляем налоговую систему
             calc.tax_system = tax_system
-            calc.set_marketplace(marketplace)
             
+            # Выполняем расчёт
             result = calc.calculate(
                 price=price,
                 cost=cost,
@@ -2025,6 +2042,13 @@ def show_section_batch_calculation():
     df_catalog = st.session_state.processed_catalog_df.copy()
     marketplace = st.session_state.current_marketplace
     
+    # Получаем калькулятор
+    calc = st.session_state.fbs_calculator
+    
+    if calc is None:
+        st.error("❌ Калькулятор не инициализирован. Пожалуйста, перезагрузите страницу.")
+        return
+    
     # --- Настройки расчёта ---
     st.subheader("⚙️ Настройки массового расчёта")
     
@@ -2086,9 +2110,12 @@ def show_section_batch_calculation():
     # --- Запуск расчёта ---
     st.divider()
     
-    calc = st.session_state.fbs_calculator
-    calc.tax_system = tax_system
-    calc.set_marketplace(marketplace)
+    try:
+        calc.tax_system = tax_system
+        calc.set_marketplace(marketplace)
+    except Exception as e:
+        st.error(f"❌ Ошибка настройки калькулятора: {e}")
+        return
     
     if st.button("🚀 Запустить профессиональный массовый расчёт", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
@@ -2104,20 +2131,25 @@ def show_section_batch_calculation():
         total = len(df_catalog)
         
         # Пакетный расчёт
-        df_results = calc.calculate_batch(
-            df=df_catalog,
-            artikul_col=artikul_col,
-            price_col=price_col,
-            cost_col=cost_col,
-            weight_col=weight_col_actual,
-            length_col=length_col_actual,
-            width_col=width_col_actual,
-            height_col=height_col_actual,
-            name_col=name_col_actual,
-            days_in_storage=days_in_storage,
-            operation_mode=operation_mode,
-            marketplace=marketplace
-        )
+        try:
+            df_results = calc.calculate_batch(
+                df=df_catalog,
+                artikul_col=artikul_col,
+                price_col=price_col,
+                cost_col=cost_col,
+                weight_col=weight_col_actual,
+                length_col=length_col_actual,
+                width_col=width_col_actual,
+                height_col=height_col_actual,
+                name_col=name_col_actual,
+                days_in_storage=days_in_storage,
+                operation_mode=operation_mode,
+                marketplace=marketplace
+            )
+        except Exception as e:
+            st.error(f"❌ Ошибка расчёта: {e}")
+            logger.exception("Ошибка в batch calculation")
+            return
         
         progress_bar.progress(1.0)
         status_text.text(f"✅ Расчёт завершён! Обработано {len(df_results)} товаров.")
@@ -2221,6 +2253,10 @@ def show_section_batch_calculation():
                 try:
                     output_path = EXPORTS_DIR / f"unit_economics_pro_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                     exporter = st.session_state.excel_exporter
+                    
+                    if exporter is None:
+                        st.error("❌ Excel экспортер не доступен. Установите openpyxl.")
+                        return
                     
                     # Добавляем маркетинговые и упаковочные расходы, если их нет
                     if 'marketing_expenses' not in df_results.columns:
@@ -2370,7 +2406,10 @@ def main():
     with status_cols[0]:
         st.sidebar.success("✅ SecureKeyManager")
         st.sidebar.success("✅ FBS Calculator")
-        st.sidebar.success("✅ Excel Exporter")
+        if st.session_state.excel_exporter is not None:
+            st.sidebar.success("✅ Excel Exporter")
+        else:
+            st.sidebar.warning("⚠️ Excel Exporter")
     with status_cols[1]:
         if CRYPTO_AVAILABLE:
             st.sidebar.success("✅ Cryptography")
@@ -2417,12 +2456,16 @@ def main():
     st.sidebar.caption(f"Версия {APP_VERSION}")
     
     # Отображение выбранного раздела
-    if selected_section == "📁 Загрузка данных и настройка API":
-        show_section_data_loading()
-    elif selected_section == "🧮 Калькулятор единичного товара":
-        show_section_single_calculation()
-    elif selected_section == "📊 Массовый расчёт юнит-экономики":
-        show_section_batch_calculation()
+    try:
+        if selected_section == "📁 Загрузка данных и настройка API":
+            show_section_data_loading()
+        elif selected_section == "🧮 Калькулятор единичного товара":
+            show_section_single_calculation()
+        elif selected_section == "📊 Массовый расчёт юнит-экономики":
+            show_section_batch_calculation()
+    except Exception as e:
+        st.error(f"❌ Ошибка при загрузке раздела: {e}")
+        logger.exception("Ошибка в main")
     
     # Футер
     st.divider()
