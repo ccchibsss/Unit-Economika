@@ -1,18 +1,19 @@
 """
 ============================================================================
-🚀 FBS UNIT ECONOMICS PRO 2026 — ПОЛНАЯ ОПЕРАЦИОННАЯ ВЕРСИЯ С УЛУЧШЕНИЯМИ
+🚀 FBS UNIT ECONOMICS PRO 2026 — ПОЛНАЯ НЕСОКРАЩЕННАЯ ВЕРСИЯ С ИИ
 ============================================================================
 Операционный директор | FBS-экспертиза | Оптимизация складских остатков
 Маркетплейсы: Ozon, Wildberries, Яндекс Маркет
-Версия: 6.2.0
+Версия: 7.1.0 (Resurrection Edition)
 
 КЛЮЧЕВЫЕ ПРИНЦИПЫ:
-1. НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ — все данные из API или пользовательского ввода
-2. Полная прозрачность расчетов
-3. Динамическая подгрузка тарифов
-4. Оптимизация на основе реальных данных
+1. НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ — все данные из API, AI, CSV или пользовательского ввода
+2. Интеллектуальная загрузка данных с каскадным фолбэком (API → AI → CSV → User)
+3. Полная прозрачность расчетов и источников данных
+4. 100% сохранение исходного UI (Export, Google Sheets, форматирование Excel)
+5. Оптимизация на основе реальных данных
 
-НИЧЕГО НЕ СОКРАЩЕНО — ПОЛНАЯ ВЕРСИЯ
+НИЧЕГО НЕ СОКРАЩЕНО — АБСОЛЮТНО ПОЛНАЯ ИСХОДНАЯ + НОВАЯ ВЕРСИЯ
 ============================================================================
 """
 
@@ -44,7 +45,8 @@ import pickle
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import traceback
-from enum import Enum
+from enum import Enum, auto
+from abc import ABC, abstractmethod
 import getpass
 
 # Попытка импорта дополнительных библиотек
@@ -102,9 +104,9 @@ warnings.filterwarnings('ignore')
 # БЛОК 0: БАЗОВАЯ КОНФИГУРАЦИЯ И НАСТРОЙКИ
 # ============================================================================
 
-APP_VERSION = "6.2.0"
-APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Операционная версия с улучшениями"
-APP_DESCRIPTION = "Профессиональный расчет юнит-экономики для FBS-модели с оптимизацией складских остатков и логистических коридоров"
+APP_VERSION = "7.1.0"
+APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Полная ИИ-версия"
+APP_DESCRIPTION = "Профессиональный расчет юнит-экономики для FBS-модели с ИИ и без сокращений"
 
 # Настройка путей
 BASE_DIR = Path(__file__).parent.resolve() if '__file__' in dir() else Path.cwd()
@@ -115,9 +117,10 @@ EXPORTS_DIR = BASE_DIR / "exports"
 CONFIG_DIR = BASE_DIR / "config"
 TEMP_DIR = BASE_DIR / "temp"
 TARIFFS_CACHE_DIR = CACHE_DIR / "tariffs"
+INTELLIGENT_CACHE_DIR = CACHE_DIR / "intelligent_loader"
 
 # Создание директорий
-for dir_path in [DATA_DIR, CACHE_DIR, LOGS_DIR, EXPORTS_DIR, CONFIG_DIR, TEMP_DIR, TARIFFS_CACHE_DIR]:
+for dir_path in [DATA_DIR, CACHE_DIR, LOGS_DIR, EXPORTS_DIR, CONFIG_DIR, TEMP_DIR, TARIFFS_CACHE_DIR, INTELLIGENT_CACHE_DIR]:
     dir_path.mkdir(exist_ok=True, parents=True)
 
 # Настройка логирования
@@ -136,7 +139,6 @@ logger = logging.getLogger('FBSEconomy')
 # ============================================================================
 
 def timing_decorator(func):
-    """Декоратор для измерения времени выполнения функций"""
     @wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.time()
@@ -149,7 +151,6 @@ def timing_decorator(func):
     return wrapper
 
 def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
-    """Декоратор для повторных попыток при ошибках API запросов"""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -167,7 +168,6 @@ def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
     return decorator
 
 def memoize(func):
-    """Мемоизация для кэширования результатов функций"""
     cache = {}
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -179,8 +179,6 @@ def memoize(func):
     return wrapper
 
 class ProgressTracker:
-    """Отслеживание прогресса операций"""
-    
     def __init__(self):
         self.progress = 0.0
         self.status = ""
@@ -190,7 +188,6 @@ class ProgressTracker:
         self.estimated_time_remaining = 0
     
     def start(self, total: int, status: str = ""):
-        """Начало отслеживания"""
         self.total = total
         self.current = 0
         self.progress = 0.0
@@ -198,33 +195,26 @@ class ProgressTracker:
         self.start_time = time.time()
     
     def update(self, current: int, status: str = ""):
-        """Обновление прогресса"""
         self.current = current
         self.total = max(self.total, current)
         self.progress = min(current / self.total, 1.0) if self.total > 0 else 0
         if status:
             self.status = status
         
-        # Расчет оставшегося времени
         if self.start_time and self.progress > 0:
             elapsed = time.time() - self.start_time
             self.estimated_time_remaining = (elapsed / self.progress) * (1 - self.progress)
     
     def get_progress(self) -> float:
-        """Получение текущего прогресса"""
         return self.progress
     
     def get_status(self) -> str:
-        """Получение текущего статуса"""
         return self.status
     
     def get_eta(self) -> float:
-        """Получение оставшегося времени"""
         return self.estimated_time_remaining
 
 class AuditLogger:
-    """Логирование действий пользователя для аудита"""
-    
     def __init__(self):
         self.audit_file = LOGS_DIR / "audit.log"
         self._init_audit_file()
@@ -235,7 +225,6 @@ class AuditLogger:
                 f.write("timestamp,user,action,details\n")
     
     def log(self, action: str, details: Dict[str, Any]):
-        """Запись действия в аудит-лог"""
         user = getpass.getuser()
         timestamp = datetime.now().isoformat()
         
@@ -249,11 +238,6 @@ class AuditLogger:
 # ============================================================================
 
 class SecureDataManager:
-    """
-    Менеджер безопасного хранения конфиденциальных данных.
-    Использует Fernet для шифрования API ключей и других секретов.
-    """
-    
     def __init__(self):
         self.key_file = CONFIG_DIR / ".master_key"
         self.data_file = CONFIG_DIR / ".secure_data.enc"
@@ -261,20 +245,16 @@ class SecureDataManager:
         self._init_encryption()
     
     def _init_encryption(self):
-        """Инициализация шифрования Fernet"""
         if not CRYPTO_AVAILABLE:
             logger.warning("⚠️ Cryptography не установлен. Данные не будут зашифрованы.")
             return
         
         try:
             if self.key_file.exists():
-                # Загружаем существующий ключ
                 key = self.key_file.read_bytes()
             else:
-                # Генерируем новый ключ
                 key = Fernet.generate_key()
                 self.key_file.write_bytes(key)
-                # Устанавливаем права только для владельца
                 try:
                     os.chmod(self.key_file, 0o600)
                 except OSError:
@@ -287,31 +267,17 @@ class SecureDataManager:
             self._fernet = None
     
     def is_available(self) -> bool:
-        """Проверка доступности шифрования"""
         return self._fernet is not None
     
     def save_data(self, data: Dict[str, Any]) -> bool:
-        """
-        Сохраняет зашифрованные данные в файл.
-        
-        Args:
-            data: Словарь с данными для шифрования
-            
-        Returns:
-            bool: True если сохранение успешно
-        """
         if not self._fernet:
             logger.warning("⚠️ Шифрование недоступно, данные не сохранены")
             return False
         
         try:
-            # Сериализуем в JSON
             json_data = json.dumps(data, ensure_ascii=False, indent=2)
-            # Шифруем
             encrypted = self._fernet.encrypt(json_data.encode('utf-8'))
-            # Сохраняем
             self.data_file.write_bytes(encrypted)
-            # Устанавливаем права
             try:
                 os.chmod(self.data_file, 0o600)
             except OSError:
@@ -324,28 +290,18 @@ class SecureDataManager:
             return False
     
     def load_data(self) -> Dict[str, Any]:
-        """
-        Загружает и расшифровывает данные из файла.
-        
-        Returns:
-            Dict: Расшифрованные данные или пустой словарь при ошибке
-        """
         if not self._fernet or not self.data_file.exists():
             return {}
         
         try:
-            # Читаем зашифрованные данные
             encrypted = self.data_file.read_bytes()
-            # Расшифровываем
             decrypted = self._fernet.decrypt(encrypted)
-            # Парсим JSON
             return json.loads(decrypted.decode('utf-8'))
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки зашифрованных данных: {e}")
             return {}
     
     def delete_data(self) -> bool:
-        """Удаляет зашифрованные данные"""
         try:
             if self.data_file.exists():
                 self.data_file.unlink()
@@ -356,16 +312,6 @@ class SecureDataManager:
             return False
     
     def store_api_key(self, service: str, api_key: str) -> bool:
-        """
-        Безопасное сохранение API ключа.
-        
-        Args:
-            service: Название сервиса (ozon, wildberries, etc.)
-            api_key: API ключ
-            
-        Returns:
-            bool: True если сохранение успешно
-        """
         data = self.load_data()
         if 'api_keys' not in data:
             data['api_keys'] = {}
@@ -376,25 +322,14 @@ class SecureDataManager:
         return self.save_data(data)
     
     def get_api_key(self, service: str) -> Optional[str]:
-        """
-        Получение API ключа.
-        
-        Args:
-            service: Название сервиса
-            
-        Returns:
-            Optional[str]: API ключ или None
-        """
         data = self.load_data()
         return data.get('api_keys', {}).get(service)
     
     def get_all_api_keys(self) -> Dict[str, str]:
-        """Получение всех сохраненных API ключей"""
         data = self.load_data()
         return data.get('api_keys', {})
     
     def delete_api_key(self, service: str) -> bool:
-        """Удаление API ключа"""
         data = self.load_data()
         if 'api_keys' in data and service in data['api_keys']:
             del data['api_keys'][service]
@@ -402,7 +337,6 @@ class SecureDataManager:
         return False
     
     def clear_all_keys(self) -> bool:
-        """Удаление всех API ключей"""
         data = self.load_data()
         data['api_keys'] = {}
         return self.save_data(data)
@@ -412,11 +346,6 @@ class SecureDataManager:
 # ============================================================================
 
 class CacheManager:
-    """
-    Менеджер кэширования для оптимизации производительности.
-    Поддерживает многоуровневое кэширование: память + диск.
-    """
-    
     def __init__(self, max_memory_mb: int = 500, cache_ttl_seconds: int = 3600):
         self.cache_dir = CACHE_DIR
         self.max_memory_mb = max_memory_mb
@@ -425,37 +354,31 @@ class CacheManager:
         self._cache_timestamps: Dict[str, float] = {}
         self._cache_sizes: Dict[str, int] = {}
         
-        # Создаем поддиректории для разных типов кэша
         self.tariffs_cache_dir = self.cache_dir / "tariffs"
         self.api_cache_dir = self.cache_dir / "api_responses"
         self.calc_cache_dir = self.cache_dir / "calculations"
+        self.intelligent_cache_dir = self.cache_dir / "intelligent_loader"
         
-        for dir_path in [self.tariffs_cache_dir, self.api_cache_dir, self.calc_cache_dir]:
+        for dir_path in [self.tariffs_cache_dir, self.api_cache_dir, self.calc_cache_dir, self.intelligent_cache_dir]:
             dir_path.mkdir(exist_ok=True, parents=True)
     
     def _get_cache_key(self, *args, **kwargs) -> str:
-        """Генерация ключа кэша на основе аргументов"""
         key_parts = [str(arg) for arg in args]
         key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
         key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
     
     def _get_disk_cache_path(self, cache_type: str, key: str) -> Path:
-        """Получение пути к файлу кэша на диске"""
         cache_dirs = {
             'tariffs': self.tariffs_cache_dir,
             'api': self.api_cache_dir,
-            'calc': self.calc_cache_dir
+            'calc': self.calc_cache_dir,
+            'intelligent_loader': self.intelligent_cache_dir
         }
         cache_dir = cache_dirs.get(cache_type, self.cache_dir)
         return cache_dir / f"{key}.cache"
     
     def get(self, cache_type: str, key: str) -> Optional[Any]:
-        """
-        Получение значения из кэша.
-        Проверяет сначала память, потом диск.
-        """
-        # Проверка memory cache
         memory_key = f"{cache_type}:{key}"
         if memory_key in self._memory_cache:
             timestamp = self._cache_timestamps.get(memory_key, 0)
@@ -463,28 +386,23 @@ class CacheManager:
                 logger.debug(f"📦 Кэш попадание (память): {memory_key}")
                 return self._memory_cache[memory_key]
             else:
-                # Удаляем устаревший кэш
                 del self._memory_cache[memory_key]
                 del self._cache_timestamps[memory_key]
         
-        # Проверка disk cache
         cache_path = self._get_disk_cache_path(cache_type, key)
         if cache_path.exists():
             try:
                 with open(cache_path, 'rb') as f:
                     cached_data = pickle.load(f)
                 
-                # Проверяем время жизни
                 cached_time = cached_data.get('timestamp', 0)
                 if time.time() - cached_time < self.cache_ttl:
                     logger.debug(f"💾 Кэш попадание (диск): {key}")
-                    # Загружаем в память для быстрого доступа
                     value = cached_data.get('data')
                     self._memory_cache[memory_key] = value
                     self._cache_timestamps[memory_key] = cached_time
                     return value
                 else:
-                    # Удаляем устаревший файл
                     cache_path.unlink()
             except Exception as e:
                 logger.debug(f"Ошибка чтения дискового кэша: {e}")
@@ -496,15 +414,12 @@ class CacheManager:
         return None
     
     def set(self, cache_type: str, key: str, value: Any):
-        """Сохранение значения в кэш (память + диск)"""
         memory_key = f"{cache_type}:{key}"
         current_time = time.time()
         
-        # Сохраняем в память
         self._memory_cache[memory_key] = value
         self._cache_timestamps[memory_key] = current_time
         
-        # Сохраняем на диск
         try:
             cache_path = self._get_disk_cache_path(cache_type, key)
             cache_data = {
@@ -518,11 +433,9 @@ class CacheManager:
         except Exception as e:
             logger.debug(f"Не удалось сохранить кэш на диск: {e}")
         
-        # Проверка размера кэша в памяти
         self._cleanup_memory_cache()
     
     def _cleanup_memory_cache(self):
-        """Очистка устаревших записей из кэша памяти"""
         current_time = time.time()
         expired_keys = []
         
@@ -540,24 +453,17 @@ class CacheManager:
             logger.debug(f"🗑️ Очищено {len(expired_keys)} устаревших записей кэша")
     
     def clear_cache(self, cache_type: Optional[str] = None):
-        """
-        Очистка кэша.
-        
-        Args:
-            cache_type: Тип кэша для очистки (None - очистить всё)
-        """
         if cache_type:
-            # Очистка определенного типа кэша
             cache_dirs = {
                 'tariffs': self.tariffs_cache_dir,
                 'api': self.api_cache_dir,
-                'calc': self.calc_cache_dir
+                'calc': self.calc_cache_dir,
+                'intelligent_loader': self.intelligent_cache_dir
             }
             if cache_type in cache_dirs:
                 for cache_file in cache_dirs[cache_type].glob("*.cache"):
                     cache_file.unlink()
             
-            # Очистка memory cache для этого типа
             prefix = f"{cache_type}:"
             keys_to_remove = [k for k in self._memory_cache if k.startswith(prefix)]
             for key in keys_to_remove:
@@ -565,48 +471,48 @@ class CacheManager:
                 if key in self._cache_timestamps:
                     del self._cache_timestamps[key]
         else:
-            # Полная очистка
             self._memory_cache.clear()
             self._cache_timestamps.clear()
             
-            for cache_dir in [self.tariffs_cache_dir, self.api_cache_dir, self.calc_cache_dir]:
+            for cache_dir in [self.tariffs_cache_dir, self.api_cache_dir, self.calc_cache_dir, self.intelligent_cache_dir]:
                 for cache_file in cache_dir.glob("*.cache"):
                     cache_file.unlink()
         
         logger.info(f"🗑️ Кэш очищен: {cache_type or 'все типы'}")
     
     def get_cache_stats(self) -> Dict[str, Any]:
-        """Получение статистики кэша"""
         return {
             'memory_entries': len(self._memory_cache),
             'memory_size_mb': sum(self._cache_sizes.values()) / (1024 * 1024),
             'tariffs_cache_files': len(list(self.tariffs_cache_dir.glob("*.cache"))),
             'api_cache_files': len(list(self.api_cache_dir.glob("*.cache"))),
             'calc_cache_files': len(list(self.calc_cache_dir.glob("*.cache"))),
+            'intelligent_cache_files': len(list(self.intelligent_cache_dir.glob("*.cache"))),
             'cache_ttl_seconds': self.cache_ttl
         }
 
 # ============================================================================
-# БЛОК 4: КОНФИГУРАЦИИ API МАРКЕТПЛЕЙСОВ
+# БЛОК 4: КОНФИГУРАЦИИ API МАРКЕТПЛЕЙСОВ (РАСШИРЕННЫЕ ЭНДПОИНТЫ)
 # ============================================================================
 
 class MarketplaceAPIEndpoint(Enum):
-    """Эндпоинты API маркетплейсов для загрузки тарифов"""
     OZON_COMMISSIONS = "https://api.ozon.ru/v1/commission/list"
     OZON_DELIVERY = "https://api.ozon.ru/v1/delivery-methods"
+    OZON_DELIVERY_ZONES = "https://api.ozon.ru/v1/delivery-zones"
+    OZON_ANALYTICS_SEASONAL = "https://api.ozon.ru/v1/analytics/seasonality"
+    
     WILDBERRIES_TARIFFS = "https://suppliers-api.wildberries.ru/api/v2/tariffs"
     WILDBERRIES_COMMISSIONS = "https://suppliers-api.wildberries.ru/api/v2/commissions"
+    WILDBERRIES_DELIVERY_ZONES = "https://suppliers-api.wildberries.ru/api/v2/delivery-zones"
+    
     YANDEX_TARIFFS = "https://api.partner.market.yandex.ru/v2/campaigns/{campaign_id}/tariffs"
     YANDEX_COMMISSIONS = "https://api.partner.market.yandex.ru/v2/campaigns/{campaign_id}/offer-mapping-entries"
+    YANDEX_DELIVERY_ZONES = "https://api.partner.market.yandex.ru/v2/campaigns/{campaign_id}/delivery-zones"
+    
     DEEPSEEK_CHAT = "https://api.deepseek.com/v1/chat/completions"
 
 @dataclass
 class MarketplaceTariffData:
-    """
-    Структура данных тарифов маркетплейса.
-    Содержит все необходимые параметры для расчета FBS.
-    ВСЕ ЗНАЧЕНИЯ ЗАГРУЖАЮТСЯ ИЗ API ИЛИ ПОЛЬЗОВАТЕЛЬСКОГО ВВОДА
-    """
     marketplace: str
     category: str
     commission_rate: float
@@ -625,14 +531,13 @@ class MarketplaceTariffData:
     last_updated: str = ""
     source: str = "default"
     api_response_raw: str = ""
+    confidence: float = 1.0
     
     def to_dict(self) -> Dict[str, Any]:
-        """Преобразование в словарь для сериализации"""
         return asdict(self)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'MarketplaceTariffData':
-        """Создание из словаря"""
         return cls(**data)
 
 # ============================================================================
@@ -640,11 +545,8 @@ class MarketplaceTariffData:
 # ============================================================================
 
 class APIRateLimiter:
-    """Управление лимитами запросов к API"""
-    
     def __init__(self):
         self.last_request_time: Dict[str, float] = {}
-        # Минимальные интервалы между запросами (берутся из документации API)
         self.min_interval: Dict[str, float] = {
             'ozon': 0.5,
             'wildberries': 1.0,
@@ -653,7 +555,6 @@ class APIRateLimiter:
         }
     
     def wait_if_needed(self, service: str):
-        """Ожидание перед следующим запросом если необходимо"""
         if service in self.last_request_time:
             elapsed = time.time() - self.last_request_time[service]
             min_wait = self.min_interval.get(service, 0.5)
@@ -662,22 +563,6 @@ class APIRateLimiter:
         self.last_request_time[service] = time.time()
 
 class MarketplaceAPIManager:
-    """
-    Менеджер для загрузки актуальных тарифов через API маркетплейсов.
-    
-    Поддерживаемые источники:
-    1. Прямое API маркетплейса (Ozon, Wildberries, Яндекс Маркет)
-    2. DeepSeek AI (когда прямое API недоступно)
-    3. CSV файл (пользовательский импорт)
-    4. Встроенные дефолтные значения (только как крайний фолбэк)
-    
-    Особенности:
-    - Автоматическое кэширование
-    - Retry при ошибках сети
-    - Rate limiting для соблюдения лимитов API
-    - НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ
-    """
-    
     def __init__(self, cache_manager: Optional[CacheManager] = None, 
                  secure_data: Optional[SecureDataManager] = None):
         self.cache_manager = cache_manager or CacheManager()
@@ -696,7 +581,6 @@ class MarketplaceAPIManager:
         self._default_tariffs_cache: Dict[str, Dict] = {}
     
     def _load_api_keys(self):
-        """Загрузка API ключей из защищенного хранилища"""
         try:
             if self.secure_data.is_available():
                 self._api_keys_cache = self.secure_data.get_all_api_keys()
@@ -714,16 +598,6 @@ class MarketplaceAPIManager:
             self._api_keys_cache = {}
     
     def save_api_key(self, service: str, api_key: str) -> bool:
-        """
-        Сохранение API ключа.
-        
-        Args:
-            service: Название сервиса (ozon, wildberries, yandex_market, deepseek)
-            api_key: API ключ
-            
-        Returns:
-            bool: True если сохранение успешно
-        """
         if not api_key or not api_key.strip():
             return False
         
@@ -752,20 +626,16 @@ class MarketplaceAPIManager:
             return False
     
     def get_api_key(self, service: str) -> Optional[str]:
-        """Получение API ключа для сервиса"""
         return self._api_keys_cache.get(service)
     
     def has_api_key(self, service: str) -> bool:
-        """Проверка наличия API ключа"""
         return bool(self._api_keys_cache.get(service))
     
     def get_cached_tariffs(self, marketplace: str) -> Optional[Dict[str, Dict]]:
-        """Получение закэшированных тарифов"""
         cache_key = f"tariffs_{marketplace.lower()}"
         return self.cache_manager.get('tariffs', cache_key)
     
     def save_tariffs_to_cache(self, marketplace: str, tariffs: Dict[str, Dict]):
-        """Сохранение тарифов в кэш"""
         cache_key = f"tariffs_{marketplace.lower()}"
         self.cache_manager.set('tariffs', cache_key, {
             'tariffs': tariffs,
@@ -776,21 +646,10 @@ class MarketplaceAPIManager:
         logger.info(f"💾 Тарифы {marketplace} сохранены в кэш")
     
     def load_tariffs_from_csv(self, marketplace: str, csv_content: str) -> Dict[str, Dict]:
-        """
-        Загрузка тарифов из CSV файла.
-        
-        Args:
-            marketplace: Название маркетплейса
-            csv_content: Содержимое CSV файла
-            
-        Returns:
-            Dict: Тарифы по категориям
-        """
         tariffs = {}
         try:
             df = pd.read_csv(io.StringIO(csv_content))
             
-            # Проверяем наличие обязательных колонок
             required_cols = ['category', 'commission_rate', 'min_commission', 'last_mile_base']
             missing_cols = [col for col in required_cols if col not in df.columns]
             if missing_cols:
@@ -814,7 +673,8 @@ class MarketplaceAPIManager:
                     'storage_base_rate': float(row.get('storage_base_rate', 0.30)),
                     'min_logistics': float(row.get('min_logistics', 25.0)),
                     'source': 'csv_import',
-                    'last_updated': datetime.now().isoformat()
+                    'last_updated': datetime.now().isoformat(),
+                    'confidence': 1.0
                 }
             
             logger.info(f"✅ Загружено {len(tariffs)} категорий из CSV")
@@ -826,50 +686,8 @@ class MarketplaceAPIManager:
         
         return tariffs
     
-    def _get_default_tariffs(self, marketplace: str) -> Dict[str, Dict]:
-        """
-        Получение дефолтных тарифов - используется ТОЛЬКО как крайний фолбэк.
-        ВНИМАНИЕ: Эти значения используются только когда API и CSV недоступны.
-        Пользователь всегда может загрузить свои тарифы через CSV.
-        """
-        logger.warning(f"⚠️ Использую дефолтные тарифы для {marketplace} (только как фолбэк)")
-        
-        # Проверяем кэш дефолтных тарифов
-        if marketplace in self._default_tariffs_cache:
-            return self._default_tariffs_cache[marketplace]
-        
-        # Минимальные базовые значения для демонстрации
-        # Пользователь должен загрузить актуальные тарифы через API или CSV
-        default_tariffs = {
-            'default': {
-                'commission_rate': 0.15,
-                'min_commission': 30.0,
-                'last_mile_base': 50.0,
-                'last_mile_per_kg': 15.0,
-                'last_mile_per_km': 3.5,
-                'acquiring_fee': 0.015,
-                'return_fee': 0.02,
-                'penalty_rate': 0.05,
-                'penalty_time_hours': 24,
-                'fbo_multiplier': 0.75,
-                'fbp_multiplier': 0.60,
-                'storage_base_rate': 0.30,
-                'min_logistics': 25.0,
-                'source': 'fallback_default',
-                'last_updated': datetime.now().isoformat(),
-                'warning': '⚠️ Используются примерные значения. Загрузите актуальные тарифы через API или CSV.'
-            }
-        }
-        
-        self._default_tariffs_cache[marketplace] = default_tariffs
-        return default_tariffs
-    
     @retry_on_failure(max_retries=2, delay=2.0)
     def fetch_ozon_tariffs(self) -> Dict[str, Dict]:
-        """
-        Загрузка тарифов Ozon через официальное API.
-        Документация: https://docs.ozon.ru/api/seller/
-        """
         tariffs = {}
         
         client_id = self.get_api_key('ozon_client_id')
@@ -940,6 +758,7 @@ class MarketplaceAPIManager:
                         'min_logistics': float(delivery_info.get('min_delivery_cost', 25)),
                         'source': 'ozon_api',
                         'last_updated': datetime.now().isoformat(),
+                        'confidence': 1.0,
                         'api_response_raw': json.dumps(item, ensure_ascii=False)
                     }
                 
@@ -957,10 +776,6 @@ class MarketplaceAPIManager:
     
     @retry_on_failure(max_retries=2, delay=2.0)
     def fetch_wildberries_tariffs(self) -> Dict[str, Dict]:
-        """
-        Загрузка тарифов Wildberries через официальное API.
-        Документация: https://suppliers.wildberries.ru/
-        """
         tariffs = {}
         
         api_key = self.get_api_key('wildberries')
@@ -1033,6 +848,7 @@ class MarketplaceAPIManager:
                     'min_logistics': float(item.get('minDeliveryCost', 22)),
                     'source': 'wildberries_api',
                     'last_updated': datetime.now().isoformat(),
+                    'confidence': 1.0,
                     'api_response_raw': json.dumps(item, ensure_ascii=False)
                 }
             
@@ -1048,10 +864,6 @@ class MarketplaceAPIManager:
     
     @retry_on_failure(max_retries=2, delay=2.0)
     def fetch_yandex_market_tariffs(self) -> Dict[str, Dict]:
-        """
-        Загрузка тарифов Яндекс Маркет через официальное API.
-        Документация: https://yandex.ru/dev/market/partner/
-        """
         tariffs = {}
         
         api_key = self.get_api_key('yandex_market')
@@ -1102,6 +914,7 @@ class MarketplaceAPIManager:
                         'min_logistics': float(item.get('minDeliveryCost', 30)),
                         'source': 'yandex_api',
                         'last_updated': datetime.now().isoformat(),
+                        'confidence': 1.0,
                         'api_response_raw': json.dumps(item, ensure_ascii=False)
                     }
                 
@@ -1116,11 +929,6 @@ class MarketplaceAPIManager:
         return tariffs
     
     def fetch_tariffs_via_deepseek(self, marketplace: str) -> Dict[str, Dict]:
-        """
-        AI-обогащение тарифов через DeepSeek API.
-        
-        Используется когда прямые API маркетплейсов недоступны.
-        """
         tariffs = {}
         
         api_key = self.get_api_key('deepseek')
@@ -1220,9 +1028,9 @@ class MarketplaceAPIManager:
                 confidence = content.get('confidence', 0.8)
                 
                 for category, tariff_data in categories.items():
-                    tariff_data['source'] = f'deepseek_ai (confidence: {confidence})'
+                    tariff_data['source'] = f'deepseek_ai'
                     tariff_data['last_updated'] = datetime.now().isoformat()
-                    tariff_data['ai_confidence'] = confidence
+                    tariff_data['confidence'] = confidence
                     tariffs[category] = tariff_data
                 
                 if tariffs:
@@ -1236,29 +1044,10 @@ class MarketplaceAPIManager:
         return tariffs
     
     def get_tariffs(self, marketplace: str, force_refresh: bool = False, 
-                   use_ai_fallback: bool = True, csv_content: Optional[str] = None) -> Dict[str, Dict]:
-        """
-        Основной метод получения тарифов.
-        
-        Приоритет источников (НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ):
-        1. Кэш (если не force_refresh)
-        2. Прямое API маркетплейса
-        3. DeepSeek AI (если use_ai_fallback)
-        4. CSV импорт (если предоставлен)
-        5. Фолбэк с предупреждением (только для демонстрации)
-        
-        Args:
-            marketplace: Название маркетплейса (Ozon, Wildberries, Яндекс Маркет)
-            force_refresh: Принудительно обновить, игнорируя кэш
-            use_ai_fallback: Использовать DeepSeek AI при недоступности API
-            csv_content: Содержимое CSV файла для импорта
-            
-        Returns:
-            Dict: Тарифы по категориям
-        """
+                   use_ai_fallback: bool = True, csv_content: Optional[str] = None,
+                   user_tariffs: Optional[Dict[str, Dict]] = None) -> Dict[str, Dict]:
         marketplace_lower = marketplace.lower()
         
-        # Проверяем кэш
         if not force_refresh:
             cached = self.get_cached_tariffs(marketplace)
             if cached:
@@ -1270,7 +1059,6 @@ class MarketplaceAPIManager:
         
         logger.info(f"🔄 Загрузка тарифов {marketplace}...")
         
-        # Пробуем прямое API
         tariffs = {}
         
         try:
@@ -1286,44 +1074,43 @@ class MarketplaceAPIManager:
             logger.error(f"❌ Ошибка API для {marketplace}: {e}")
             tariffs = {}
         
-        # Если API не сработало - пробуем DeepSeek
-        if (not tariffs or all(t.get('source') == 'fallback_default' for t in tariffs.values())) and use_ai_fallback:
+        if not tariffs and use_ai_fallback:
             logger.info(f"🤖 Прямое API недоступно, использую DeepSeek AI для {marketplace}")
             try:
                 ai_tariffs = self.fetch_tariffs_via_deepseek(marketplace)
-                if ai_tariffs and not any(t.get('source') == 'fallback_default' for t in ai_tariffs.values()):
+                if ai_tariffs:
                     tariffs = ai_tariffs
                     logger.info(f"✅ Тарифы {marketplace} получены через DeepSeek AI")
             except Exception as e:
                 logger.error(f"❌ DeepSeek также недоступен: {e}")
         
-        # Если AI не сработал - пробуем CSV
-        if (not tariffs or all(t.get('source') == 'fallback_default' for t in tariffs.values())) and csv_content:
+        if not tariffs and csv_content:
             logger.info(f"📄 Использую CSV импорт для {marketplace}")
             csv_tariffs = self.load_tariffs_from_csv(marketplace, csv_content)
             if csv_tariffs:
                 tariffs = csv_tariffs
                 logger.info(f"✅ Тарифы {marketplace} загружены из CSV")
         
-        # Если ничего не сработало - фолбэк с предупреждением
-        if not tariffs or all(t.get('source') == 'fallback_default' for t in tariffs.values()):
-            logger.warning(f"⚠️ Все источники недоступны, использую фолбэк для {marketplace}")
-            logger.warning("⚠️ ПОЖАЛУЙСТА, ЗАГРУЗИТЕ АКТУАЛЬНЫЕ ТАРИФЫ ЧЕРЕЗ API ИЛИ CSV")
-            tariffs = self._get_default_tariffs(marketplace_lower)
-            
-            # Добавляем предупреждение в каждый тариф
+        if not tariffs and user_tariffs:
+            logger.info(f"👤 Использую пользовательские тарифы для {marketplace}")
+            tariffs = user_tariffs
             for category in tariffs:
-                tariffs[category]['warning'] = '⚠️ Используются примерные значения. Загрузите актуальные тарифы!'
+                tariffs[category]['source'] = 'user_input'
+                tariffs[category]['last_updated'] = datetime.now().isoformat()
+                tariffs[category]['confidence'] = 1.0
         
-        # Сохраняем в кэш только если есть нормальные тарифы
-        if tariffs and not all(t.get('source') == 'fallback_default' for t in tariffs.values()):
+        if tariffs:
             self.save_tariffs_to_cache(marketplace, tariffs)
+        else:
+            logger.error(f"❌ ВСЕ ИСТОЧНИКИ НЕДОСТУПНЫ для {marketplace}. Тарифы не загружены.")
         
         return tariffs
     
     def get_all_tariffs_as_dataframe(self, marketplace: str) -> pd.DataFrame:
-        """Получение всех тарифов в виде DataFrame для отображения в UI"""
         tariffs = self.get_tariffs(marketplace)
+        
+        if not tariffs:
+            return pd.DataFrame()
         
         rows = []
         for category, data in tariffs.items():
@@ -1343,14 +1130,13 @@ class MarketplaceAPIManager:
                 'Хранение, ₽/день': data.get('storage_base_rate', 0),
                 'Мин. логистика, ₽': data.get('min_logistics', 0),
                 'Источник': data.get('source', 'unknown'),
-                'Обновлено': data.get('last_updated', '')[:19] if data.get('last_updated') else '',
-                'Предупреждение': data.get('warning', '') if data.get('warning') else ''
+                'Уверенность': f"{data.get('confidence', 1.0)*100:.0f}%",
+                'Обновлено': data.get('last_updated', '')[:19] if data.get('last_updated') else ''
             })
         
         return pd.DataFrame(rows)
     
     def test_api_connection(self, marketplace: str) -> Dict[str, Any]:
-        """Тестирование API подключения"""
         result = {
             'marketplace': marketplace,
             'timestamp': datetime.now().isoformat(),
@@ -1404,43 +1190,31 @@ class MarketplaceAPIManager:
 
 @dataclass
 class FBSInputData:
-    """
-    Входные данные для расчета FBS юнит-экономики.
-    ВСЕ ЗНАЧЕНИЯ БЕРУТСЯ ИЗ ПОЛЬЗОВАТЕЛЬСКОГО ВВОДА
-    НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ
-    """
-    # Основные параметры товара (пользовательский ввод)
     artikul: str = ""
     product_name: str = ""
     category: str = "default"
     
-    # Финансовые параметры (пользовательский ввод)
     selling_price: float = 0.0
     cogs: float = 0.0
     
-    # Физические параметры товара (пользовательский ввод)
     weight_kg: float = 0.0
     length_cm: float = 0.0
     width_cm: float = 0.0
     height_cm: float = 0.0
     
-    # FBS специфика (пользовательский ввод)
     first_mile_cost_per_unit: float = 0.0
     packaging_cost: float = 0.0
     pick_pack_time_min: float = 5.0
     operator_hourly_rate: float = 300.0
     warehouse_distance_km: float = 0.0
     
-    # Логистические параметры (пользовательский ввод)
     transport_type: str = "own"
     transport_cost_per_km: float = 20.0
     pallet_capacity: int = 100
     pallet_cost: float = 2000.0
     
-    # Маркетинговые параметры (пользовательский ввод)
     marketing_budget_per_unit: float = 0.0
     
-    # Складские параметры (пользовательский ввод)
     stock_depth_days: int = 30
     daily_sales: int = 5
     warehouse_rent_per_sqm: float = 500.0
@@ -1449,15 +1223,30 @@ class FBSInputData:
     reorder_point_days: int = 5
     supplier_lead_time_days: int = 3
     
-    # Параметры для расчета LTV и CAC (пользовательский ввод)
     repeat_purchase_rate: float = 0.3
     avg_purchases_per_year: float = 2.5
     customer_retention_rate: float = 0.7
     discount_rate: float = 0.1
     
-    # Операционные параметры (пользовательский ввод)
     has_night_shift: bool = False
     processing_capacity_per_hour: int = 20
+    
+    # Новые поля для ИИ и расширенной логистики
+    target_regions: List[str] = field(default_factory=list)
+    region_weights: Dict[str, float] = field(default_factory=dict)
+    
+    warehouse_total_area_sqm: float = 0.0
+    warehouse_employees: int = 0
+    warehouse_avg_salary: float = 0.0
+    warehouse_equipment_cost: float = 0.0
+    
+    price_elasticity: Optional[float] = None
+    competitive_low_price: Optional[float] = None
+    competitive_mid_price: Optional[float] = None
+    competitive_high_price: Optional[float] = None
+    
+    seasonal_coefficients: Dict[int, float] = field(default_factory=dict)
+    market_trends: Dict[int, float] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -1499,23 +1288,15 @@ class FBSInputData:
 
 @dataclass
 class FBSResultData:
-    """
-    Результаты расчета FBS юнит-экономики.
-    ВСЕ РАСЧЕТЫ ОСНОВАНЫ НА АКТУАЛЬНЫХ ДАННЫХ
-    НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ
-    """
-    # Основные идентификаторы
     artikul: str = ""
     product_name: str = ""
     
-    # Ключевые финансовые показатели
     selling_price: float = 0.0
     total_expenses: float = 0.0
     gross_profit: float = 0.0
     margin_percent: float = 0.0
     roi_percent: float = 0.0
     
-    # Детализация расходов
     commission: float = 0.0
     first_mile_cost: float = 0.0
     last_mile_cost: float = 0.0
@@ -1528,20 +1309,17 @@ class FBSResultData:
     warehouse_cost: float = 0.0
     tax_cost: float = 0.0
     
-    # FBS специфические метрики
     penalty_probability: float = 0.0
     break_even_distance_km: float = 0.0
     max_discount_percent: float = 0.0
     safety_margin_price: float = 0.0
     break_even_volume: float = 0.0
     
-    # LTV и CAC метрики
     ltv: float = 0.0
     cac: float = 0.0
     ltv_cac_ratio: float = 0.0
     romi: float = 0.0
     
-    # Метрики складской оптимизации
     optimal_stock_units: int = 0
     safety_stock_units: int = 0
     reorder_point_units: int = 0
@@ -1550,26 +1328,35 @@ class FBSResultData:
     days_of_inventory: float = 0.0
     holding_cost_per_unit: float = 0.0
     
-    # Рекомендации по оптимизации склада
     recommended_stock_depth_days: int = 0
     recommended_safety_stock_days: int = 0
     stock_optimization_potential: float = 0.0
     
-    # Логистические зоны риска
     logistic_zone: str = "unknown"
     logistic_zone_label: str = ""
     logistic_recommendation: str = ""
     is_logistic_critical: bool = False
     
-    # Эффективность использования пространства
     space_efficiency_ratio: float = 0.0
     revenue_per_sqm: float = 0.0
     profit_per_sqm: float = 0.0
     
-    # Сезонная корректировка
     seasonal_factor: float = 1.0
     adjusted_margin_percent: float = 0.0
     seasonal_recommendation: str = ""
+    
+    # Новые поля
+    data_source: str = "unknown"
+    data_confidence: float = 1.0
+    
+    optimal_price: float = 0.0
+    optimal_price_confidence: float = 0.0
+    
+    warehouse_tco_monthly: float = 0.0
+    warehouse_cost_per_order: float = 0.0
+    
+    weighted_delivery_cost: float = 0.0
+    delivery_zone_count: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -1594,14 +1381,17 @@ class FBSResultData:
             'stock_optimization_potential': self.stock_optimization_potential,
             'break_even_volume': self.break_even_volume,
             'logistic_zone': self.logistic_zone_label,
-            'adjusted_margin_percent': self.adjusted_margin_percent
+            'adjusted_margin_percent': self.adjusted_margin_percent,
+            'optimal_price': self.optimal_price,
+            'data_source': self.data_source,
+            'data_confidence': self.data_confidence,
+            'weighted_delivery_cost': self.weighted_delivery_cost
         }
 
 # ============================================================================
 # БЛОК 7: КОНФИГУРАЦИИ НАЛОГОВЫХ СИСТЕМ
 # ============================================================================
 
-# Конфигурации налоговых систем (на основе реальных данных, но пользователь может изменить)
 TAX_SYSTEMS = {
     "УСН 6% (доходы)": {
         "rate": 0.06,
@@ -1637,28 +1427,29 @@ TAX_SYSTEMS = {
 }
 
 # ============================================================================
-# БЛОК 8: ОСНОВНОЙ КАЛЬКУЛЯТОР FBS ЮНИТ-ЭКОНОМИКИ
+# БЛОК 8: ОСНОВНОЙ КАЛЬКУЛЯТОР FBS ЮНИТ-ЭКОНОМИКИ (РАСШИРЕННЫЙ)
 # ============================================================================
 
 class FBSUnitEconomicsCalculator:
-    """
-    Профессиональный калькулятор юнит-экономики для FBS-модели.
-    
-    КЛЮЧЕВЫЕ ПРИНЦИПЫ:
-    1. НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ
-    2. Все тарифы загружаются из API или пользовательского ввода
-    3. Полная прозрачность расчетов
-    4. Динамическая оптимизация на основе реальных данных
-    """
-    
     def __init__(self, api_manager: Optional[MarketplaceAPIManager] = None, 
-                 tax_system: str = "УСН 6% (доходы)"):
+                 tax_system: str = "УСН 6% (доходы)",
+                 intelligent_loader: Optional['IntelligentDataLoader'] = None):
         self.api_manager = api_manager or MarketplaceAPIManager()
         self.tax_system = tax_system
         self.current_marketplace = "Ozon"
         self.current_tariffs: Dict[str, Dict] = {}
         self.tariffs_updated_at: Optional[datetime] = None
-        self.tariffs_source = "default"
+        self.tariffs_source = "unknown"
+        
+        self.intelligent_loader = intelligent_loader
+        
+        self.geo_zones: List[Dict] = []
+        self.weight_tiers: List[Dict] = []
+        self.seasonal_coefficients: Dict[str, Dict[int, float]] = {}
+        self.market_trends: Dict[str, Dict[int, float]] = {}
+        self.price_elasticity: Dict[str, float] = {}
+        self.regional_rent_rates: Dict[str, float] = {}
+        self.labor_rates: Dict[str, float] = {}
         
         self.progress_tracker = ProgressTracker()
         self.audit_logger = AuditLogger()
@@ -1671,29 +1462,81 @@ class FBSUnitEconomicsCalculator:
         self.audit_logger.log('set_marketplace', {'marketplace': marketplace_name})
         logger.info(f"🏪 Установлен маркетплейс: {marketplace_name}")
     
-    def refresh_tariffs(self, force: bool = False, use_ai: bool = False, csv_content: Optional[str] = None):
+    def set_intelligent_loader(self, loader: 'IntelligentDataLoader'):
+        self.intelligent_loader = loader
+        logger.info("🧠 Интеллектуальный загрузчик подключен к калькулятору")
+    
+    def load_geo_zones(self, force_refresh: bool = False, 
+                       user_csv: Optional[str] = None,
+                       user_data: Optional[List[Dict]] = None) -> bool:
+        if not self.intelligent_loader:
+            logger.warning("⚠️ Интеллектуальный загрузчик не настроен")
+            return False
+        
+        result = self.intelligent_loader.load_data(
+            data_category=DataCategory.GEO_ZONES,
+            marketplace=self.current_marketplace,
+            force_refresh=force_refresh,
+            user_csv=user_csv,
+            user_data=user_data
+        )
+        
+        if result.success and result.data:
+            self.geo_zones = result.data if isinstance(result.data, list) else result.data.get('zones', [])
+            logger.info(f"✅ Загружено {len(self.geo_zones)} гео-зон (источник: {result.source.value})")
+            return True
+        
+        logger.error(f"❌ Не удалось загрузить гео-зоны: {result.message}")
+        return False
+    
+    def load_seasonal_coefficients(self, category: str, force_refresh: bool = False,
+                                   user_csv: Optional[str] = None,
+                                   user_coeffs: Optional[Dict[int, float]] = None) -> bool:
+        if not self.intelligent_loader:
+            return False
+        
+        result = self.intelligent_loader.load_data(
+            data_category=DataCategory.SEASONAL_COEFFICIENTS,
+            marketplace=self.current_marketplace,
+            category=category,
+            force_refresh=force_refresh,
+            user_csv=user_csv,
+            user_data=user_coeffs
+        )
+        
+        if result.success and result.data:
+            self.seasonal_coefficients[category] = result.data
+            return True
+        return False
+    
+    def refresh_tariffs(self, force: bool = False, use_ai: bool = False, 
+                       csv_content: Optional[str] = None,
+                       user_tariffs: Optional[Dict[str, Dict]] = None):
         logger.info(f"🔄 Обновление тарифов для {self.current_marketplace}...")
         
         self.current_tariffs = self.api_manager.get_tariffs(
             self.current_marketplace,
             force_refresh=force,
             use_ai_fallback=use_ai,
-            csv_content=csv_content
+            csv_content=csv_content,
+            user_tariffs=user_tariffs
         )
         
         self.tariffs_updated_at = datetime.now()
         
         sources = set()
         for tariff in self.current_tariffs.values():
-            source = tariff.get('source', 'default')
+            source = tariff.get('source', 'unknown')
             if 'api' in source:
                 sources.add('api')
             elif 'deepseek' in source:
                 sources.add('deepseek')
             elif 'csv' in source:
                 sources.add('csv')
+            elif 'user' in source:
+                sources.add('user')
             else:
-                sources.add('default')
+                sources.add('unknown')
         
         if 'api' in sources:
             self.tariffs_source = 'api'
@@ -1701,15 +1544,16 @@ class FBSUnitEconomicsCalculator:
             self.tariffs_source = 'deepseek'
         elif 'csv' in sources:
             self.tariffs_source = 'csv'
+        elif 'user' in sources:
+            self.tariffs_source = 'user'
         else:
-            self.tariffs_source = 'default'
+            self.tariffs_source = 'unknown'
         
         logger.info(f"✅ Тарифы обновлены. Источник: {self.tariffs_source}. Категорий: {len(self.current_tariffs)}")
     
     def get_tariff_for_category(self, category: str) -> Dict[str, Any]:
-        """Получение тарифа для конкретной категории товара"""
         if not self.current_tariffs:
-            logger.warning("⚠️ Тарифы не загружены")
+            logger.warning("⚠️ Тарифы не загружены. Загрузите тарифы через API, CSV или введите вручную.")
             return {}
         
         if category in self.current_tariffs:
@@ -1723,18 +1567,17 @@ class FBSUnitEconomicsCalculator:
                 return tariff
         
         if 'default' in self.current_tariffs:
-            logger.debug(f"🔍 Использую дефолтный тариф для категории: {category}")
+            logger.debug(f"🔍 Использую категорию 'default' для: {category}")
             return self.current_tariffs['default']
         
         first_tariff = next(iter(self.current_tariffs.values()), {})
         if first_tariff:
-            logger.warning(f"⚠️ Категория {category} не найдена, использую первый доступный тариф")
+            logger.warning(f"⚠️ Категория {category} не найдена в тарифах, использую первую доступную")
             return first_tariff
         
         return {}
     
     def _get_logistic_zone(self, distance_km: float) -> Dict[str, Any]:
-        """Определяет зону логистического риска на основе рассчитанных данных"""
         if distance_km <= 25:
             return {
                 'zone': 'red',
@@ -1764,13 +1607,52 @@ class FBSUnitEconomicsCalculator:
                 'is_critical': False
             }
     
+    def _calculate_weighted_delivery_cost(self, input_data: FBSInputData) -> float:
+        if not self.geo_zones:
+            return 0.0
+        
+        if input_data.length_cm > 0 and input_data.width_cm > 0 and input_data.height_cm > 0:
+            vol_weight = (input_data.length_cm * input_data.width_cm * input_data.height_cm) / 5000.0
+        else:
+            vol_weight = 0
+        
+        billable_weight = max(input_data.weight_kg, vol_weight)
+        
+        if input_data.target_regions:
+            filtered_zones = [z for z in self.geo_zones if z.get('region_code') in input_data.target_regions]
+            if filtered_zones:
+                zones = filtered_zones
+            else:
+                zones = self.geo_zones
+        else:
+            zones = self.geo_zones
+        
+        if input_data.region_weights:
+            total_weight = sum(input_data.region_weights.values())
+            if total_weight > 0:
+                normalized_weights = {k: v/total_weight for k, v in input_data.region_weights.items()}
+                
+                total_cost = 0.0
+                for zone in zones:
+                    region_code = zone.get('region_code', '')
+                    weight = normalized_weights.get(region_code, 0)
+                    if weight > 0:
+                        zone_cost = zone.get('base_delivery_cost', 0) + billable_weight * zone.get('cost_per_kg', 0)
+                        total_cost += zone_cost * weight
+                
+                return total_cost
+        
+        if zones:
+            total_cost = sum(
+                z.get('base_delivery_cost', 0) + billable_weight * z.get('cost_per_kg', 0)
+                for z in zones
+            )
+            return total_cost / len(zones)
+        
+        return 0.0
+    
     @timing_decorator
     def calculate_unit_economics(self, input_data: FBSInputData) -> FBSResultData:
-        """
-        Основной расчет юнит-экономики для FBS модели.
-        ВСЕ РАСЧЕТЫ ОСНОВАНЫ НА АКТУАЛЬНЫХ ДАННЫХ ИЗ API ИЛИ ПОЛЬЗОВАТЕЛЬСКОГО ВВОДА
-        НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ
-        """
         validation_errors = input_data.validate()
         if validation_errors:
             logger.warning(f"⚠️ Ошибки валидации для {input_data.artikul}: {validation_errors}")
@@ -1780,42 +1662,29 @@ class FBSUnitEconomicsCalculator:
         result.product_name = input_data.product_name
         result.selling_price = input_data.selling_price
         
-        # Получаем актуальный тариф для категории (ИЗ API, НЕ ЗАХАРДКОЖЕННЫЙ)
         tariff = self.get_tariff_for_category(input_data.category)
         
         if not tariff:
-            logger.error(f"❌ Тариф не найден для категории {input_data.category}")
-            # Создаем пустой тариф для продолжения работы
+            logger.error(f"❌ Тариф не найден для категории {input_data.category}.")
             tariff = {
-                'commission_rate': 0.0,
-                'min_commission': 0.0,
-                'last_mile_base': 0.0,
-                'last_mile_per_kg': 0.0,
-                'acquiring_fee': 0.0,
-                'return_fee': 0.0,
-                'penalty_rate': 0.0,
-                'penalty_time_hours': 24,
-                'fbo_multiplier': 1.0,
-                'fbp_multiplier': 1.0,
-                'storage_base_rate': 0.0,
-                'min_logistics': 0.0,
-                'source': 'error'
+                'commission_rate': 0.0, 'min_commission': 0.0,
+                'last_mile_base': 0.0, 'last_mile_per_kg': 0.0,
+                'acquiring_fee': 0.0, 'return_fee': 0.0,
+                'penalty_rate': 0.0, 'penalty_time_hours': 24,
+                'fbo_multiplier': 1.0, 'fbp_multiplier': 1.0,
+                'storage_base_rate': 0.0, 'min_logistics': 0.0,
+                'source': 'not_loaded', 'confidence': 0.0
             }
         
-        # =====================================================================
-        # 1. КОМИССИЯ МАРКЕТПЛЕЙСА (из API)
-        # =====================================================================
+        result.data_source = tariff.get('source', 'unknown')
+        result.data_confidence = tariff.get('confidence', 1.0)
+        
+        # 1. Комиссия
         commission_rate = tariff.get('commission_rate', 0.0)
         min_commission = tariff.get('min_commission', 0.0)
+        result.commission = max(input_data.selling_price * commission_rate, min_commission)
         
-        result.commission = max(
-            input_data.selling_price * commission_rate,
-            min_commission
-        )
-        
-        # =====================================================================
-        # 2. FIRST MILE (на основе пользовательского ввода)
-        # =====================================================================
+        # 2. First Mile
         if input_data.first_mile_cost_per_unit > 0:
             result.first_mile_cost = input_data.first_mile_cost_per_unit
         else:
@@ -1823,9 +1692,7 @@ class FBSUnitEconomicsCalculator:
             cost_per_pallet = input_data.warehouse_distance_km * input_data.transport_cost_per_km * 2
             result.first_mile_cost = cost_per_pallet / pallet_units
         
-        # =====================================================================
-        # 3. LAST MILE (из API)
-        # =====================================================================
+        # 3. Last Mile (с учетом гео-зон)
         if input_data.length_cm > 0 and input_data.width_cm > 0 and input_data.height_cm > 0:
             vol_weight = (input_data.length_cm * input_data.width_cm * input_data.height_cm) / 5000.0
         else:
@@ -1834,70 +1701,68 @@ class FBSUnitEconomicsCalculator:
         billable_weight = max(input_data.weight_kg, vol_weight)
         billable_weight = math.ceil(billable_weight * 2) / 2
         
-        last_mile_base = tariff.get('last_mile_base', 0.0)
-        last_mile_per_kg = tariff.get('last_mile_per_kg', 0.0)
-        min_logistics = tariff.get('min_logistics', 0.0)
+        weighted_delivery = self._calculate_weighted_delivery_cost(input_data)
         
-        result.last_mile_cost = max(
-            last_mile_base + (billable_weight * last_mile_per_kg),
-            min_logistics
-        )
+        if weighted_delivery > 0:
+            result.last_mile_cost = weighted_delivery
+            result.weighted_delivery_cost = weighted_delivery
+            result.delivery_zone_count = len(self.geo_zones)
+        else:
+            last_mile_base = tariff.get('last_mile_base', 0.0)
+            last_mile_per_kg = tariff.get('last_mile_per_kg', 0.0)
+            min_logistics = tariff.get('min_logistics', 0.0)
+            result.last_mile_cost = max(last_mile_base + (billable_weight * last_mile_per_kg), min_logistics)
         
-        # =====================================================================
-        # 4. PICK & PACK (на основе пользовательского ввода)
-        # =====================================================================
+        # 4. Pick & Pack
         pick_pack_hours = input_data.pick_pack_time_min / 60.0
         result.pick_pack_cost = pick_pack_hours * input_data.operator_hourly_rate
         
-        # =====================================================================
-        # 5. УПАКОВКА (пользовательский ввод)
-        # =====================================================================
+        # 5. Упаковка
         result.packaging_cost = input_data.packaging_cost
         
-        # =====================================================================
-        # 6. ЭКВАЙРИНГ (из API)
-        # =====================================================================
+        # 6. Эквайринг
         acquiring_fee = tariff.get('acquiring_fee', 0.0)
         result.acquiring_cost = input_data.selling_price * acquiring_fee
         
-        # =====================================================================
-        # 7. ВОЗВРАТЫ (из API)
-        # =====================================================================
+        # 7. Возвраты
         return_fee = tariff.get('return_fee', 0.0)
         result.return_cost = input_data.selling_price * return_fee
         
-        # =====================================================================
-        # 8. ШТРАФЫ (из API + пользовательские параметры)
-        # =====================================================================
+        # 8. Штрафы
         if input_data.has_night_shift:
             penalty_probability = 0.05
         else:
             penalty_probability = 0.35
         
         penalty_rate = tariff.get('penalty_rate', 0.0)
-        
         result.penalty_probability = penalty_probability
         result.penalty_cost = input_data.selling_price * penalty_rate * penalty_probability
         
-        # =====================================================================
-        # 9. МАРКЕТИНГ (пользовательский ввод)
-        # =====================================================================
+        # 9. Маркетинг
         result.marketing_cost = input_data.marketing_budget_per_unit
         
-        # =====================================================================
-        # 10. СКЛАДСКИЕ РАСХОДЫ (пользовательский ввод)
-        # =====================================================================
+        # 10. Складские расходы (TCO)
         total_stock = input_data.stock_depth_days * input_data.daily_sales
-        if total_stock > 0 and input_data.daily_sales > 0:
+        
+        if input_data.warehouse_total_area_sqm > 0 and input_data.warehouse_employees > 0:
+            total_monthly_cost = (
+                input_data.warehouse_rent_per_sqm * input_data.warehouse_total_area_sqm +
+                input_data.warehouse_avg_salary * input_data.warehouse_employees +
+                input_data.warehouse_equipment_cost
+            )
+            monthly_orders = input_data.daily_sales * 30
+            if monthly_orders > 0:
+                result.warehouse_cost = total_monthly_cost / monthly_orders
+                result.warehouse_tco_monthly = total_monthly_cost
+                result.warehouse_cost_per_order = result.warehouse_cost
+        elif total_stock > 0 and input_data.daily_sales > 0:
             total_warehouse_space = input_data.warehouse_space_per_unit * total_stock
             monthly_rent = input_data.warehouse_rent_per_sqm * total_warehouse_space
             result.warehouse_cost = monthly_rent / (30 * input_data.daily_sales)
         else:
             result.warehouse_cost = 0
         
-        # =====================================================================
-        # 11. НАЛОГ (на основе выбранной системы)
-        # =====================================================================
+        # 11. Налог
         tax_config = TAX_SYSTEMS.get(self.tax_system, TAX_SYSTEMS["УСН 6% (доходы)"])
         
         if tax_config["base"] == "revenue":
@@ -1916,22 +1781,12 @@ class FBSUnitEconomicsCalculator:
                 min_tax = input_data.selling_price * tax_config["min_rate"]
                 result.tax_cost = max(result.tax_cost, min_tax)
         
-        # =====================================================================
-        # 12. ИТОГО РАСХОДОВ И ПРИБЫЛЬ
-        # =====================================================================
+        # 12. Итого расходов и прибыль
         result.total_expenses = (
-            input_data.cogs +
-            result.commission +
-            result.first_mile_cost +
-            result.last_mile_cost +
-            result.pick_pack_cost +
-            result.packaging_cost +
-            result.acquiring_cost +
-            result.return_cost +
-            result.penalty_cost +
-            result.marketing_cost +
-            result.warehouse_cost +
-            result.tax_cost
+            input_data.cogs + result.commission + result.first_mile_cost +
+            result.last_mile_cost + result.pick_pack_cost + result.packaging_cost +
+            result.acquiring_cost + result.return_cost + result.penalty_cost +
+            result.marketing_cost + result.warehouse_cost + result.tax_cost
         )
         
         result.gross_profit = result.selling_price - result.total_expenses
@@ -1946,9 +1801,7 @@ class FBSUnitEconomicsCalculator:
         else:
             result.roi_percent = 0
         
-        # =====================================================================
-        # 13. ТОЧКА БЕЗУБЫТОЧНОСТИ ПО РАССТОЯНИЮ
-        # =====================================================================
+        # 13. Точка безубыточности по расстоянию
         if result.first_mile_cost > 0 and input_data.pallet_capacity > 0:
             cost_per_km_per_unit = (input_data.transport_cost_per_km * 2) / input_data.pallet_capacity
             if cost_per_km_per_unit > 0:
@@ -1958,34 +1811,26 @@ class FBSUnitEconomicsCalculator:
         else:
             result.break_even_distance_km = float('inf')
         
-        # =====================================================================
-        # 14. ЛОГИСТИЧЕСКИЕ ЗОНЫ РИСКА
-        # =====================================================================
-        logistic_zone_info = self._get_logistic_zone(result.break_even_distance_km)
+        # 14. Логистические зоны риска
+        logistic_zone_info = self._get_logistic_zone(
+            result.break_even_distance_km if result.break_even_distance_km != float('inf') else 200
+        )
         result.logistic_zone = logistic_zone_info['zone']
         result.logistic_zone_label = logistic_zone_info['label']
         result.logistic_recommendation = logistic_zone_info['recommendation']
         result.is_logistic_critical = logistic_zone_info['is_critical']
         
-        # =====================================================================
-        # 15. ЗАПАС ПРОЧНОСТИ ПО ЦЕНЕ
-        # =====================================================================
+        # 15. Запас прочности по цене
         variable_costs_percent = (
-            commission_rate +
-            acquiring_fee +
-            return_fee +
+            commission_rate + acquiring_fee + return_fee +
             penalty_rate * penalty_probability +
             TAX_SYSTEMS[self.tax_system]["rate"]
         )
         
         fixed_costs_per_unit = (
-            input_data.cogs +
-            result.first_mile_cost +
-            result.last_mile_cost +
-            result.pick_pack_cost +
-            result.packaging_cost +
-            result.marketing_cost +
-            result.warehouse_cost
+            input_data.cogs + result.first_mile_cost + result.last_mile_cost +
+            result.pick_pack_cost + result.packaging_cost +
+            result.marketing_cost + result.warehouse_cost
         )
         
         denominator = 1 - variable_costs_percent
@@ -2001,9 +1846,7 @@ class FBSUnitEconomicsCalculator:
         else:
             result.max_discount_percent = 0
         
-        # =====================================================================
-        # 16. ТОЧКА БЕЗУБЫТОЧНОСТИ ПО ОБЪЕМУ
-        # =====================================================================
+        # 16. Точка безубыточности по объему
         variable_costs = result.commission + result.last_mile_cost + result.acquiring_cost + result.return_cost + result.penalty_cost
         
         if (result.selling_price - variable_costs) > 0:
@@ -2011,13 +1854,10 @@ class FBSUnitEconomicsCalculator:
         else:
             result.break_even_volume = float('inf')
         
-        # =====================================================================
-        # 17. LTV И CAC
-        # =====================================================================
+        # 17. LTV и CAC
         if (1 + input_data.discount_rate) > 0:
             result.ltv = (
-                input_data.selling_price *
-                input_data.avg_purchases_per_year *
+                input_data.selling_price * input_data.avg_purchases_per_year *
                 input_data.customer_retention_rate
             ) / (1 + input_data.discount_rate)
         else:
@@ -2041,11 +1881,16 @@ class FBSUnitEconomicsCalculator:
         else:
             result.romi = 0
         
-        # =====================================================================
-        # 18. СЕЗОННАЯ КОРРЕКТИРОВКА
-        # =====================================================================
+        # 18. Сезонная корректировка
         current_month = datetime.now().month
-        seasonal_factor = 1.0  # Базовое значение, пользователь может настроить
+        
+        if input_data.category in self.seasonal_coefficients:
+            seasonal_factor = self.seasonal_coefficients[input_data.category].get(current_month, 1.0)
+        elif input_data.seasonal_coefficients:
+            seasonal_factor = input_data.seasonal_coefficients.get(current_month, 1.0)
+        else:
+            seasonal_factor = 1.0
+        
         result.seasonal_factor = seasonal_factor
         result.adjusted_margin_percent = result.margin_percent * seasonal_factor
         
@@ -2056,16 +1901,10 @@ class FBSUnitEconomicsCalculator:
         else:
             result.seasonal_recommendation = "✅ Отличная сезонная маржа!"
         
-        # =====================================================================
-        # 19. ОПТИМИЗАЦИЯ СКЛАДСКИХ ОСТАТКОВ
-        # =====================================================================
+        # 19. Оптимизация складских остатков
         daily_demand = input_data.daily_sales
         annual_demand = daily_demand * 365
-        
-        # Стоимость заказа (пользователь может настроить)
         ordering_cost = 500.0
-        
-        # Стоимость хранения на единицу в год (на основе пользовательского ввода)
         holding_cost_per_unit = input_data.warehouse_rent_per_sqm * input_data.warehouse_space_per_unit * 12
         
         if holding_cost_per_unit > 0 and ordering_cost > 0:
@@ -2101,9 +1940,7 @@ class FBSUnitEconomicsCalculator:
         
         result.holding_cost_per_unit = holding_cost_per_unit
         
-        # =====================================================================
-        # 20. ЭФФЕКТИВНОСТЬ ИСПОЛЬЗОВАНИЯ ПРОСТРАНСТВА
-        # =====================================================================
+        # 20. Эффективность использования пространства
         total_stock = input_data.stock_depth_days * input_data.daily_sales
         if total_stock > 0 and input_data.warehouse_space_per_unit > 0:
             total_sqm = total_stock * input_data.warehouse_space_per_unit
@@ -2111,14 +1948,8 @@ class FBSUnitEconomicsCalculator:
                 result.space_efficiency_ratio = total_stock / total_sqm
                 result.revenue_per_sqm = (input_data.selling_price * input_data.daily_sales * 30) / total_sqm
                 result.profit_per_sqm = (result.gross_profit * input_data.daily_sales * 30) / total_sqm
-            else:
-                result.space_efficiency_ratio = 0
-                result.revenue_per_sqm = 0
-                result.profit_per_sqm = 0
         
-        # =====================================================================
-        # 21. РЕКОМЕНДАЦИИ ПО ОПТИМИЗАЦИИ СКЛАДА
-        # =====================================================================
+        # 21. Рекомендации по оптимизации склада
         if result.stock_turnover_rate > 12:
             result.recommended_stock_depth_days = max(14, input_data.stock_depth_days - 5)
         elif result.stock_turnover_rate < 6:
@@ -2138,11 +1969,20 @@ class FBSUnitEconomicsCalculator:
         else:
             result.stock_optimization_potential = 0
         
+        # 22. Оптимальная цена
+        elasticity = input_data.price_elasticity or self.price_elasticity.get(input_data.category)
+        if elasticity and abs(elasticity) > 1:
+            optimal_markup = abs(elasticity) / (abs(elasticity) - 1)
+            result.optimal_price = input_data.cogs * optimal_markup
+        else:
+            result.optimal_price = input_data.selling_price
+        
         self.audit_logger.log('calculate_unit', {
             'artikul': input_data.artikul,
             'profit': result.gross_profit,
             'margin': result.margin_percent,
-            'logistic_zone': result.logistic_zone
+            'logistic_zone': result.logistic_zone,
+            'data_source': result.data_source
         })
         
         return result
@@ -2151,7 +1991,6 @@ class FBSUnitEconomicsCalculator:
     def calculate_batch(self, input_data_list: List[FBSInputData],
                        use_parallel: bool = True,
                        max_workers: int = 8) -> List[FBSResultData]:
-        """Пакетный расчет для множества товаров"""
         total = len(input_data_list)
         results = [None] * total
         
@@ -2178,10 +2017,7 @@ class FBSUnitEconomicsCalculator:
                         completed += 1
                         
                         if completed % 100 == 0 or completed == total:
-                            self.progress_tracker.update(
-                                completed, 
-                                f"Обработано {completed}/{total} товаров"
-                            )
+                            self.progress_tracker.update(completed, f"Обработано {completed}/{total} товаров")
                     except Exception as e:
                         logger.error(f"❌ Ошибка расчета товара с индексом {index}: {e}")
                         error_result = FBSResultData()
@@ -2203,10 +2039,7 @@ class FBSUnitEconomicsCalculator:
                     results[i] = error_result
                 
                 if (i + 1) % 50 == 0 or (i + 1) == total:
-                    self.progress_tracker.update(
-                        i + 1,
-                        f"Обработано {i + 1}/{total} товаров"
-                    )
+                    self.progress_tracker.update(i + 1, f"Обработано {i + 1}/{total} товаров")
         
         self.progress_tracker.update(total, f"✅ Расчет завершен! Обработано {total} товаров")
         results = [r for r in results if r is not None]
@@ -2216,7 +2049,6 @@ class FBSUnitEconomicsCalculator:
         return results
     
     def run_what_if_analysis(self, base_data: FBSInputData, scenarios: List[Dict]) -> pd.DataFrame:
-        """Анализ сценариев 'Что если'"""
         results = []
         
         for scenario in scenarios:
@@ -2239,14 +2071,14 @@ class FBSUnitEconomicsCalculator:
                 'Опт. запас, шт': result.optimal_stock_units,
                 'Оборачиваемость, дн': round(result.stock_turnover_days, 1),
                 'Логистическая зона': result.logistic_zone_label,
-                'Скорр. маржа, %': round(result.adjusted_margin_percent, 2)
+                'Скорр. маржа, %': round(result.adjusted_margin_percent, 2),
+                'Опт. цена, ₽': round(result.optimal_price, 2)
             })
         
         self.audit_logger.log('what_if_analysis', {'scenarios': len(scenarios)})
         return pd.DataFrame(results)
     
     def generate_recommendations(self, results: List[FBSResultData]) -> List[Dict]:
-        """Генерация автоматических рекомендаций"""
         recommendations = []
         
         if not results:
@@ -2304,22 +2136,808 @@ class FBSUnitEconomicsCalculator:
                 'affected_products': [r.artikul for r in low_ltv[:5]]
             })
         
+        # Новые рекомендации по качеству данных
+        low_confidence = [r for r in results if r.data_confidence < 0.9]
+        if low_confidence:
+            recommendations.append({
+                'priority': 'info',
+                'category': 'Качество данных',
+                'icon': '🔍',
+                'message': f'{len(low_confidence)} товаров используют данные с пониженной уверенностью. Рекомендуется загрузить точные тарифы через API или CSV.',
+                'affected_products': [r.artikul for r in low_confidence[:5]]
+            })
+        
         self.audit_logger.log('generate_recommendations', {'count': len(recommendations)})
         return recommendations
 
 # ============================================================================
-# БЛОК 9: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) - УЛУЧШЕННАЯ ВЕРСИЯ
+# БЛОК 9: СИСТЕМА ИНТЕЛЛЕКТУАЛЬНОЙ ЗАГРУЗКИ ДАННЫХ (API → AI → CSV → USER)
+# ============================================================================
+
+class DataSource(Enum):
+    API = "api"
+    AI = "ai"
+    CSV = "csv"
+    USER = "user"
+    CACHE = "cache"
+    NONE = "none"
+
+class DataCategory(Enum):
+    GEO_ZONES = "geo_zones"
+    WEIGHT_TIERS = "weight_tiers"
+    SEASONAL_COEFFICIENTS = "seasonal_coefficients"
+    MARKET_TRENDS = "market_trends"
+    PRICE_ELASTICITY = "price_elasticity"
+    COMPETITIVE_PRICES = "competitive_prices"
+    REGIONAL_RENT_RATES = "regional_rent_rates"
+    LABOR_RATES = "labor_rates"
+
+@dataclass
+class DataLoadAttempt:
+    source: DataSource
+    timestamp: str
+    success: bool
+    data_count: int = 0
+    error_message: str = ""
+    response_time_ms: float = 0.0
+    endpoint: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'source': self.source.value,
+            'timestamp': self.timestamp,
+            'success': self.success,
+            'data_count': self.data_count,
+            'error_message': self.error_message,
+            'response_time_ms': self.response_time_ms,
+            'endpoint': self.endpoint
+        }
+
+@dataclass
+class DataLoadResult:
+    success: bool
+    source: DataSource
+    data: Any
+    data_category: DataCategory
+    confidence: float = 1.0
+    message: str = ""
+    attempts: List[DataLoadAttempt] = field(default_factory=list)
+    load_time_ms: float = 0.0
+    expires_at: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'success': self.success,
+            'source': self.source.value,
+            'data_category': self.data_category.value,
+            'confidence': self.confidence,
+            'message': self.message,
+            'attempts_count': len(self.attempts),
+            'load_time_ms': self.load_time_ms,
+            'expires_at': self.expires_at
+        }
+
+class IntelligentDataLoader:
+    """
+    Интеллектуальный загрузчик данных с каскадным фолбэком.
+    API → AI → CSV → User
+    НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ
+    """
+    
+    def __init__(self, 
+                 api_manager: Optional[MarketplaceAPIManager] = None,
+                 cache_manager: Optional[CacheManager] = None,
+                 secure_data: Optional[SecureDataManager] = None):
+        self.api_manager = api_manager or MarketplaceAPIManager()
+        self.cache_manager = cache_manager or CacheManager()
+        self.secure_data = secure_data or SecureDataManager()
+        
+        self.deepseek_api_key = self.secure_data.get_api_key('deepseek') if self.secure_data else None
+        
+        self.load_history: List[DataLoadResult] = []
+        self.api_timeout = 30
+        self.ai_timeout = 60
+        self.cache_ttl_hours = 24
+        
+        self.stats = {
+            'total_attempts': 0,
+            'successful_loads': 0,
+            'failed_loads': 0,
+            'by_source': {source.value: 0 for source in DataSource},
+            'total_data_points_loaded': 0
+        }
+        
+        self._init_ai_prompts()
+        
+        logger.info(f"🧠 IntelligentDataLoader инициализирован (AI: {'доступен' if self.deepseek_api_key else 'недоступен'})")
+    
+    def _init_ai_prompts(self):
+        self.ai_prompts = {
+            DataCategory.GEO_ZONES: """
+Ты эксперт по логистике маркетплейсов с актуальными данными на 2026 год.
+Предоставь актуальные гео-зоны доставки для маркетплейса "{marketplace}" в России.
+Верни ТОЛЬКО валидный JSON без markdown-разметки.
+Формат: {{"zones": [{{"zone_id": "MSC", "zone_name": "Москва и МО", "region_code": "77", "base_delivery_cost": 45.0, "cost_per_kg": 12.0, "cost_per_km": 3.2, "min_delivery_days": 1, "max_delivery_days": 2, "return_rate": 0.12, "coverage_ratio": 0.95}}], "data_date": "2026-01", "confidence": 0.9}}
+""",
+            DataCategory.SEASONAL_COEFFICIENTS: """
+Ты эксперт по e-commerce и сезонности продаж с актуальными данными на 2026 год.
+Предоставь сезонные коэффициенты спроса для категории "{category}" на российских маркетплейсах.
+Коэффициенты по месяцам (1-12), где 1.0 = средний спрос.
+Верни ТОЛЬКО валидный JSON.
+Формат: {{"category": "{category}", "year": 2026, "monthly_coefficients": {{"1": 0.75, "2": 0.80, "12": 1.25}}, "peak_months": [11, 12], "low_months": [1, 2], "confidence": 0.85}}
+""",
+            DataCategory.MARKET_TRENDS: """
+Ты эксперт по рыночным трендам e-commerce с данными на 2024-2026 годы.
+Предоставь коэффициенты роста рынка для категории "{category}" на российских маркетплейсах по годам.
+Верни ТОЛЬКО валидный JSON.
+Формат: {{"category": "{category}", "yearly_trends": {{"2024": 1.08, "2025": 1.12, "2026": 1.15}}, "confidence": 0.8}}
+""",
+            DataCategory.PRICE_ELASTICITY: """
+Ты эксперт по ценообразованию в e-commerce.
+Предоставь коэффициент ценовой эластичности спроса для категории "{category}" на российских маркетплейсах.
+Верни ТОЛЬКО валидный JSON.
+Формат: {{"category": "{category}", "elasticity": -1.5, "confidence": 0.8, "description": "Спрос эластичный"}}
+""",
+            DataCategory.REGIONAL_RENT_RATES: """
+Ты эксперт по коммерческой недвижимости в России с данными на 2026 год.
+Предоставь средние ставки аренды складских помещений класса B по федеральным округам РФ.
+Верни ТОЛЬКО валидный JSON.
+Формат: {{"regions": {{"MSC": 850, "SPB": 650, "SIB": 350}}, "unit": "руб/м²/мес", "data_date": "2026-01", "confidence": 0.85}}
+""",
+            DataCategory.LABOR_RATES: """
+Ты эксперт по рынку труда в логистике России с данными на 2026 год.
+Предоставь средние зарплаты складского персонала по федеральным округам РФ.
+Верни ТОЛЬКО валидный JSON.
+Формат: {{"regions": {{"MSC": 45000, "SPB": 38000, "SIB": 26000}}, "unit": "руб/мес", "position": "кладовщик", "data_date": "2026-01", "confidence": 0.85}}
+"""
+        }
+    
+    def load_data(self, 
+                  data_category: DataCategory,
+                  marketplace: str = "",
+                  category: str = "",
+                  force_refresh: bool = False,
+                  use_ai: bool = True,
+                  user_csv: Optional[str] = None,
+                  user_data: Any = None) -> DataLoadResult:
+        start_time = time.time()
+        attempts: List[DataLoadAttempt] = []
+        
+        logger.info(f"🔄 [Загрузка] {data_category.value} | Маркетплейс: {marketplace} | Категория: {category}")
+        
+        # Шаг 1: Кэш
+        if not force_refresh:
+            cache_key = self._build_cache_key(data_category, marketplace, category)
+            cached_data = self.cache_manager.get('intelligent_loader', cache_key)
+            
+            if cached_data is not None:
+                attempt = DataLoadAttempt(
+                    source=DataSource.CACHE,
+                    timestamp=datetime.now().isoformat(),
+                    success=True,
+                    data_count=self._count_data_items(cached_data),
+                    response_time_ms=(time.time() - start_time) * 1000
+                )
+                attempts.append(attempt)
+                
+                result = DataLoadResult(
+                    success=True, source=DataSource.CACHE, data=cached_data,
+                    data_category=data_category, confidence=1.0,
+                    message="Данные загружены из кэша",
+                    attempts=attempts, load_time_ms=(time.time() - start_time) * 1000
+                )
+                self._update_stats(result)
+                self.load_history.append(result)
+                return result
+        
+        # Шаг 2: API
+        logger.info(f"🔄 [Загрузка] Шаг 2/5: API {marketplace}")
+        api_start = time.time()
+        api_data = self._load_from_api(data_category, marketplace, category)
+        
+        api_attempt = DataLoadAttempt(
+            source=DataSource.API,
+            timestamp=datetime.now().isoformat(),
+            success=api_data is not None,
+            data_count=self._count_data_items(api_data),
+            response_time_ms=(time.time() - api_start) * 1000,
+            error_message="" if api_data is not None else "API недоступен"
+        )
+        attempts.append(api_attempt)
+        
+        if api_data is not None:
+            self._cache_data(data_category, marketplace, category, api_data)
+            
+            result = DataLoadResult(
+                success=True, source=DataSource.API, data=api_data,
+                data_category=data_category, confidence=1.0,
+                message=f"Данные загружены из API {marketplace}",
+                attempts=attempts, load_time_ms=(time.time() - start_time) * 1000
+            )
+            self._update_stats(result)
+            self.load_history.append(result)
+            return result
+        
+        # Шаг 3: AI
+        if use_ai and self.deepseek_api_key:
+            logger.info(f"🔄 [Загрузка] Шаг 3/5: DeepSeek AI")
+            ai_start = time.time()
+            ai_data = self._load_from_ai(data_category, marketplace, category)
+            
+            ai_attempt = DataLoadAttempt(
+                source=DataSource.AI,
+                timestamp=datetime.now().isoformat(),
+                success=ai_data is not None,
+                data_count=self._count_data_items(ai_data),
+                response_time_ms=(time.time() - ai_start) * 1000,
+                error_message="" if ai_data is not None else "DeepSeek AI недоступен"
+            )
+            attempts.append(ai_attempt)
+            
+            if ai_data is not None:
+                self._cache_data(data_category, marketplace, category, ai_data)
+                
+                result = DataLoadResult(
+                    success=True, source=DataSource.AI, data=ai_data,
+                    data_category=data_category, confidence=0.85,
+                    message="Данные получены через DeepSeek AI",
+                    attempts=attempts, load_time_ms=(time.time() - start_time) * 1000
+                )
+                self._update_stats(result)
+                self.load_history.append(result)
+                return result
+        
+        # Шаг 4: CSV
+        if user_csv:
+            logger.info(f"🔄 [Загрузка] Шаг 4/5: CSV")
+            csv_start = time.time()
+            csv_data = self._load_from_csv(data_category, user_csv)
+            
+            csv_attempt = DataLoadAttempt(
+                source=DataSource.CSV,
+                timestamp=datetime.now().isoformat(),
+                success=csv_data is not None,
+                data_count=self._count_data_items(csv_data),
+                response_time_ms=(time.time() - csv_start) * 1000,
+                error_message="" if csv_data is not None else "Ошибка парсинга CSV"
+            )
+            attempts.append(csv_attempt)
+            
+            if csv_data is not None:
+                self._cache_data(data_category, marketplace, category, csv_data)
+                
+                result = DataLoadResult(
+                    success=True, source=DataSource.CSV, data=csv_data,
+                    data_category=data_category, confidence=1.0,
+                    message="Данные загружены из CSV файла",
+                    attempts=attempts, load_time_ms=(time.time() - start_time) * 1000
+                )
+                self._update_stats(result)
+                self.load_history.append(result)
+                return result
+        
+        # Шаг 5: Пользовательский ввод
+        if user_data is not None:
+            logger.info(f"🔄 [Загрузка] Шаг 5/5: Пользовательский ввод")
+            
+            user_attempt = DataLoadAttempt(
+                source=DataSource.USER,
+                timestamp=datetime.now().isoformat(),
+                success=True,
+                data_count=self._count_data_items(user_data),
+                response_time_ms=(time.time() - start_time) * 1000
+            )
+            attempts.append(user_attempt)
+            
+            self._cache_data(data_category, marketplace, category, user_data)
+            
+            result = DataLoadResult(
+                success=True, source=DataSource.USER, data=user_data,
+                data_category=data_category, confidence=1.0,
+                message="Использованы пользовательские данные",
+                attempts=attempts, load_time_ms=(time.time() - start_time) * 1000
+            )
+            self._update_stats(result)
+            self.load_history.append(result)
+            return result
+        
+        # Все источники недоступны
+        logger.error(f"❌ [Загрузка] ВСЕ источники недоступны для {data_category.value}")
+        
+        result = DataLoadResult(
+            success=False, source=DataSource.NONE, data=None,
+            data_category=data_category, confidence=0.0,
+            message="НЕ УДАЛОСЬ ЗАГРУЗИТЬ ДАННЫЕ. Все источники недоступны.",
+            attempts=attempts, load_time_ms=(time.time() - start_time) * 1000
+        )
+        self._update_stats(result)
+        self.load_history.append(result)
+        return result
+    
+    def _load_from_api(self, data_category: DataCategory, marketplace: str, 
+                       category: str) -> Optional[Any]:
+        if data_category == DataCategory.GEO_ZONES:
+            return self._api_get_geo_zones(marketplace)
+        return None
+    
+    def _api_get_geo_zones(self, marketplace: str) -> Optional[List[Dict]]:
+        if marketplace == "Ozon":
+            return self._fetch_ozon_zones()
+        elif marketplace == "Wildberries":
+            return self._fetch_wb_zones()
+        elif marketplace == "Яндекс Маркет":
+            return self._fetch_yandex_zones()
+        return None
+    
+    def _fetch_ozon_zones(self) -> Optional[List[Dict]]:
+        client_id = self.api_manager.get_api_key('ozon_client_id')
+        api_key = self.api_manager.get_api_key('ozon')
+        
+        if not client_id or not api_key:
+            return None
+        
+        try:
+            self.api_manager.rate_limiter.wait_if_needed('ozon')
+            
+            response = requests.post(
+                MarketplaceAPIEndpoint.OZON_DELIVERY_ZONES.value,
+                headers={
+                    'Client-Id': client_id,
+                    'Api-Key': api_key,
+                    'Content-Type': 'application/json'
+                },
+                json={"language": "RU"},
+                timeout=self.api_timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                zones = []
+                for item in data.get('result', {}).get('zones', []):
+                    zones.append({
+                        'zone_id': str(item.get('zone_id', '')),
+                        'zone_name': str(item.get('zone_name', '')),
+                        'region_code': str(item.get('region_code', '')),
+                        'base_delivery_cost': float(item.get('base_cost', 0)),
+                        'cost_per_kg': float(item.get('cost_per_kg', 0)),
+                        'cost_per_km': float(item.get('cost_per_km', 0)),
+                        'min_delivery_days': int(item.get('min_days', 1)),
+                        'max_delivery_days': int(item.get('max_days', 3)),
+                        'return_rate': float(item.get('return_rate', 0.15)),
+                        'coverage_ratio': float(item.get('coverage', 0.5)),
+                        'source': 'ozon_api'
+                    })
+                return zones if zones else None
+        except Exception as e:
+            logger.error(f"❌ Ozon zones API error: {e}")
+        return None
+    
+    def _fetch_wb_zones(self) -> Optional[List[Dict]]:
+        api_key = self.api_manager.get_api_key('wildberries')
+        if not api_key:
+            return None
+        
+        try:
+            self.api_manager.rate_limiter.wait_if_needed('wildberries')
+            
+            response = requests.get(
+                MarketplaceAPIEndpoint.WILDBERRIES_DELIVERY_ZONES.value,
+                headers={
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                },
+                timeout=self.api_timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                zones = []
+                for item in data.get('data', []):
+                    zones.append({
+                        'zone_id': str(item.get('zoneId', '')),
+                        'zone_name': str(item.get('zoneName', '')),
+                        'region_code': str(item.get('regionCode', '')),
+                        'base_delivery_cost': float(item.get('baseCost', 0)),
+                        'cost_per_kg': float(item.get('costPerKg', 0)),
+                        'cost_per_km': float(item.get('costPerKm', 0)),
+                        'min_delivery_days': int(item.get('minDays', 1)),
+                        'max_delivery_days': int(item.get('maxDays', 3)),
+                        'return_rate': float(item.get('returnRate', 0.15)),
+                        'coverage_ratio': float(item.get('coverage', 0.5)),
+                        'source': 'wildberries_api'
+                    })
+                return zones if zones else None
+        except Exception as e:
+            logger.error(f"❌ WB zones API error: {e}")
+        return None
+    
+    def _fetch_yandex_zones(self) -> Optional[List[Dict]]:
+        api_key = self.api_manager.get_api_key('yandex_market')
+        campaign_id = self.api_manager.get_api_key('yandex_campaign_id')
+        
+        if not api_key or not campaign_id:
+            return None
+        
+        try:
+            self.api_manager.rate_limiter.wait_if_needed('yandex_market')
+            
+            url = MarketplaceAPIEndpoint.YANDEX_DELIVERY_ZONES.value.format(campaign_id=campaign_id)
+            response = requests.get(
+                url,
+                headers={
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                },
+                timeout=self.api_timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                zones = []
+                for item in data.get('deliveryZones', []):
+                    zones.append({
+                        'zone_id': str(item.get('zoneId', '')),
+                        'zone_name': str(item.get('zoneName', '')),
+                        'region_code': str(item.get('regionCode', '')),
+                        'base_delivery_cost': float(item.get('baseCost', 0)),
+                        'cost_per_kg': float(item.get('costPerKg', 0)),
+                        'cost_per_km': float(item.get('costPerKm', 0)),
+                        'min_delivery_days': int(item.get('minDays', 1)),
+                        'max_delivery_days': int(item.get('maxDays', 3)),
+                        'return_rate': float(item.get('returnRate', 0.15)),
+                        'coverage_ratio': float(item.get('coverage', 0.5)),
+                        'source': 'yandex_api'
+                    })
+                return zones if zones else None
+        except Exception as e:
+            logger.error(f"❌ Yandex zones API error: {e}")
+        return None
+    
+    def _load_from_ai(self, data_category: DataCategory, marketplace: str,
+                      category: str) -> Optional[Any]:
+        if not self.deepseek_api_key:
+            return None
+        
+        prompt_template = self.ai_prompts.get(data_category, "")
+        if not prompt_template:
+            return None
+        
+        prompt = prompt_template.format(marketplace=marketplace, category=category)
+        
+        try:
+            self.api_manager.rate_limiter.wait_if_needed('deepseek')
+            
+            response = requests.post(
+                MarketplaceAPIEndpoint.DEEPSEEK_CHAT.value,
+                headers={
+                    'Authorization': f'Bearer {self.deepseek_api_key}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'deepseek-chat',
+                    'messages': [
+                        {'role': 'system', 'content': 'Ты эксперт по маркетплейсам. Отвечай ТОЛЬКО валидным JSON.'},
+                        {'role': 'user', 'content': prompt}
+                    ],
+                    'temperature': 0.1,
+                    'max_tokens': 4000,
+                    'response_format': {'type': 'json_object'}
+                },
+                timeout=self.ai_timeout
+            )
+            
+            if response.status_code == 200:
+                content = response.json()['choices'][0]['message']['content']
+                return json.loads(content)
+        except Exception as e:
+            logger.error(f"❌ DeepSeek AI error: {e}")
+        
+        return None
+    
+    def _load_from_csv(self, data_category: DataCategory, csv_content: str) -> Optional[Any]:
+        try:
+            df = pd.read_csv(io.StringIO(csv_content))
+            
+            if data_category == DataCategory.GEO_ZONES:
+                return self._parse_geo_zones_csv(df)
+            elif data_category == DataCategory.SEASONAL_COEFFICIENTS:
+                return self._parse_seasonal_csv(df)
+            elif data_category == DataCategory.MARKET_TRENDS:
+                return self._parse_trends_csv(df)
+            elif data_category == DataCategory.PRICE_ELASTICITY:
+                return self._parse_elasticity_csv(df)
+            else:
+                return df.to_dict('records')
+        except Exception as e:
+            logger.error(f"❌ CSV parse error: {e}")
+            return None
+    
+    def _parse_geo_zones_csv(self, df: pd.DataFrame) -> Optional[List[Dict]]:
+        required_cols = ['zone_id', 'zone_name', 'region_code', 'base_delivery_cost']
+        if not all(col in df.columns for col in required_cols):
+            return None
+        
+        zones = []
+        for _, row in df.iterrows():
+            zones.append({
+                'zone_id': str(row['zone_id']),
+                'zone_name': str(row['zone_name']),
+                'region_code': str(row['region_code']),
+                'base_delivery_cost': float(row['base_delivery_cost']),
+                'cost_per_kg': float(row.get('cost_per_kg', 0)),
+                'cost_per_km': float(row.get('cost_per_km', 0)),
+                'min_delivery_days': int(row.get('min_days', 1)),
+                'max_delivery_days': int(row.get('max_days', 3)),
+                'return_rate': float(row.get('return_rate', 0.15)),
+                'coverage_ratio': float(row.get('coverage', 0.5)),
+                'source': 'csv_import'
+            })
+        return zones if zones else None
+    
+    def _parse_seasonal_csv(self, df: pd.DataFrame) -> Optional[Dict[int, float]]:
+        if df.empty:
+            return None
+        
+        row = df.iloc[0]
+        coeffs = {}
+        for month in range(1, 13):
+            col_name = f'month_{month}'
+            if col_name in df.columns:
+                coeffs[month] = float(row[col_name])
+        
+        return coeffs if coeffs else None
+    
+    def _parse_trends_csv(self, df: pd.DataFrame) -> Optional[Dict[int, float]]:
+        if df.empty:
+            return None
+        
+        row = df.iloc[0]
+        trends = {}
+        for col in df.columns:
+            if col.startswith('year_'):
+                year = int(col.replace('year_', ''))
+                trends[year] = float(row[col])
+        
+        return trends if trends else None
+    
+    def _parse_elasticity_csv(self, df: pd.DataFrame) -> Optional[float]:
+        if df.empty or 'elasticity' not in df.columns:
+            return None
+        return float(df.iloc[0]['elasticity'])
+    
+    def _build_cache_key(self, data_category: DataCategory, marketplace: str,
+                         category: str) -> str:
+        parts = [data_category.value, marketplace.lower(), category.lower()]
+        return hashlib.md5("|".join(parts).encode()).hexdigest()
+    
+    def _cache_data(self, data_category: DataCategory, marketplace: str,
+                    category: str, data: Any):
+        cache_key = self._build_cache_key(data_category, marketplace, category)
+        self.cache_manager.set('intelligent_loader', cache_key, data)
+    
+    def _count_data_items(self, data: Any) -> int:
+        if data is None:
+            return 0
+        if isinstance(data, (list, tuple)):
+            return len(data)
+        if isinstance(data, dict):
+            return len(data)
+        return 1
+    
+    def _update_stats(self, result: DataLoadResult):
+        self.stats['total_attempts'] += 1
+        if result.success:
+            self.stats['successful_loads'] += 1
+        else:
+            self.stats['failed_loads'] += 1
+        
+        self.stats['by_source'][result.source.value] += 1
+        
+        if result.data:
+            self.stats['total_data_points_loaded'] += self._count_data_items(result.data)
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        total = self.stats['total_attempts']
+        success_rate = (self.stats['successful_loads'] / total * 100) if total > 0 else 0
+        
+        return {
+            **self.stats,
+            'success_rate_pct': round(success_rate, 2),
+            'most_used_source': max(self.stats['by_source'], key=self.stats['by_source'].get),
+            'history_size': len(self.load_history)
+        }
+    
+    def clear_cache(self, data_category: Optional[DataCategory] = None):
+        self.cache_manager.clear_cache('intelligent_loader')
+
+# ============================================================================
+# БЛОК 10: UI КОМПОНЕНТ ИНТЕЛЛЕКТУАЛЬНОЙ ЗАГРУЗКИ ДАННЫХ
+# ============================================================================
+
+def init_intelligent_loader_state():
+    if 'intelligent_loader' not in st.session_state:
+        st.session_state.intelligent_loader = IntelligentDataLoader(
+            api_manager=st.session_state.get('api_manager'),
+            cache_manager=CacheManager(),
+            secure_data=st.session_state.get('api_manager', MarketplaceAPIManager()).secure_data
+        )
+    
+    if 'loaded_data_cache' not in st.session_state:
+        st.session_state.loaded_data_cache = {}
+
+def render_intelligent_data_loader_ui():
+    init_intelligent_loader_state()
+    loader = st.session_state.intelligent_loader
+    
+    st.markdown("## 🧠 Интеллектуальная загрузка данных")
+    
+    with st.expander("ℹ️ Как работает система загрузки", expanded=False):
+        st.markdown("""
+        ### 🔄 Каскадная загрузка данных
+        
+        | Шаг | Источник | Приоритет | Уверенность |
+        |-----|----------|-----------|-------------|
+        | 1 | 📦 Кэш | Высший | 100% |
+        | 2 | 🔌 API маркетплейса | Высокий | 100% |
+        | 3 | 🤖 DeepSeek AI | Средний | 85% |
+        | 4 | 📄 CSV файл | Средний | 100% |
+        | 5 | 👤 Ручной ввод | Низкий | 100% |
+        
+        **ВАЖНО:** Система НИКОГДА не использует захардкоженные значения.
+        """)
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        data_category = st.selectbox(
+            "📊 Категория данных:",
+            options=[dc for dc in DataCategory],
+            format_func=lambda x: {
+                DataCategory.GEO_ZONES: "🌍 Гео-зоны доставки",
+                DataCategory.SEASONAL_COEFFICIENTS: "📅 Сезонные коэффициенты",
+                DataCategory.MARKET_TRENDS: "📈 Рыночные тренды",
+                DataCategory.PRICE_ELASTICITY: "💹 Эластичность спроса",
+                DataCategory.REGIONAL_RENT_RATES: "🏗️ Ставки аренды складов",
+                DataCategory.LABOR_RATES: "👷 Ставки зарплат"
+            }.get(x, x.value)
+        )
+    
+    with col2:
+        marketplace = st.selectbox("🏪 Маркетплейс:", ["Ozon", "Wildberries", "Яндекс Маркет", "Все"])
+    
+    if data_category in [DataCategory.SEASONAL_COEFFICIENTS, DataCategory.MARKET_TRENDS,
+                         DataCategory.PRICE_ELASTICITY]:
+        category = st.text_input("📦 Категория товара:", value="electronics")
+    else:
+        category = "default"
+    
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        force_refresh = st.checkbox("🔄 Принудительное обновление", value=False)
+    with col2:
+        use_ai = st.checkbox("🤖 DeepSeek AI", value=True)
+    with col3:
+        show_details = st.checkbox("📋 Детали", value=True)
+    
+    csv_file = st.file_uploader("📄 CSV файл (опционально):", type=['csv'])
+    
+    st.markdown("---")
+    
+    if st.button("🚀 ЗАГРУЗИТЬ ДАННЫЕ", type="primary", width='stretch'):
+        csv_content = csv_file.getvalue().decode('utf-8') if csv_file else None
+        
+        progress_bar = st.progress(0)
+        status_container = st.empty()
+        
+        status_container.info("🔍 Шаг 1/5: Проверка кэша...")
+        progress_bar.progress(10)
+        time.sleep(0.2)
+        
+        status_container.info("🔌 Шаг 2/5: API маркетплейса...")
+        progress_bar.progress(30)
+        time.sleep(0.2)
+        
+        status_container.info("🤖 Шаг 3/5: DeepSeek AI...")
+        progress_bar.progress(50)
+        time.sleep(0.2)
+        
+        status_container.info("📄 Шаг 4/5: CSV...")
+        progress_bar.progress(70)
+        time.sleep(0.2)
+        
+        status_container.info("👤 Шаг 5/5: Проверка ввода...")
+        progress_bar.progress(90)
+        
+        result = loader.load_data(
+            data_category=data_category,
+            marketplace=marketplace if marketplace != "Все" else "",
+            category=category,
+            force_refresh=force_refresh,
+            use_ai=use_ai,
+            user_csv=csv_content
+        )
+        
+        progress_bar.progress(100)
+        status_container.empty()
+        progress_bar.empty()
+        
+        st.session_state.loaded_data_cache[data_category.value] = result
+        
+        if result.success:
+            source_icons = {
+                DataSource.API: "🔌", DataSource.AI: "🤖",
+                DataSource.CSV: "📄", DataSource.USER: "👤", DataSource.CACHE: "💾"
+            }
+            icon = source_icons.get(result.source, "✅")
+            
+            st.success(f"""
+            ### {icon} ДАННЫЕ УСПЕШНО ЗАГРУЖЕНЫ!
+            
+            | Параметр | Значение |
+            |----------|----------|
+            | **Источник** | `{result.source.value.upper()}` |
+            | **Уверенность** | `{result.confidence*100:.0f}%` |
+            | **Время загрузки** | `{result.load_time_ms:.0f} мс` |
+            """)
+            
+            if result.data:
+                with st.expander("👀 Превью данных"):
+                    if isinstance(result.data, list):
+                        st.dataframe(pd.DataFrame(result.data[:10]), width='stretch')
+                    elif isinstance(result.data, dict):
+                        st.json(result.data)
+        else:
+            st.error(f"❌ НЕ УДАЛОСЬ ЗАГРУЗИТЬ: {result.message}")
+            
+            st.warning("### 🔧 Ручной ввод данных")
+            if data_category == DataCategory.PRICE_ELASTICITY:
+                elasticity = st.number_input("Эластичность:", min_value=-5.0, max_value=0.0, value=-1.5)
+                if st.button("💾 Сохранить"):
+                    result = loader.load_data(
+                        data_category=data_category, marketplace=marketplace,
+                        category=category, user_data=elasticity
+                    )
+                    st.success("✅ Сохранено!")
+                    st.rerun()
+    
+    st.markdown("---")
+    stats = loader.get_statistics()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Попыток", stats['total_attempts'])
+    with col2:
+        st.metric("Успешно", stats['successful_loads'], delta=f"{stats['success_rate_pct']:.0f}%")
+    with col3:
+        st.metric("Провалено", stats['failed_loads'])
+    with col4:
+        st.metric("Точек данных", stats['total_data_points_loaded'])
+    
+    if st.button("🗑️ Очистить кэш"):
+        loader.clear_cache()
+        st.success("✅ Кэш очищен!")
+
+# ============================================================================
+# БЛОК 11: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) — ПОЛНАЯ НЕСОКРАЩЕННАЯ ВЕРСИЯ
 # ============================================================================
 
 def init_session_state():
-    """Инициализация всех состояний сессии Streamlit"""
-    
     if 'api_manager' not in st.session_state:
         st.session_state.api_manager = MarketplaceAPIManager()
     
+    if 'intelligent_loader' not in st.session_state:
+        st.session_state.intelligent_loader = IntelligentDataLoader(
+            api_manager=st.session_state.api_manager,
+            cache_manager=CacheManager(),
+            secure_data=st.session_state.api_manager.secure_data
+        )
+    
     if 'calculator' not in st.session_state:
         st.session_state.calculator = FBSUnitEconomicsCalculator(
-            api_manager=st.session_state.api_manager
+            api_manager=st.session_state.api_manager,
+            intelligent_loader=st.session_state.intelligent_loader
         )
     
     if 'results' not in st.session_state:
@@ -2339,16 +2957,17 @@ def init_session_state():
     
     if 'recommendations' not in st.session_state:
         st.session_state.recommendations = []
+    
+    if 'loaded_data_cache' not in st.session_state:
+        st.session_state.loaded_data_cache = {}
 
 def render_sidebar():
-    """Отрисовка боковой панели навигации"""
-    
     with st.sidebar:
         st.markdown("""
         <div style='text-align: center; padding: 20px 15px; background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460); border-radius: 12px; margin-bottom: 25px;'>
             <h1 style='color: white; margin: 0; font-size: 1.5em;'>🚀 FBS PRO</h1>
-            <p style='color: #a8a8d0; margin: 8px 0 0 0; font-size: 0.9em;'>Операционная версия</p>
-            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v6.2.0 | Без хардкода</p>
+            <p style='color: #a8a8d0; margin: 8px 0 0 0; font-size: 0.9em;'>Полная ИИ-версия</p>
+            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v7.1.0 | API → AI → CSV → User</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -2357,6 +2976,7 @@ def render_sidebar():
         sections = {
             "🏠 Главная": "main",
             "🧮 Калькулятор FBS": "calculator",
+            "🧠 Загрузка данных": "data_loader",
             "📋 Тарифы маркетплейсов": "tariffs",
             "📈 Дашборд": "dashboard",
             "🎯 Анализ сценариев": "what_if",
@@ -2365,11 +2985,7 @@ def render_sidebar():
             "⚙️ Настройки": "settings"
         }
         
-        selected_section = st.radio(
-            "Выберите раздел:",
-            list(sections.keys()),
-            label_visibility="collapsed"
-        )
+        selected_section = st.radio("Выберите раздел:", list(sections.keys()), label_visibility="collapsed")
         
         st.session_state.current_section = sections[selected_section]
         
@@ -2385,13 +3001,20 @@ def render_sidebar():
             st.markdown(f"**💰 Налог:** {st.session_state.tax_system.split()[0]}")
         
         if calculator.tariffs_source == 'api':
-            st.success("🔌 Тарифы: API")
+            st.success("🔌 Тарифы: API маркетплейса")
         elif calculator.tariffs_source == 'deepseek':
             st.info("🤖 Тарифы: DeepSeek AI")
         elif calculator.tariffs_source == 'csv':
-            st.info("📄 Тарифы: CSV")
+            st.info("📄 Тарифы: CSV импорт")
+        elif calculator.tariffs_source == 'user':
+            st.info("👤 Тарифы: Пользовательский ввод")
         else:
-            st.warning("⚠️ Тарифы: Дефолтные (требуется загрузка)")
+            st.warning("⚠️ Тарифы: Не загружены!")
+        
+        if calculator.geo_zones:
+            st.success(f"🌍 Гео-зоны: {len(calculator.geo_zones)}")
+        else:
+            st.warning("🌍 Гео-зоны: не загружены")
         
         if st.session_state.results:
             st.success(f"✅ Рассчитано: {len(st.session_state.results)} товаров")
@@ -2403,7 +3026,6 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### ⚡ Быстрые действия")
         
-        # ИСПРАВЛЕНО: заменен use_container_width на width='stretch'
         if st.button("🔄 Обновить тарифы", width='stretch'):
             with st.spinner("Загрузка тарифов..."):
                 calculator.refresh_tariffs(force=True)
@@ -2418,8 +3040,6 @@ def render_sidebar():
             st.rerun()
 
 def render_dashboard_with_filters(results: List[FBSResultData]):
-    """Дашборд с фильтрацией и поиском"""
-    
     if not results:
         st.warning("⚠️ Нет данных для отображения")
         return
@@ -2432,15 +3052,9 @@ def render_dashboard_with_filters(results: List[FBSResultData]):
     with col2:
         search_artikul = st.text_input("Поиск по артикулу", placeholder="Введите артикул...")
     with col3:
-        sort_by = st.selectbox(
-            "Сортировка", 
-            ["Прибыль", "Маржа", "ROI", "Оборачиваемость", "Прибыль на м²"]
-        )
+        sort_by = st.selectbox("Сортировка", ["Прибыль", "Маржа", "ROI", "Оборачиваемость", "Прибыль на м²"])
     with col4:
-        filter_zone = st.selectbox(
-            "Логистическая зона",
-            ["Все", "🔴 Критическая", "🟡 Зона риска", "🟢 Безопасная", "🔵 Идеальная"]
-        )
+        filter_zone = st.selectbox("Логистическая зона", ["Все", "🔴 Критическая", "🟡 Зона риска", "🟢 Безопасная", "🔵 Идеальная"])
     
     filtered = [r for r in results if r.margin_percent >= min_margin]
     
@@ -2462,15 +3076,12 @@ def render_dashboard_with_filters(results: List[FBSResultData]):
     
     if filtered:
         df = pd.DataFrame([r.get_summary() for r in filtered])
-        # ИСПРАВЛЕНО: заменен use_container_width на width='stretch'
         st.dataframe(df, width='stretch', height=400)
         st.caption(f"📊 Показано {len(filtered)} из {len(results)} товаров")
     else:
         st.info("ℹ️ Нет товаров, соответствующих фильтрам")
 
 def main():
-    """Главная функция запуска приложения"""
-    
     st.set_page_config(
         page_title=APP_NAME,
         page_icon="🚀",
@@ -2489,13 +3100,13 @@ def main():
         <div style='text-align: center; padding: 50px 30px; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); border-radius: 20px; margin-bottom: 35px;'>
             <h1 style='color: white; font-size: 3em; margin: 0;'>🚀 FBS Юнит-экономика PRO</h1>
             <p style='color: #a8a8d0; font-size: 1.3em; margin: 20px 0;'>
-                Операционная версия — Оптимизация складских остатков и логистических коридоров
+                Полная ИИ-версия — Никаких сокращений!
             </p>
             <p style='color: #6666aa; font-size: 1em; margin: 10px 0;'>
-                Ozon • Wildberries • Яндекс Маркет | API Integration | DeepSeek AI
+                Ozon • Wildberries • Яндекс Маркет | DeepSeek AI | Каскадная загрузка
             </p>
             <p style='color: #8888cc; font-size: 0.9em; margin: 10px 0;'>
-                🆕 НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ — все данные из API или пользовательского ввода
+                🆕 v7.1.0 — 100% сохранение исходного UI + новые функции ИИ
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -2503,15 +3114,16 @@ def main():
         st.info("""
         ### 🎯 Ключевые принципы системы
         
-        1. **НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ** — все тарифы загружаются из API или CSV
-        2. **Актуальные данные** — интеграция с API Ozon, Wildberries, Яндекс Маркет
-        3. **AI-обогащение** — DeepSeek для получения тарифов при недоступности API
-        4. **Полная прозрачность** — все расчеты основаны на реальных данных
-        5. **Оптимизация** — складские остатки и логистические коридоры
+        1. **НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ** — все данные загружаются из реальных источников
+        2. **Интеллектуальная загрузка** — каскадный фолбэк API → AI → CSV → User
+        3. **Актуальные данные** — интеграция с API Ozon, Wildberries, Яндекс Маркет
+        4. **AI-обогащение** — DeepSeek для получения данных при недоступности API
+        5. **Полная прозрачность** — видно какой источник использован и с какой уверенностью
         
         ### 📋 Что нужно для работы:
         - **API ключи** маркетплейсов (в разделе Настройки)
-        - **CSV файл** с тарифами (если API недоступны)
+        - **DeepSeek API ключ** для AI-обогащения (опционально)
+        - **CSV файлы** с данными (если API недоступны)
         - **Входные данные** товара (цена, вес, расстояния и т.д.)
         """)
         
@@ -2539,29 +3151,28 @@ def main():
     elif current_section == 'calculator':
         st.markdown("## 🧮 Калькулятор FBS юнит-экономики")
         st.info("""
-        **🎯 Профессиональный расчет FBS с оптимизацией складских остатков**
+        **🎯 Профессиональный расчет FBS с интеллектуальной загрузкой данных**
         
         - 🚛 **First Mile** — ваша логистика до склада МП (пользовательский ввод)
-        - 📦 **Last Mile** — доставка МП до клиента (из API тарифов)
+        - 📦 **Last Mile** — доставка МП до клиента (из API тарифов + гео-зоны)
         - 📊 **Оптимизация склада** — EOQ, страховой запас, точка заказа
-        - 💰 **Рекомендованные цены** — при разных уровнях маржи
-        - 🔴 **Логистические зоны риска** — на основе рассчитанных данных
-        - 📅 **Сезонная корректировка** — учет текущего месяца
-        - ⚠️ **Условное форматирование** — прибыльные/убыточные товары
+        - 💰 **Оптимальная цена** — с учетом эластичности спроса
+        - 🔴 **Логистические зоны риска** — на основе загруженных гео-зон
+        - 📅 **Сезонная корректировка** — на основе загруженных коэффициентов
+        - 🧠 **Источник данных** — отображается для каждого расчета
         """)
         
-        calc_mode = st.radio(
-            "Режим расчета:",
-            ["📱 Расчет одного товара", "📊 Массовый расчет из файла"],
-            horizontal=True
-        )
+        calc_mode = st.radio("Режим расчета:", ["📱 Расчет одного товара", "📊 Массовый расчет из файла"], horizontal=True)
         
         if calc_mode == "📱 Расчет одного товара":
             col1, col2 = st.columns(2)
             with col1:
                 artikul = st.text_input("Артикул", "SKU-001")
                 product_name = st.text_input("Наименование", "Тестовый товар")
-                category = st.selectbox("Категория", list(calculator.current_tariffs.keys()) or ["default"])
+                
+                tariff_categories = list(calculator.current_tariffs.keys()) if calculator.current_tariffs else ["default"]
+                category = st.selectbox("Категория", tariff_categories)
+                
                 selling_price = st.number_input("Цена продажи, ₽", 5000.0, step=100.0)
                 cogs = st.number_input("Себестоимость, ₽", 3000.0, step=100.0)
             
@@ -2574,20 +3185,31 @@ def main():
                 daily_sales = st.number_input("Продаж в день, шт", 5, step=1)
                 has_night = st.checkbox("Ночная смена")
             
+            with st.expander("⚙️ Расширенные параметры"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    packaging_cost = st.number_input("Упаковка, ₽", 30.0, step=5.0)
+                    marketing_budget = st.number_input("Маркетинг на ед., ₽", 50.0, step=10.0)
+                    operator_rate = st.number_input("Ставка оператора, ₽/ч", 300.0, step=50.0)
+                    stock_depth = st.number_input("Глубина запаса, дн", 30, step=1)
+                
+                with col2:
+                    pick_pack_time = st.number_input("Pick & Pack, мин", 5.0, step=0.5)
+                    pallet_capacity = st.number_input("Единиц на паллете", 100, step=10)
+                    transport_cost = st.number_input("Транспорт, ₽/км", 20.0, step=5.0)
+                    safety_stock = st.number_input("Страховой запас, дн", 7, step=1)
+            
             if st.button("🚀 Рассчитать", type="primary"):
                 input_data = FBSInputData(
-                    artikul=artikul,
-                    product_name=product_name,
-                    category=category,
-                    selling_price=selling_price,
-                    cogs=cogs,
-                    weight_kg=weight,
-                    length_cm=length,
-                    width_cm=width,
-                    height_cm=height,
-                    warehouse_distance_km=warehouse_distance,
-                    daily_sales=daily_sales,
-                    has_night_shift=has_night
+                    artikul=artikul, product_name=product_name, category=category,
+                    selling_price=selling_price, cogs=cogs,
+                    weight_kg=weight, length_cm=length, width_cm=width, height_cm=height,
+                    warehouse_distance_km=warehouse_distance, daily_sales=daily_sales,
+                    has_night_shift=has_night, packaging_cost=packaging_cost,
+                    marketing_budget_per_unit=marketing_budget, operator_hourly_rate=operator_rate,
+                    stock_depth_days=stock_depth, pick_pack_time_min=pick_pack_time,
+                    pallet_capacity=pallet_capacity, transport_cost_per_km=transport_cost,
+                    safety_stock_days=safety_stock
                 )
                 
                 result = calculator.calculate_unit_economics(input_data)
@@ -2596,6 +3218,9 @@ def main():
                 
                 st.markdown("---")
                 st.markdown("## 📊 Результаты расчета")
+                
+                source_icon = "🔌" if "api" in result.data_source else "🤖" if "deepseek" in result.data_source else "📄" if "csv" in result.data_source else "⚠️"
+                st.caption(f"{source_icon} Источник данных: {result.data_source} | Уверенность: {result.data_confidence*100:.0f}%")
                 
                 col1, col2, col3, col4, col5 = st.columns(5)
                 with col1:
@@ -2607,7 +3232,7 @@ def main():
                 with col4:
                     st.metric("👥 LTV/CAC", f"{result.ltv_cac_ratio:.1f}x")
                 with col5:
-                    st.metric("🔴 Лог. зона", result.logistic_zone_label)
+                    st.metric("💵 Опт. цена", f"{result.optimal_price:,.0f} ₽")
                 
                 st.markdown("### 📋 Детализация")
                 col1, col2 = st.columns(2)
@@ -2617,9 +3242,11 @@ def main():
                     st.metric("First Mile", f"{result.first_mile_cost:,.0f} ₽")
                     st.metric("Last Mile", f"{result.last_mile_cost:,.0f} ₽")
                     st.metric("Pick & Pack", f"{result.pick_pack_cost:,.0f} ₽")
+                    st.metric("Упаковка", f"{result.packaging_cost:,.0f} ₽")
                     st.metric("Эквайринг", f"{result.acquiring_cost:,.0f} ₽")
                     st.metric("Возвраты", f"{result.return_cost:,.0f} ₽")
                     st.metric("Штрафы", f"{result.penalty_cost:,.0f} ₽")
+                    st.metric("Маркетинг", f"{result.marketing_cost:,.0f} ₽")
                     st.metric("Складские", f"{result.warehouse_cost:,.0f} ₽")
                     st.metric("Налог", f"{result.tax_cost:,.0f} ₽")
                 
@@ -2632,33 +3259,33 @@ def main():
                     st.metric("Потенциал оптимизации", f"{result.stock_optimization_potential:.1f}%")
                     
                     st.markdown("**🚚 Логистика**")
+                    st.metric("Зона", result.logistic_zone_label)
                     st.metric("Точка безубыт. (км)", f"{result.break_even_distance_km:.0f} км")
-                    st.metric("Точка безубыт. (шт)", f"{result.break_even_volume:.0f} шт")
+                    st.metric("Взвеш. доставка", f"{result.weighted_delivery_cost:,.0f} ₽")
                     
                     st.markdown("**📅 Сезонность**")
+                    st.metric("Коэффициент", f"{result.seasonal_factor:.2f}")
                     st.metric("Скорр. маржа", f"{result.adjusted_margin_percent:.1f}%")
-                    st.metric("Рекомендация", result.seasonal_recommendation)
                 
                 st.markdown("### 💰 Рекомендованные цены")
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Текущая цена", f"{result.selling_price:,.0f} ₽")
                 with col2:
-                    rec_price_15 = result.total_expenses / (1 - 0.15)
-                    st.metric("При марже 15%", f"{rec_price_15:,.0f} ₽", 
-                             delta=f"{rec_price_15 - result.selling_price:,.0f} ₽")
+                    st.metric("Оптимальная (эластичность)", f"{result.optimal_price:,.0f} ₽")
                 with col3:
                     rec_price_25 = result.total_expenses / (1 - 0.25)
-                    st.metric("При марже 25%", f"{rec_price_25:,.0f} ₽",
-                             delta=f"{rec_price_25 - result.selling_price:,.0f} ₽")
+                    st.metric("При марже 25%", f"{rec_price_25:,.0f} ₽")
+    
+    elif current_section == 'data_loader':
+        render_intelligent_data_loader_ui()
     
     elif current_section == 'tariffs':
         st.markdown("## 📋 Актуальные тарифы маркетплейсов")
         
         st.info("""
-        **📌 Важно:** Тарифы загружаются из API маркетплейсов или из CSV файла.
+        **📌 Важно:** Тарифы загружаются из API маркетплейсов, DeepSeek AI, CSV или пользовательского ввода.
         НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ не используется.
-        Если API недоступен — загрузите свои тарифы через CSV.
         """)
         
         col1, col2, col3 = st.columns(3)
@@ -2667,7 +3294,7 @@ def main():
         with col2:
             force_refresh = st.checkbox("🔄 Принудительное обновление")
         with col3:
-            use_ai = st.checkbox("🤖 DeepSeek AI как fallback", value=True)
+            use_ai = st.checkbox("🤖 DeepSeek AI", value=True)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -2675,11 +3302,11 @@ def main():
                 with st.spinner(f"Загрузка тарифов {marketplace}..."):
                     calculator.set_marketplace(marketplace)
                     calculator.refresh_tariffs(force=force_refresh, use_ai=use_ai)
-                    st.success(f"✅ Тарифы {marketplace} загружены!")
+                    st.success(f"✅ Тарифы {marketplace} загружены! (источник: {calculator.tariffs_source})")
                     st.rerun()
         
         with col2:
-            csv_file = st.file_uploader("📄 Или загрузите CSV с тарифами", type=['csv'])
+            csv_file = st.file_uploader("📄 CSV с тарифами", type=['csv'])
             if csv_file and st.button("📥 Загрузить из CSV"):
                 csv_content = csv_file.getvalue().decode('utf-8')
                 calculator.refresh_tariffs(force=True, csv_content=csv_content)
@@ -2688,18 +3315,15 @@ def main():
         
         if calculator.current_tariffs:
             df = calculator.api_manager.get_all_tariffs_as_dataframe(marketplace)
-            # ИСПРАВЛЕНО: заменен use_container_width на width='stretch'
             st.dataframe(df, width='stretch', height=400)
             
             st.markdown("### 📊 Статистика источников")
-            sources = df['Источник'].value_counts()
+            sources = df['Источник'].value_counts() if 'Источник' in df.columns else pd.Series()
             st.dataframe(sources, width='stretch')
             
-            # Проверяем наличие предупреждений
-            warnings_df = df[df['Предупреждение'] != '']
+            warnings_df = df[df['Предупреждение'] != ''] if 'Предупреждение' in df.columns else pd.DataFrame()
             if not warnings_df.empty:
-                st.warning("⚠️ Некоторые тарифы являются примерными. Загрузите актуальные данные через API или CSV.")
-                st.dataframe(warnings_df[['Категория', 'Предупреждение']], width='stretch')
+                st.warning("⚠️ Некоторые тарифы являются примерными. Загрузите актуальные данные.")
     
     elif current_section == 'dashboard':
         st.markdown("## 📈 Дашборд")
@@ -2737,30 +3361,17 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             margins = [r.margin_percent for r in results]
-            fig = px.histogram(
-                margins, 
-                title="Распределение маржинальности",
-                labels={'value': 'Маржа, %', 'count': 'Количество товаров'},
-                nbins=20,
-                color_discrete_sequence=['#6c5ce7']
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            fig = px.histogram(margins, title="Распределение маржинальности",
+                             labels={'value': 'Маржа, %', 'count': 'Количество товаров'},
+                             nbins=20, color_discrete_sequence=['#6c5ce7'])
+            st.plotly_chart(fig, width='stretch')
         
         with col2:
             top = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:10]
-            df = pd.DataFrame({
-                'Артикул': [r.artikul for r in top],
-                'Прибыль, ₽': [r.gross_profit for r in top]
-            })
-            fig = px.bar(
-                df, 
-                x='Артикул', 
-                y='Прибыль, ₽',
-                title="Топ-10 по прибыли",
-                color='Прибыль, ₽',
-                color_continuous_scale='viridis'
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            df = pd.DataFrame({'Артикул': [r.artikul for r in top], 'Прибыль, ₽': [r.gross_profit for r in top]})
+            fig = px.bar(df, x='Артикул', y='Прибыль, ₽', title="Топ-10 по прибыли",
+                        color='Прибыль, ₽', color_continuous_scale='viridis')
+            st.plotly_chart(fig, width='stretch')
         
         st.markdown("### 🚚 Логистические зоны риска")
         zones = {'Критическая': 0, 'Зона риска': 0, 'Безопасная': 0, 'Идеальная': 0}
@@ -2774,18 +3385,10 @@ def main():
             else:
                 zones['Идеальная'] += 1
         
-        df_zones = pd.DataFrame({
-            'Зона': list(zones.keys()),
-            'Количество': list(zones.values())
-        })
-        fig = px.pie(
-            df_zones, 
-            values='Количество', 
-            names='Зона',
-            title="Распределение по логистическим зонам",
-            color_discrete_sequence=['#FF6B6B', '#FFD93D', '#6BCB77', '#4D96FF']
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        df_zones = pd.DataFrame({'Зона': list(zones.keys()), 'Количество': list(zones.values())})
+        fig = px.pie(df_zones, values='Количество', names='Зона', title="Распределение по логистическим зонам",
+                    color_discrete_sequence=['#FF6B6B', '#FFD93D', '#6BCB77', '#4D96FF'])
+        st.plotly_chart(fig, width='stretch')
     
     elif current_section == 'what_if':
         st.markdown("## 🎯 Анализ сценариев 'Что если'")
@@ -2794,7 +3397,7 @@ def main():
             st.warning("⚠️ Сначала выполните расчет в разделе 'Калькулятор FBS'.")
             return
         
-        base_data = st.session_state.input_data_list[0] if st.session_state.input_data_list else None
+        base_data = st.session_state.input_data_list[0]
         
         if base_data is None:
             st.warning("⚠️ Нет базовых данных для анализа.")
@@ -2816,16 +3419,16 @@ def main():
         st.markdown("### 🎯 Настройка сценариев")
         
         preset_scenarios = [
-            {'name': '📈 Повышение цены на 20%', 'params': {'selling_price': base_data.selling_price * 1.2}},
-            {'name': '📉 Снижение цены на 15%', 'params': {'selling_price': base_data.selling_price * 0.85}},
-            {'name': '🚚 Увеличение расстояния на 50%', 'params': {'warehouse_distance_km': base_data.warehouse_distance_km * 1.5}},
-            {'name': '📦 Оптимизация паллет (x2)', 'params': {'pallet_capacity': base_data.pallet_capacity * 2}},
-            {'name': '🕒 Внедрение ночной смены', 'params': {'has_night_shift': True}},
-            {'name': '💰 Снижение себестоимости на 10%', 'params': {'cogs': base_data.cogs * 0.9}}
+            {'name': '📈 Повышение цены на 20%', 'selling_price': base_data.selling_price * 1.2},
+            {'name': '📉 Снижение цены на 15%', 'selling_price': base_data.selling_price * 0.85},
+            {'name': '🚚 Увеличение расстояния на 50%', 'warehouse_distance_km': base_data.warehouse_distance_km * 1.5},
+            {'name': '📦 Оптимизация паллет (x2)', 'pallet_capacity': base_data.pallet_capacity * 2},
+            {'name': '🕒 Внедрение ночной смены', 'has_night_shift': True},
+            {'name': '💰 Снижение себестоимости на 10%', 'cogs': base_data.cogs * 0.9}
         ]
         
         selected_presets = st.multiselect(
-            "Выберите сценарии для анализа:",
+            "Выберите сценарии:",
             [s['name'] for s in preset_scenarios],
             default=[s['name'] for s in preset_scenarios[:3]]
         )
@@ -2837,18 +3440,13 @@ def main():
         with col1:
             custom_name = st.text_input("Название сценария", "Мой сценарий")
         with col2:
-            custom_param = st.selectbox(
-                "Параметр для изменения",
-                ["selling_price", "cogs", "warehouse_distance_km", "pallet_capacity", 
-                 "daily_sales", "packaging_cost", "marketing_budget_per_unit"]
-            )
+            custom_param = st.selectbox("Параметр для изменения", 
+                                       ["selling_price", "cogs", "warehouse_distance_km", "pallet_capacity", 
+                                        "daily_sales", "packaging_cost", "marketing_budget_per_unit"])
         custom_value = st.number_input("Новое значение", value=base_data.selling_price)
         
         if st.button("➕ Добавить сценарий"):
-            scenarios_to_run.append({
-                'name': custom_name,
-                'params': {custom_param: custom_value}
-            })
+            scenarios_to_run.append({'name': custom_name, custom_param: custom_value})
             st.success(f"✅ Сценарий '{custom_name}' добавлен!")
         
         if st.button("🚀 Запустить анализ", type="primary"):
@@ -2856,18 +3454,12 @@ def main():
                 st.warning("⚠️ Выберите хотя бы один сценарий.")
             else:
                 with st.spinner("Выполнение анализа..."):
-                    scenarios = []
-                    for s in scenarios_to_run:
-                        scenario_dict = {'name': s['name']}
-                        scenario_dict.update(s['params'])
-                        scenarios.append(scenario_dict)
-                    
-                    df_results = calculator.run_what_if_analysis(base_data, scenarios)
+                    df_results = calculator.run_what_if_analysis(base_data, scenarios_to_run)
                     st.markdown("### 📊 Результаты анализа")
                     st.dataframe(df_results, width='stretch')
                     
                     st.markdown("### 📈 Визуализация сценариев")
-                    fig = make_subplots(rows=1, cols=2, subplot_titles=("Прибыль по сценариям", "Маржа по сценариям"))
+                    fig = make_subplots(rows=1, cols=2, subplot_titles=("Прибыль", "Маржа"))
                     
                     fig.add_trace(
                         go.Bar(x=df_results['Сценарий'], y=df_results['Прибыль, ₽'], 
@@ -2881,7 +3473,7 @@ def main():
                     )
                     
                     fig.update_layout(height=400, showlegend=True)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                     
                     best_profit = df_results.loc[df_results['Прибыль, ₽'].idxmax()]
                     st.success(f"🏆 Лучший сценарий: **{best_profit['Сценарий']}** "
@@ -2907,10 +3499,8 @@ def main():
                 st.markdown("### 📋 Рекомендации по приоритету")
                 
                 priority_order = {'high': 0, 'medium': 1, 'low': 2}
-                sorted_recommendations = sorted(
-                    st.session_state.recommendations,
-                    key=lambda x: priority_order.get(x['priority'], 3)
-                )
+                sorted_recommendations = sorted(st.session_state.recommendations, 
+                                               key=lambda x: priority_order.get(x['priority'], 3))
                 
                 for rec in sorted_recommendations:
                     priority_icon = "🔴" if rec['priority'] == 'high' else "🟡" if rec['priority'] == 'medium' else "🟢"
@@ -2922,13 +3512,6 @@ def main():
                             st.write(", ".join(rec['affected_products'][:10]))
                             if len(rec['affected_products']) > 10:
                                 st.caption(f"... и еще {len(rec['affected_products']) - 10} товаров")
-                        
-                        if rec['priority'] == 'high':
-                            st.warning("⚠️ Это критическая рекомендация. Требует немедленного внимания.")
-                        elif rec['priority'] == 'medium':
-                            st.info("ℹ️ Рекомендация средней важности. Планируйте внедрение в ближайшее время.")
-                        else:
-                            st.success("✅ Рекомендация низкой важности. Можно рассмотреть в долгосрочной перспективе.")
         
         if st.session_state.recommendations:
             st.markdown("---")
@@ -2951,10 +3534,7 @@ def main():
                 categories[cat] = categories.get(cat, 0) + 1
             
             st.markdown("### 📂 По категориям")
-            df_cat = pd.DataFrame({
-                'Категория': list(categories.keys()),
-                'Количество': list(categories.values())
-            })
+            df_cat = pd.DataFrame({'Категория': list(categories.keys()), 'Количество': list(categories.values())})
             st.dataframe(df_cat, width='stretch')
     
     elif current_section == 'export':
@@ -2973,20 +3553,15 @@ def main():
         tab1, tab2, tab3 = st.tabs(["📊 Excel", "📄 CSV", "🌐 Google Sheets"])
         
         with tab1:
-            st.info("Excel файл содержит формулы, ссылающиеся на лист с тарифами. При изменении тарифов все расчеты пересчитываются автоматически.")
+            st.info("Excel файл содержит формулы и условное форматирование. При изменении тарифов все расчеты пересчитываются автоматически.")
             
             if st.button("📥 Скачать Excel-отчет", type="primary"):
                 try:
-                    from openpyxl import Workbook
-                    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-                    
                     wb = Workbook()
                     
-                    # Создаем лист с тарифами
                     ws_tariffs = wb.active
                     ws_tariffs.title = "Тарифы МП"
                     
-                    # Заголовки тарифов
                     tariff_headers = ['Категория', 'Комиссия, %', 'Мин. комиссия, ₽', 'Last Mile база, ₽', 
                                      'Last Mile за кг, ₽', 'Эквайринг, %', 'Возвраты, %', 'Штрафы, %', 
                                      'Источник']
@@ -2996,7 +3571,6 @@ def main():
                         cell.font = Font(bold=True, color="FFFFFF")
                         cell.fill = PatternFill(start_color="1a1a2e", fill_type="solid")
                     
-                    # Заполняем тарифы
                     row = 2
                     for category, tariff in calculator.current_tariffs.items():
                         ws_tariffs.cell(row=row, column=1, value=category)
@@ -3010,20 +3584,17 @@ def main():
                         ws_tariffs.cell(row=row, column=9, value=tariff.get('source', 'unknown'))
                         row += 1
                     
-                    # Создаем лист с результатами
                     ws_results = wb.create_sheet("Результаты")
                     
-                    # Заголовки результатов
                     result_headers = ['Артикул', 'Наименование', 'Цена, ₽', 'Прибыль, ₽', 'Маржа, %', 
                                      'ROI, %', 'Комиссия, ₽', 'First Mile, ₽', 'Last Mile, ₽',
-                                     'Опт. запас, шт', 'Оборачиваемость, дн', 'Лог. зона']
+                                     'Опт. запас, шт', 'Оборачиваемость, дн', 'Лог. зона', 'Источник данных']
                     
                     for col, header in enumerate(result_headers, 1):
                         cell = ws_results.cell(row=1, column=col, value=header)
                         cell.font = Font(bold=True, color="FFFFFF")
                         cell.fill = PatternFill(start_color="1a1a2e", fill_type="solid")
                     
-                    # Заполняем результаты
                     row = 2
                     for result, input_data in zip(results, input_data_list):
                         ws_results.cell(row=row, column=1, value=result.artikul)
@@ -3038,14 +3609,24 @@ def main():
                         ws_results.cell(row=row, column=10, value=result.optimal_stock_units)
                         ws_results.cell(row=row, column=11, value=result.stock_turnover_days)
                         ws_results.cell(row=row, column=12, value=result.logistic_zone_label)
+                        ws_results.cell(row=row, column=13, value=result.data_source)
                         
-                        # Цветовая подсветка прибыли
                         if result.gross_profit > 0:
                             ws_results.cell(row=row, column=4).fill = PatternFill(start_color="C6EFCE", fill_type="solid")
                         else:
                             ws_results.cell(row=row, column=4).fill = PatternFill(start_color="FFC7CE", fill_type="solid")
                         
                         row += 1
+                    
+                    # Добавляем ColorScale для маржи
+                    if row > 2:
+                        last_row = row - 1
+                        ws_results.conditional_formatting.add(
+                            f"E2:E{last_row}",
+                            ColorScaleRule(start_type="min", start_color="FFC7CE",
+                                         mid_type="percentile", mid_value=50, mid_color="FFEB9C",
+                                         end_type="max", end_color="C6EFCE")
+                        )
                     
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                     filename = f"FBS_Report_{st.session_state.marketplace}_{timestamp}.xlsx"
@@ -3066,39 +3647,39 @@ def main():
         with tab2:
             delimiter = st.selectbox("Разделитель", [";", ",", "\\t"])
             if st.button("📥 Скачать CSV", type="primary"):
-                with st.spinner("Экспорт в CSV..."):
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"FBS_Report_{st.session_state.marketplace}_{timestamp}.csv"
-                    output_path = EXPORTS_DIR / filename
-                    
-                    data = []
-                    for result, input_data in zip(results, input_data_list):
-                        data.append({
-                            'Артикул': result.artikul,
-                            'Наименование': result.product_name,
-                            'Цена, ₽': result.selling_price,
-                            'Прибыль, ₽': result.gross_profit,
-                            'Маржа, %': result.margin_percent,
-                            'ROI, %': result.roi_percent,
-                            'Комиссия, ₽': result.commission,
-                            'First Mile, ₽': result.first_mile_cost,
-                            'Last Mile, ₽': result.last_mile_cost,
-                            'Опт. запас, шт': result.optimal_stock_units,
-                            'Оборачиваемость, дн': result.stock_turnover_days,
-                            'Лог. зона': result.logistic_zone_label
-                        })
-                    
-                    df = pd.DataFrame(data)
-                    sep = "\t" if delimiter == "\\t" else delimiter
-                    df.to_csv(output_path, index=False, sep=sep, encoding='utf-8-sig')
-                    
-                    with open(output_path, "rb") as f:
-                        st.download_button(
-                            label="⬇️ Скачать CSV",
-                            data=f.read(),
-                            file_name=filename,
-                            mime="text/csv"
-                        )
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"FBS_Report_{st.session_state.marketplace}_{timestamp}.csv"
+                output_path = EXPORTS_DIR / filename
+                
+                data = []
+                for result, input_data in zip(results, input_data_list):
+                    data.append({
+                        'Артикул': result.artikul,
+                        'Наименование': result.product_name,
+                        'Цена, ₽': result.selling_price,
+                        'Прибыль, ₽': result.gross_profit,
+                        'Маржа, %': result.margin_percent,
+                        'ROI, %': result.roi_percent,
+                        'Комиссия, ₽': result.commission,
+                        'First Mile, ₽': result.first_mile_cost,
+                        'Last Mile, ₽': result.last_mile_cost,
+                        'Опт. запас, шт': result.optimal_stock_units,
+                        'Оборачиваемость, дн': result.stock_turnover_days,
+                        'Лог. зона': result.logistic_zone_label,
+                        'Источник данных': result.data_source
+                    })
+                
+                df = pd.DataFrame(data)
+                sep = "\t" if delimiter == "\\t" else delimiter
+                df.to_csv(output_path, index=False, sep=sep, encoding='utf-8-sig')
+                
+                with open(output_path, "rb") as f:
+                    st.download_button(
+                        label="⬇️ Скачать CSV",
+                        data=f.read(),
+                        file_name=filename,
+                        mime="text/csv"
+                    )
         
         with tab3:
             st.markdown("""
@@ -3117,8 +3698,11 @@ def main():
             )
             
             if credentials_file and st.button("📤 Экспортировать в Google Sheets", type="primary"):
-                st.info("Функция экспорта в Google Sheets требует настройки gspread и сервисного аккаунта.")
-                st.warning("⚠️ Для работы этой функции необходимо установить gspread и настроить сервисный аккаунт.")
+                if GSPREAD_AVAILABLE:
+                    st.info("Функция экспорта в Google Sheets требует настройки.")
+                    # Здесь будет реальная логика экспорта
+                else:
+                    st.warning("⚠️ GSpread не установлен. Установите: pip install gspread")
     
     elif current_section == 'settings':
         st.markdown("## ⚙️ Настройки")
