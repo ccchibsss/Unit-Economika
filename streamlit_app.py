@@ -1,17 +1,26 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
 ============================================================================
-🚀 FBS UNIT ECONOMICS PRO 2026 — ПОЛНАЯ НЕСОКРАЩЕННАЯ ВЕРСИЯ С ИИ
+🚀 FBS UNIT ECONOMICS PRO 2026 — ПОЛНАЯ ВЕРСИЯ С ИНТЕГРАЦИЕЙ GOOGLE SHEETS
 ============================================================================
 Операционный директор | FBS-экспертиза | Оптимизация складских остатков
 Маркетплейсы: Ozon, Wildberries, Яндекс Маркет
-Версия: 7.1.0 (Resurrection Edition)
+Версия: 7.2.0 (Google Sheets Edition)
 
 КЛЮЧЕВЫЕ ПРИНЦИПЫ:
 1. НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ — все данные из API, AI, CSV или пользовательского ввода
 2. Интеллектуальная загрузка данных с каскадным фолбэком (API → AI → CSV → User)
 3. Полная прозрачность расчетов и источников данных
-4. 100% сохранение исходного UI (Export, Google Sheets, форматирование Excel)
-5. Оптимизация на основе реальных данных
+4. 100% сохранение исходного UI + новые возможности
+5. Работа с Google Sheets без сервисного аккаунта (ручной экспорт + инструкции)
+
+НОВЫЕ ВОЗМОЖНОСТИ (v7.2.0):
+- Экспорт в Google Sheets без сервисного аккаунта (CSV, TSV, копирование в буфер)
+- Пошаговый туториал для новичков
+- Подсказки к полям ввода
+- Автоматическое обновление таблицы при наличии credentials.json
 
 НИЧЕГО НЕ СОКРАЩЕНО — АБСОЛЮТНО ПОЛНАЯ ИСХОДНАЯ + НОВАЯ ВЕРСИЯ
 ============================================================================
@@ -104,8 +113,8 @@ warnings.filterwarnings('ignore')
 # БЛОК 0: БАЗОВАЯ КОНФИГУРАЦИЯ И НАСТРОЙКИ
 # ============================================================================
 
-APP_VERSION = "7.1.0"
-APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Полная ИИ-версия"
+APP_VERSION = "7.2.0"
+APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Полная ИИ-версия с Google Sheets"
 APP_DESCRIPTION = "Профессиональный расчет юнит-экономики для FBS-модели с ИИ и без сокращений"
 
 # Настройка путей
@@ -2920,7 +2929,62 @@ def render_intelligent_data_loader_ui():
         st.success("✅ Кэш очищен!")
 
 # ============================================================================
-# БЛОК 11: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) — ПОЛНАЯ НЕСОКРАЩЕННАЯ ВЕРСИЯ
+# БЛОК 11: ЭКСПОРТ В GOOGLE SHEETS БЕЗ СЕРВИСНОГО АККАУНТА
+# ============================================================================
+
+class GoogleSheetsExporter:
+    """
+    Помощник для экспорта данных в Google Таблицы без API.
+    Генерирует CSV, TSV или текст для копирования, а также инструкцию по импорту.
+    """
+    
+    @staticmethod
+    def generate_csv(results: List[FBSResultData], separator: str = ";") -> str:
+        """Генерирует строку CSV с результатами."""
+        if not results:
+            return ""
+        headers = ['Артикул', 'Название', 'Цена', 'Прибыль', 'Маржа,%', 'ROI,%',
+                   'Комиссия', 'First Mile', 'Last Mile', 'Pick&Pack', 'Упаковка',
+                   'Эквайринг', 'Возвраты', 'Штрафы', 'Маркетинг', 'Склад', 'Налог',
+                   'Опт.запас', 'Оборач., дн', 'Лог.зона', 'Источник']
+        lines = [separator.join(headers)]
+        for r in results:
+            row = [
+                str(r.artikul), str(r.product_name), str(r.selling_price),
+                str(r.gross_profit), str(r.margin_percent), str(r.roi_percent),
+                str(r.commission), str(r.first_mile_cost), str(r.last_mile_cost),
+                str(r.pick_pack_cost), str(r.packaging_cost), str(r.acquiring_cost),
+                str(r.return_cost), str(r.penalty_cost), str(r.marketing_cost),
+                str(r.warehouse_cost), str(r.tax_cost), str(r.optimal_stock_units),
+                str(r.stock_turnover_days), str(r.logistic_zone_label), str(r.data_source)
+            ]
+            lines.append(separator.join(row))
+        return "\n".join(lines)
+    
+    @staticmethod
+    def generate_tsv(results: List[FBSResultData]) -> str:
+        """Генерирует TSV (табуляция) — удобно для вставки в Google Sheets."""
+        return GoogleSheetsExporter.generate_csv(results, separator="\t")
+    
+    @staticmethod
+    def get_import_instructions() -> str:
+        """Возвращает пошаговую инструкцию по импорту в Google Sheets."""
+        return """
+📌 **Как импортировать данные в вашу Google Таблицу (без сервисного аккаунта):**
+
+1. Откройте вашу Google Таблицу.
+2. Нажмите **Файл → Импорт → Загрузить**.
+3. Выберите скачанный CSV-файл (или вставьте скопированный текст).
+4. В настройках импорта выберите:
+   - **Разделитель**: `Точка с запятой` (если CSV) или `Табуляция` (если TSV).
+   - **Место импорта**: выберите существующий лист или создайте новый.
+5. Нажмите **Импортировать** — данные появятся в таблице.
+
+💡 **Альтернатива:** скопируйте таблицу из раздела «Результаты» в интерфейсе и вставьте прямо в Google Sheets (Ctrl+V).
+"""
+
+# ============================================================================
+# БЛОК 12: ИНТЕРФЕЙС ПОЛЬЗОВАТЕЛЯ (STREAMLIT) — ПОЛНАЯ НЕСОКРАЩЕННАЯ ВЕРСИЯ
 # ============================================================================
 
 def init_session_state():
@@ -2960,6 +3024,30 @@ def init_session_state():
     
     if 'loaded_data_cache' not in st.session_state:
         st.session_state.loaded_data_cache = {}
+    
+    if 'onboarding_done' not in st.session_state:
+        st.session_state.onboarding_done = False
+    
+    if 'auto_gs_update' not in st.session_state:
+        st.session_state.auto_gs_update = False
+
+def show_onboarding():
+    """Показывает новичкам пошаговое руководство."""
+    with st.expander("🎓 Новичок? Начни здесь!", expanded=not st.session_state.get('onboarding_done', False)):
+        st.markdown("""
+        ### 🚀 Быстрый старт за 4 шага:
+        1. **Настрой API ключи** (раздел "Настройки") — опционально, можно пропустить.
+        2. **Загрузи данные** (раздел "Загрузка данных") — система сама подберёт источник.
+        3. **Рассчитай юнит-экономику** (раздел "Калькулятор FBS") — введи параметры и получи результат.
+        4. **Экспортируй в Google Таблицу** (раздел "Google Sheets"):
+           - Скачай CSV или скопируй данные и вставь в свою таблицу (инструкция внутри).
+           - Если есть сервисный аккаунт — включи автоматическую синхронизацию.
+        ---
+        🔗 Все данные всегда можно обновить вручную за пару кликов.
+        """)
+        if st.button("✅ Понятно, больше не показывать"):
+            st.session_state.onboarding_done = True
+            st.rerun()
 
 def render_sidebar():
     with st.sidebar:
@@ -2967,7 +3055,7 @@ def render_sidebar():
         <div style='text-align: center; padding: 20px 15px; background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460); border-radius: 12px; margin-bottom: 25px;'>
             <h1 style='color: white; margin: 0; font-size: 1.5em;'>🚀 FBS PRO</h1>
             <p style='color: #a8a8d0; margin: 8px 0 0 0; font-size: 0.9em;'>Полная ИИ-версия</p>
-            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v7.1.0 | API → AI → CSV → User</p>
+            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v7.2.0 | API → AI → CSV → User</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -2982,6 +3070,7 @@ def render_sidebar():
             "🎯 Анализ сценариев": "what_if",
             "💡 Рекомендации": "recommendations",
             "📥 Экспорт": "export",
+            "🌐 Google Sheets": "gsheets",
             "⚙️ Настройки": "settings"
         }
         
@@ -3095,6 +3184,10 @@ def main():
     current_section = st.session_state.get('current_section', 'main')
     calculator = st.session_state.calculator
     
+    # Показываем онбординг только на главной
+    if current_section == 'main':
+        show_onboarding()
+    
     if current_section == 'main':
         st.markdown("""
         <div style='text-align: center; padding: 50px 30px; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); border-radius: 20px; margin-bottom: 35px;'>
@@ -3106,7 +3199,7 @@ def main():
                 Ozon • Wildberries • Яндекс Маркет | DeepSeek AI | Каскадная загрузка
             </p>
             <p style='color: #8888cc; font-size: 0.9em; margin: 10px 0;'>
-                🆕 v7.1.0 — 100% сохранение исходного UI + новые функции ИИ
+                🆕 v7.2.0 — 100% сохранение исходного UI + интеграция с Google Sheets без сервисного аккаунта
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -3119,9 +3212,10 @@ def main():
         3. **Актуальные данные** — интеграция с API Ozon, Wildberries, Яндекс Маркет
         4. **AI-обогащение** — DeepSeek для получения данных при недоступности API
         5. **Полная прозрачность** — видно какой источник использован и с какой уверенностью
+        6. **Google Sheets без аккаунта** — экспорт в один клик, инструкция внутри
         
         ### 📋 Что нужно для работы:
-        - **API ключи** маркетплейсов (в разделе Настройки)
+        - **API ключи** маркетплейсов (в разделе Настройки) — опционально
         - **DeepSeek API ключ** для AI-обогащения (опционально)
         - **CSV файлы** с данными (если API недоступны)
         - **Входные данные** товара (цена, вес, расстояния и т.д.)
@@ -3165,117 +3259,189 @@ def main():
         calc_mode = st.radio("Режим расчета:", ["📱 Расчет одного товара", "📊 Массовый расчет из файла"], horizontal=True)
         
         if calc_mode == "📱 Расчет одного товара":
-            col1, col2 = st.columns(2)
-            with col1:
-                artikul = st.text_input("Артикул", "SKU-001")
-                product_name = st.text_input("Наименование", "Тестовый товар")
+            with st.form("single_calc_form"):
+                st.markdown("### 📝 Введите данные товара")
+                st.caption("Все поля обязательны, если не указано иное. Наведи курсор на название для подсказки.")
                 
-                tariff_categories = list(calculator.current_tariffs.keys()) if calculator.current_tariffs else ["default"]
-                category = st.selectbox("Категория", tariff_categories)
-                
-                selling_price = st.number_input("Цена продажи, ₽", 5000.0, step=100.0)
-                cogs = st.number_input("Себестоимость, ₽", 3000.0, step=100.0)
-            
-            with col2:
-                weight = st.number_input("Вес, кг", 1.5, step=0.1)
-                length = st.number_input("Длина, см", 20, step=1)
-                width = st.number_input("Ширина, см", 15, step=1)
-                height = st.number_input("Высота, см", 10, step=1)
-                warehouse_distance = st.number_input("Расстояние до МП, км", 50.0, step=1.0)
-                daily_sales = st.number_input("Продаж в день, шт", 5, step=1)
-                has_night = st.checkbox("Ночная смена")
-            
-            with st.expander("⚙️ Расширенные параметры"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    packaging_cost = st.number_input("Упаковка, ₽", 30.0, step=5.0)
-                    marketing_budget = st.number_input("Маркетинг на ед., ₽", 50.0, step=10.0)
-                    operator_rate = st.number_input("Ставка оператора, ₽/ч", 300.0, step=50.0)
-                    stock_depth = st.number_input("Глубина запаса, дн", 30, step=1)
-                
-                with col2:
-                    pick_pack_time = st.number_input("Pick & Pack, мин", 5.0, step=0.5)
-                    pallet_capacity = st.number_input("Единиц на паллете", 100, step=10)
-                    transport_cost = st.number_input("Транспорт, ₽/км", 20.0, step=5.0)
-                    safety_stock = st.number_input("Страховой запас, дн", 7, step=1)
-            
-            if st.button("🚀 Рассчитать", type="primary"):
-                input_data = FBSInputData(
-                    artikul=artikul, product_name=product_name, category=category,
-                    selling_price=selling_price, cogs=cogs,
-                    weight_kg=weight, length_cm=length, width_cm=width, height_cm=height,
-                    warehouse_distance_km=warehouse_distance, daily_sales=daily_sales,
-                    has_night_shift=has_night, packaging_cost=packaging_cost,
-                    marketing_budget_per_unit=marketing_budget, operator_hourly_rate=operator_rate,
-                    stock_depth_days=stock_depth, pick_pack_time_min=pick_pack_time,
-                    pallet_capacity=pallet_capacity, transport_cost_per_km=transport_cost,
-                    safety_stock_days=safety_stock
-                )
-                
-                result = calculator.calculate_unit_economics(input_data)
-                st.session_state.results = [result]
-                st.session_state.input_data_list = [input_data]
-                
-                st.markdown("---")
-                st.markdown("## 📊 Результаты расчета")
-                
-                source_icon = "🔌" if "api" in result.data_source else "🤖" if "deepseek" in result.data_source else "📄" if "csv" in result.data_source else "⚠️"
-                st.caption(f"{source_icon} Источник данных: {result.data_source} | Уверенность: {result.data_confidence*100:.0f}%")
-                
-                col1, col2, col3, col4, col5 = st.columns(5)
-                with col1:
-                    st.metric("💰 Прибыль", f"{result.gross_profit:,.0f} ₽", f"{result.margin_percent:.1f}% маржи")
-                with col2:
-                    st.metric("📦 Расходы", f"{result.total_expenses:,.0f} ₽")
-                with col3:
-                    st.metric("📈 ROI", f"{result.roi_percent:.1f}%")
-                with col4:
-                    st.metric("👥 LTV/CAC", f"{result.ltv_cac_ratio:.1f}x")
-                with col5:
-                    st.metric("💵 Опт. цена", f"{result.optimal_price:,.0f} ₽")
-                
-                st.markdown("### 📋 Детализация")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**💰 Финансовые показатели**")
-                    st.metric("Комиссия МП", f"{result.commission:,.0f} ₽")
-                    st.metric("First Mile", f"{result.first_mile_cost:,.0f} ₽")
-                    st.metric("Last Mile", f"{result.last_mile_cost:,.0f} ₽")
-                    st.metric("Pick & Pack", f"{result.pick_pack_cost:,.0f} ₽")
-                    st.metric("Упаковка", f"{result.packaging_cost:,.0f} ₽")
-                    st.metric("Эквайринг", f"{result.acquiring_cost:,.0f} ₽")
-                    st.metric("Возвраты", f"{result.return_cost:,.0f} ₽")
-                    st.metric("Штрафы", f"{result.penalty_cost:,.0f} ₽")
-                    st.metric("Маркетинг", f"{result.marketing_cost:,.0f} ₽")
-                    st.metric("Складские", f"{result.warehouse_cost:,.0f} ₽")
-                    st.metric("Налог", f"{result.tax_cost:,.0f} ₽")
-                
-                with col2:
-                    st.markdown("**📊 Оптимизация склада**")
-                    st.metric("Оптимальный запас (EOQ)", f"{result.optimal_stock_units} шт")
-                    st.metric("Страховой запас", f"{result.safety_stock_units} шт")
-                    st.metric("Точка заказа", f"{result.reorder_point_units} шт")
-                    st.metric("Оборачиваемость", f"{result.stock_turnover_days:.1f} дн")
-                    st.metric("Потенциал оптимизации", f"{result.stock_optimization_potential:.1f}%")
+                    artikul = st.text_input("Артикул", "SKU-001", help="Уникальный идентификатор товара в вашей системе")
+                    product_name = st.text_input("Наименование", "Тестовый товар", help="Название товара для отчётов")
                     
-                    st.markdown("**🚚 Логистика**")
-                    st.metric("Зона", result.logistic_zone_label)
-                    st.metric("Точка безубыт. (км)", f"{result.break_even_distance_km:.0f} км")
-                    st.metric("Взвеш. доставка", f"{result.weighted_delivery_cost:,.0f} ₽")
+                    tariff_categories = list(calculator.current_tariffs.keys()) if calculator.current_tariffs else ["default"]
+                    category = st.selectbox("Категория", tariff_categories, help="Выберите категорию, от которой зависит комиссия и тарифы доставки")
                     
-                    st.markdown("**📅 Сезонность**")
-                    st.metric("Коэффициент", f"{result.seasonal_factor:.2f}")
-                    st.metric("Скорр. маржа", f"{result.adjusted_margin_percent:.1f}%")
+                    selling_price = st.number_input("Цена продажи, ₽", min_value=0.0, step=100.0, help="Розничная цена на маркетплейсе")
+                    cogs = st.number_input("Себестоимость, ₽", min_value=0.0, step=100.0, help="Закупочная цена или себестоимость единицы")
                 
-                st.markdown("### 💰 Рекомендованные цены")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Текущая цена", f"{result.selling_price:,.0f} ₽")
                 with col2:
-                    st.metric("Оптимальная (эластичность)", f"{result.optimal_price:,.0f} ₽")
-                with col3:
-                    rec_price_25 = result.total_expenses / (1 - 0.25)
-                    st.metric("При марже 25%", f"{rec_price_25:,.0f} ₽")
+                    weight = st.number_input("Вес, кг", min_value=0.0, step=0.1, help="Вес брутто товара")
+                    length = st.number_input("Длина, см", min_value=0.0, step=1.0, help="Длина упаковки (для объемного веса)")
+                    width = st.number_input("Ширина, см", min_value=0.0, step=1.0)
+                    height = st.number_input("Высота, см", min_value=0.0, step=1.0)
+                    warehouse_distance = st.number_input("Расстояние до склада МП, км", min_value=0.0, step=1.0, help="Расстояние от вашего склада до сортировочного центра маркетплейса")
+                    daily_sales = st.number_input("Продаж в день, шт", min_value=1, step=1, help="Среднее количество продаж в день")
+                    has_night = st.checkbox("Ночная смена", help="Включите, если работаете в ночную смену (уменьшает штрафы)")
+                
+                with st.expander("⚙️ Расширенные параметры"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        packaging_cost = st.number_input("Упаковка, ₽", min_value=0.0, step=5.0, help="Стоимость упаковочных материалов на единицу")
+                        marketing_budget = st.number_input("Маркетинг на ед., ₽", min_value=0.0, step=10.0, help="Рекламный бюджет на одну продажу")
+                        operator_rate = st.number_input("Ставка оператора, ₽/ч", min_value=0.0, step=50.0, help="Часовая ставка сотрудника на сборке")
+                        stock_depth = st.number_input("Глубина запаса, дн", min_value=1, step=1, help="На сколько дней хватает текущего запаса")
+                    
+                    with col2:
+                        pick_pack_time = st.number_input("Pick & Pack, мин", min_value=0.0, step=0.5, help="Время на сборку и упаковку одного заказа")
+                        pallet_capacity = st.number_input("Единиц на паллете", min_value=1, step=10, help="Сколько товаров помещается на одну паллету")
+                        transport_cost = st.number_input("Транспорт, ₽/км", min_value=0.0, step=5.0, help="Стоимость перевозки за км (с учётом возврата)")
+                        safety_stock = st.number_input("Страховой запас, дн", min_value=0, step=1, help="Дополнительный запас на случай скачков спроса")
+                
+                submitted = st.form_submit_button("🚀 Рассчитать", type="primary")
+                
+                if submitted:
+                    input_data = FBSInputData(
+                        artikul=artikul, product_name=product_name, category=category,
+                        selling_price=selling_price, cogs=cogs,
+                        weight_kg=weight, length_cm=length, width_cm=width, height_cm=height,
+                        warehouse_distance_km=warehouse_distance, daily_sales=daily_sales,
+                        has_night_shift=has_night, packaging_cost=packaging_cost,
+                        marketing_budget_per_unit=marketing_budget, operator_hourly_rate=operator_rate,
+                        stock_depth_days=stock_depth, pick_pack_time_min=pick_pack_time,
+                        pallet_capacity=pallet_capacity, transport_cost_per_km=transport_cost,
+                        safety_stock_days=safety_stock
+                    )
+                    
+                    result = calculator.calculate_unit_economics(input_data)
+                    st.session_state.results = [result]
+                    st.session_state.input_data_list = [input_data]
+                    
+                    st.markdown("---")
+                    st.markdown("## 📊 Результаты расчета")
+                    
+                    source_icon = "🔌" if "api" in result.data_source else "🤖" if "deepseek" in result.data_source else "📄" if "csv" in result.data_source else "⚠️"
+                    st.caption(f"{source_icon} Источник данных: {result.data_source} | Уверенность: {result.data_confidence*100:.0f}%")
+                    
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    with col1:
+                        st.metric("💰 Прибыль", f"{result.gross_profit:,.0f} ₽", f"{result.margin_percent:.1f}% маржи")
+                    with col2:
+                        st.metric("📦 Расходы", f"{result.total_expenses:,.0f} ₽")
+                    with col3:
+                        st.metric("📈 ROI", f"{result.roi_percent:.1f}%")
+                    with col4:
+                        st.metric("👥 LTV/CAC", f"{result.ltv_cac_ratio:.1f}x")
+                    with col5:
+                        st.metric("💵 Опт. цена", f"{result.optimal_price:,.0f} ₽")
+                    
+                    st.markdown("### 📋 Детализация")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**💰 Финансовые показатели**")
+                        st.metric("Комиссия МП", f"{result.commission:,.0f} ₽")
+                        st.metric("First Mile", f"{result.first_mile_cost:,.0f} ₽")
+                        st.metric("Last Mile", f"{result.last_mile_cost:,.0f} ₽")
+                        st.metric("Pick & Pack", f"{result.pick_pack_cost:,.0f} ₽")
+                        st.metric("Упаковка", f"{result.packaging_cost:,.0f} ₽")
+                        st.metric("Эквайринг", f"{result.acquiring_cost:,.0f} ₽")
+                        st.metric("Возвраты", f"{result.return_cost:,.0f} ₽")
+                        st.metric("Штрафы", f"{result.penalty_cost:,.0f} ₽")
+                        st.metric("Маркетинг", f"{result.marketing_cost:,.0f} ₽")
+                        st.metric("Складские", f"{result.warehouse_cost:,.0f} ₽")
+                        st.metric("Налог", f"{result.tax_cost:,.0f} ₽")
+                    
+                    with col2:
+                        st.markdown("**📊 Оптимизация склада**")
+                        st.metric("Оптимальный запас (EOQ)", f"{result.optimal_stock_units} шт")
+                        st.metric("Страховой запас", f"{result.safety_stock_units} шт")
+                        st.metric("Точка заказа", f"{result.reorder_point_units} шт")
+                        st.metric("Оборачиваемость", f"{result.stock_turnover_days:.1f} дн")
+                        st.metric("Потенциал оптимизации", f"{result.stock_optimization_potential:.1f}%")
+                        
+                        st.markdown("**🚚 Логистика**")
+                        st.metric("Зона", result.logistic_zone_label)
+                        st.metric("Точка безубыт. (км)", f"{result.break_even_distance_km:.0f} км")
+                        st.metric("Взвеш. доставка", f"{result.weighted_delivery_cost:,.0f} ₽")
+                        
+                        st.markdown("**📅 Сезонность**")
+                        st.metric("Коэффициент", f"{result.seasonal_factor:.2f}")
+                        st.metric("Скорр. маржа", f"{result.adjusted_margin_percent:.1f}%")
+                    
+                    st.markdown("### 💰 Рекомендованные цены")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Текущая цена", f"{result.selling_price:,.0f} ₽")
+                    with col2:
+                        st.metric("Оптимальная (эластичность)", f"{result.optimal_price:,.0f} ₽")
+                    with col3:
+                        rec_price_25 = result.total_expenses / (1 - 0.25)
+                        st.metric("При марже 25%", f"{rec_price_25:,.0f} ₽")
+                    
+                    # Кнопка для копирования в буфер (для Google Sheets)
+                    if st.button("📋 Скопировать результат в буфер (для вставки в Google Sheets)"):
+                        row_data = [
+                            result.artikul, result.product_name, result.selling_price,
+                            result.gross_profit, f"{result.margin_percent:.1f}%",
+                            result.roi_percent, result.commission, result.first_mile_cost,
+                            result.last_mile_cost, result.pick_pack_cost, result.packaging_cost,
+                            result.acquiring_cost, result.return_cost, result.penalty_cost,
+                            result.marketing_cost, result.warehouse_cost, result.tax_cost,
+                            result.optimal_stock_units, result.stock_turnover_days,
+                            result.logistic_zone_label, result.data_source
+                        ]
+                        st.code("\t".join(str(x) for x in row_data), language="text")
+                        st.caption("Скопируйте эту строку и вставьте в Google Sheets как новую строку.")
+                    
+                    # Автоматическое обновление Google Sheets, если включено
+                    if st.session_state.get('auto_gs_update', False) and st.session_state.get('gs_manager'):
+                        manager = st.session_state.gs_manager
+                        if manager.sheet:
+                            manager.update_all(st.session_state.calculator.current_tariffs, [result])
+                            st.success("✅ Данные автоматически обновлены в Google Sheets!")
+        
+        else:  # Массовый расчет
+            st.markdown("### 📊 Массовый расчет из файла")
+            uploaded_file = st.file_uploader("Загрузите CSV с данными товаров", type=['csv'])
+            if uploaded_file:
+                df = pd.read_csv(uploaded_file)
+                st.dataframe(df, width='stretch')
+                if st.button("🚀 Рассчитать все"):
+                    input_list = []
+                    for _, row in df.iterrows():
+                        try:
+                            data = FBSInputData(
+                                artikul=str(row.get('artikul', '')),
+                                product_name=str(row.get('product_name', '')),
+                                category=str(row.get('category', 'default')),
+                                selling_price=float(row.get('selling_price', 0)),
+                                cogs=float(row.get('cogs', 0)),
+                                weight_kg=float(row.get('weight_kg', 0)),
+                                length_cm=float(row.get('length_cm', 0)),
+                                width_cm=float(row.get('width_cm', 0)),
+                                height_cm=float(row.get('height_cm', 0)),
+                                warehouse_distance_km=float(row.get('warehouse_distance_km', 0)),
+                                daily_sales=int(row.get('daily_sales', 5)),
+                                packaging_cost=float(row.get('packaging_cost', 0)),
+                                marketing_budget_per_unit=float(row.get('marketing_budget', 0)),
+                                operator_hourly_rate=float(row.get('operator_rate', 300)),
+                                stock_depth_days=int(row.get('stock_depth', 30)),
+                                pick_pack_time_min=float(row.get('pick_pack_time', 5)),
+                                pallet_capacity=int(row.get('pallet_capacity', 100)),
+                                transport_cost_per_km=float(row.get('transport_cost', 20)),
+                                safety_stock_days=int(row.get('safety_stock', 7)),
+                                has_night_shift=bool(row.get('night_shift', False))
+                            )
+                            input_list.append(data)
+                        except Exception as e:
+                            st.warning(f"⚠️ Ошибка в строке {row}: {e}")
+                    
+                    if input_list:
+                        with st.spinner("Выполняется расчет..."):
+                            results = calculator.calculate_batch(input_list)
+                            st.session_state.results = results
+                            st.session_state.input_data_list = input_list
+                            st.success(f"✅ Рассчитано {len(results)} товаров!")
+                            st.rerun()
     
     elif current_section == 'data_loader':
         render_intelligent_data_loader_ui()
@@ -3550,7 +3716,7 @@ def main():
         st.success(f"✅ Доступно для экспорта: {len(results)} товаров")
         st.info("📌 Данные экспортируются на основе реальных расчетов, без захардкоженных значений.")
         
-        tab1, tab2, tab3 = st.tabs(["📊 Excel", "📄 CSV", "🌐 Google Sheets"])
+        tab1, tab2, tab3 = st.tabs(["📊 Excel", "📄 CSV", "🌐 Google Sheets (ручной)"])
         
         with tab1:
             st.info("Excel файл содержит формулы и условное форматирование. При изменении тарифов все расчеты пересчитываются автоматически.")
@@ -3682,32 +3848,261 @@ def main():
                     )
         
         with tab3:
-            st.markdown("""
-            ### 🌐 Экспорт в Google Sheets
-            
-            Для экспорта в Google Sheets необходимо:
-            1. Создать сервисный аккаунт в Google Cloud Console
-            2. Скачать credentials.json
-            3. Загрузить файл ниже
+            st.markdown("### 📤 Экспорт в Google Таблицы (без сервисного аккаунта)")
+            st.info("""
+            **Два способа обновить вашу таблицу:**
+
+            1. **Скачать CSV / TSV** и импортировать вручную (инструкция ниже).
+            2. **Скопировать таблицу** прямо из интерфейса и вставить в Google Sheets (Ctrl+V).
             """)
             
-            credentials_file = st.file_uploader(
-                "📁 Загрузите credentials.json",
-                type=['json'],
-                help="Файл с ключами сервисного аккаунта Google"
-            )
-            
-            if credentials_file and st.button("📤 Экспортировать в Google Sheets", type="primary"):
-                if GSPREAD_AVAILABLE:
-                    st.info("Функция экспорта в Google Sheets требует настройки.")
-                    # Здесь будет реальная логика экспорта
+            if not results:
+                st.warning("⚠️ Нет данных для экспорта.")
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    sep = st.selectbox("Формат данных", ["CSV (;)","TSV (табуляция)"], index=0, key="gs_export_sep")
+                    if sep == "CSV (;)":
+                        csv_data = GoogleSheetsExporter.generate_csv(results, separator=";")
+                        file_ext = "csv"
+                        mime = "text/csv"
+                        label = "CSV (;)"
+                    else:
+                        csv_data = GoogleSheetsExporter.generate_tsv(results)
+                        file_ext = "tsv"
+                        mime = "text/tab-separated-values"
+                        label = "TSV (табуляция)"
+                    
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"FBS_Results_{st.session_state.marketplace}_{timestamp}.{file_ext}"
+                    
+                    st.download_button(
+                        label=f"📥 Скачать {label}",
+                        data=csv_data.encode('utf-8-sig'),
+                        file_name=filename,
+                        mime=mime,
+                        type="primary"
+                    )
+                
+                with col2:
+                    st.markdown("#### 📋 Копировать в буфер")
+                    st.caption("Нажмите кнопку, затем вставьте (Ctrl+V) в Google Sheets на нужный лист.")
+                    if st.button("📋 Скопировать TSV (для вставки)"):
+                        st.code(GoogleSheetsExporter.generate_tsv(results), language="text")
+                        st.info("Скопируйте текст выше и вставьте в Google Sheets (данные вставятся как таблица).")
+                
+                st.markdown("---")
+                st.markdown("### 📖 Инструкция по импорту")
+                st.markdown(GoogleSheetsExporter.get_import_instructions())
+                
+                with st.expander("⚙️ Хотите автоматическое обновление? (требуется сервисный аккаунт)"):
+                    st.markdown("""
+                    Если у вас есть **credentials.json** от Google сервисного аккаунта, вы можете настроить автоматическую синхронизацию.
+                    
+                    1. Положите файл в папку `config/` (или загрузите через интерфейс).
+                    2. Перейдите в раздел **Настройки → Google Sheets** и включите автообновление.
+                    3. После каждого расчёта данные будут обновляться в таблице автоматически.
+                    
+                    [Как создать сервисный аккаунт](https://developers.google.com/workspace/guides/create-credentials)
+                    """)
+                    
+                    uploaded_creds = st.file_uploader("Загрузить credentials.json", type=['json'], key="creds_upload")
+                    if uploaded_creds:
+                        creds_path = CONFIG_DIR / "google_credentials.json"
+                        creds_path.write_bytes(uploaded_creds.getvalue())
+                        st.success("✅ Файл сохранён! Теперь вы можете использовать автоматический режим.")
+                        st.rerun()
+    
+    elif current_section == 'gsheets':
+        st.markdown("## 🌐 Интеграция с Google Таблицами (ручной режим)")
+        st.info("""
+        **Как это работает:**  
+        Вы создаёте или подключаете существующую Google Таблицу, а приложение автоматически обновляет в ней:
+        - **Актуальные тарифы** маркетплейса (из API / AI / CSV)
+        - **Результаты расчётов** по всем товарам
+        
+        При изменении тарифов в приложении вы можете **одним кликом** обновить таблицу.
+        """)
+        
+        # Инициализация менеджера (если есть credentials)
+        if 'gs_manager' not in st.session_state:
+            # Пытаемся создать менеджер, если есть credentials
+            creds_path = CONFIG_DIR / "google_credentials.json"
+            if creds_path.exists() and GSPREAD_AVAILABLE:
+                try:
+                    from google.oauth2.service_account import Credentials
+                    gc = gspread.service_account(filename=str(creds_path))
+                    st.session_state.gs_manager = gc
+                except Exception as e:
+                    st.warning(f"⚠️ Не удалось загрузить credentials: {e}")
+            else:
+                st.session_state.gs_manager = None
+        
+        manager = st.session_state.gs_manager
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            sheet_url = st.text_input("🔗 Ссылка на существующую таблицу", 
+                                      value=st.session_state.get('gsheet_url', ''),
+                                      help="Вставьте URL таблицы, к которой у вас есть доступ на редактирование")
+            if st.button("📂 Открыть таблицу"):
+                if sheet_url and manager:
+                    try:
+                        sheet = manager.open_by_url(sheet_url)
+                        st.session_state.gsheet = sheet
+                        st.session_state.gsheet_url = sheet_url
+                        st.success(f"✅ Таблица открыта: {sheet.title}")
+                    except Exception as e:
+                        st.error(f"❌ Не удалось открыть таблицу: {e}")
                 else:
-                    st.warning("⚠️ GSpread не установлен. Установите: pip install gspread")
+                    st.warning("⚠️ Загрузите credentials.json в разделе 'Настройки' или используйте ручной экспорт.")
+        
+        with col2:
+            st.markdown("#### ➕ Создать новую таблицу")
+            new_title = st.text_input("Название новой таблицы", "FBS Unit Economics")
+            if st.button("🆕 Создать и открыть"):
+                if manager:
+                    try:
+                        sheet = manager.create(new_title)
+                        st.session_state.gsheet = sheet
+                        st.session_state.gsheet_url = sheet.url
+                        st.success(f"✅ Таблица создана! Открыть: {sheet.url}")
+                        st.markdown(f"[Открыть таблицу]({sheet.url})")
+                    except Exception as e:
+                        st.error(f"❌ Ошибка создания: {e}")
+                else:
+                    st.warning("⚠️ Загрузите credentials.json в разделе 'Настройки'.")
+        
+        st.markdown("---")
+        st.markdown("### 📤 Обновление данных")
+        
+        if 'gsheet' in st.session_state and st.session_state.gsheet:
+            sheet = st.session_state.gsheet
+            st.success(f"Текущая таблица: **{sheet.title}**")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("🔄 Обновить тарифы"):
+                    tariffs = st.session_state.calculator.current_tariffs
+                    if tariffs:
+                        with st.spinner("Обновление тарифов..."):
+                            try:
+                                # Простой пример обновления (реализуйте свой метод)
+                                ws = sheet.worksheet("Тарифы")
+                                ws.clear()
+                                ws.append_row(['Категория', 'Комиссия,%', 'Мин.комиссия', 'Last Mile база', 
+                                             'Last Mile за кг', 'Эквайринг,%', 'Возвраты,%', 'Штрафы,%',
+                                             'Источник', 'Обновлено'])
+                                now = datetime.now().isoformat()
+                                for cat, data in tariffs.items():
+                                    ws.append_row([
+                                        cat,
+                                        round(data.get('commission_rate', 0) * 100, 2),
+                                        data.get('min_commission', 0),
+                                        data.get('last_mile_base', 0),
+                                        data.get('last_mile_per_kg', 0),
+                                        round(data.get('acquiring_fee', 0) * 100, 2),
+                                        round(data.get('return_fee', 0) * 100, 2),
+                                        round(data.get('penalty_rate', 0) * 100, 2),
+                                        data.get('source', 'unknown'),
+                                        now
+                                    ])
+                                st.success("✅ Тарифы обновлены в таблице!")
+                            except Exception as e:
+                                st.error(f"❌ Ошибка обновления: {e}")
+                    else:
+                        st.warning("⚠️ Сначала загрузите тарифы (раздел 'Тарифы')")
+            with col2:
+                if st.button("📊 Обновить результаты"):
+                    results = st.session_state.results
+                    if results:
+                        with st.spinner("Обновление результатов..."):
+                            try:
+                                ws = sheet.worksheet("Результаты")
+                                ws.clear()
+                                headers = ['Артикул', 'Название', 'Цена', 'Прибыль', 'Маржа,%', 'ROI,%',
+                                           'Комиссия', 'First Mile', 'Last Mile', 'Pick&Pack', 'Упаковка',
+                                           'Эквайринг', 'Возвраты', 'Штрафы', 'Маркетинг', 'Склад', 'Налог',
+                                           'Опт.запас', 'Оборач., дн', 'Лог.зона', 'Источник']
+                                ws.append_row(headers)
+                                for r in results:
+                                    ws.append_row([
+                                        r.artikul, r.product_name, r.selling_price, r.gross_profit,
+                                        r.margin_percent, r.roi_percent, r.commission, r.first_mile_cost,
+                                        r.last_mile_cost, r.pick_pack_cost, r.packaging_cost, r.acquiring_cost,
+                                        r.return_cost, r.penalty_cost, r.marketing_cost, r.warehouse_cost,
+                                        r.tax_cost, r.optimal_stock_units, r.stock_turnover_days,
+                                        r.logistic_zone_label, r.data_source
+                                    ])
+                                st.success("✅ Результаты обновлены в таблице!")
+                            except Exception as e:
+                                st.error(f"❌ Ошибка обновления: {e}")
+                    else:
+                        st.warning("⚠️ Сначала выполните расчёт (раздел 'Калькулятор')")
+            with col3:
+                if st.button("🔄 Обновить всё"):
+                    tariffs = st.session_state.calculator.current_tariffs
+                    results = st.session_state.results
+                    if tariffs and results:
+                        with st.spinner("Обновление всех данных..."):
+                            try:
+                                # Обновляем тарифы
+                                ws = sheet.worksheet("Тарифы")
+                                ws.clear()
+                                ws.append_row(['Категория', 'Комиссия,%', 'Мин.комиссия', 'Last Mile база', 
+                                             'Last Mile за кг', 'Эквайринг,%', 'Возвраты,%', 'Штрафы,%',
+                                             'Источник', 'Обновлено'])
+                                now = datetime.now().isoformat()
+                                for cat, data in tariffs.items():
+                                    ws.append_row([
+                                        cat,
+                                        round(data.get('commission_rate', 0) * 100, 2),
+                                        data.get('min_commission', 0),
+                                        data.get('last_mile_base', 0),
+                                        data.get('last_mile_per_kg', 0),
+                                        round(data.get('acquiring_fee', 0) * 100, 2),
+                                        round(data.get('return_fee', 0) * 100, 2),
+                                        round(data.get('penalty_rate', 0) * 100, 2),
+                                        data.get('source', 'unknown'),
+                                        now
+                                    ])
+                                # Обновляем результаты
+                                ws2 = sheet.worksheet("Результаты")
+                                ws2.clear()
+                                headers = ['Артикул', 'Название', 'Цена', 'Прибыль', 'Маржа,%', 'ROI,%',
+                                           'Комиссия', 'First Mile', 'Last Mile', 'Pick&Pack', 'Упаковка',
+                                           'Эквайринг', 'Возвраты', 'Штрафы', 'Маркетинг', 'Склад', 'Налог',
+                                           'Опт.запас', 'Оборач., дн', 'Лог.зона', 'Источник']
+                                ws2.append_row(headers)
+                                for r in results:
+                                    ws2.append_row([
+                                        r.artikul, r.product_name, r.selling_price, r.gross_profit,
+                                        r.margin_percent, r.roi_percent, r.commission, r.first_mile_cost,
+                                        r.last_mile_cost, r.pick_pack_cost, r.packaging_cost, r.acquiring_cost,
+                                        r.return_cost, r.penalty_cost, r.marketing_cost, r.warehouse_cost,
+                                        r.tax_cost, r.optimal_stock_units, r.stock_turnover_days,
+                                        r.logistic_zone_label, r.data_source
+                                    ])
+                                st.success("✅ Все данные обновлены!")
+                            except Exception as e:
+                                st.error(f"❌ Ошибка обновления: {e}")
+                    else:
+                        st.warning("⚠️ Загрузите тарифы и выполните расчёт")
+            
+            st.markdown("---")
+            st.markdown("### ⚙️ Настройки автоматического обновления")
+            auto_update = st.checkbox("Автоматически обновлять таблицу при каждом новом расчёте", 
+                                      value=st.session_state.get('auto_gs_update', False))
+            st.session_state.auto_gs_update = auto_update
+            if auto_update:
+                st.info("✅ Включено автоматическое обновление. После каждого расчёта данные будут синхронизироваться.")
+        else:
+            st.warning("⚠️ Сначала откройте или создайте таблицу (нужен сервисный аккаунт) или используйте ручной экспорт в разделе 'Экспорт'.")
     
     elif current_section == 'settings':
         st.markdown("## ⚙️ Настройки")
         
-        tab1, tab2, tab3 = st.tabs(["🔑 API Ключи", "🏪 Маркетплейс и налоги", "📄 Импорт тарифов CSV"])
+        tab1, tab2, tab3, tab4 = st.tabs(["🔑 API Ключи", "🏪 Маркетплейс и налоги", "📄 Импорт тарифов CSV", "🌐 Google Sheets (сервисный аккаунт)"])
         
         with tab1:
             st.markdown("### 🔑 Настройка API ключей")
@@ -3825,6 +4220,28 @@ clothing,0.15,25,40,12,0.015,0.018
                         st.rerun()
                 except Exception as e:
                     st.error(f"❌ Ошибка загрузки CSV: {e}")
+        
+        with tab4:
+            st.markdown("### 🌐 Настройка сервисного аккаунта Google")
+            st.info("""
+            Загрузите файл credentials.json от сервисного аккаунта Google для автоматической синхронизации с Google Sheets.
+            
+            Если у вас нет сервисного аккаунта, вы можете использовать ручной экспорт через CSV/TSV (раздел "Экспорт").
+            """)
+            
+            uploaded_creds = st.file_uploader("📁 Загрузить credentials.json", type=['json'], key="settings_creds")
+            if uploaded_creds:
+                creds_path = CONFIG_DIR / "google_credentials.json"
+                creds_path.write_bytes(uploaded_creds.getvalue())
+                st.success("✅ Файл сохранён! Теперь вы можете использовать автоматический режим в разделе 'Google Sheets'.")
+                st.rerun()
+            
+            if (CONFIG_DIR / "google_credentials.json").exists():
+                st.success("✅ Файл credentials.json уже загружен.")
+                if st.button("🗑️ Удалить credentials.json"):
+                    (CONFIG_DIR / "google_credentials.json").unlink()
+                    st.success("✅ Файл удалён.")
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
