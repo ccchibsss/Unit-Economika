@@ -14,6 +14,7 @@
 5. ГИБКИЙ МАППИНГ КОЛОНОК — обучение системы соответствию столбцов
 6. ТРИ ЛИСТА В EXCEL: тарифы, расчёты, ABC/XYZ с дашбордами
 7. НИКАКИХ СОКРАЩЕНИЙ — абсолютно полный код
+8. ВЫБОР ИСТОЧНИКА ТАРИФОВ: API, AI, КОМБИНИРОВАННЫЙ
 ============================================================================
 """
 
@@ -987,9 +988,11 @@ class YandexMarketAPIManager:
                    use_ai_fallback: bool = True,
                    user_categories_csv: Optional[str] = None,
                    user_tariffs: Optional[Dict[str, Dict]] = None,
-                   column_mapping: Dict[str, str] = None) -> Dict[str, Dict]:
+                   column_mapping: Dict[str, str] = None,
+                   preferred_source: str = 'combined') -> Dict[str, Dict]:
         """
         Основной метод получения тарифов с каскадным фолбэком.
+        preferred_source: 'api', 'ai', 'combined'
         """
         if not force_refresh:
             cached = self.get_cached_tariffs()
@@ -999,25 +1002,33 @@ class YandexMarketAPIManager:
                     cached_time = cached.get('cached_at', '')
                     logger.info(f"📦 Использованы кэшированные тарифы Яндекс Маркет от {cached_time}")
                     return tariffs
-        logger.info(f"🔄 Загрузка тарифов Яндекс Маркет...")
+        logger.info(f"🔄 Загрузка тарифов Яндекс Маркет (источник: {preferred_source})...")
         tariffs = {}
-        # Шаг 1: API Яндекс Маркет
-        try:
-            tariffs = self.fetch_yandex_market_tariffs()
-        except Exception as e:
-            logger.error(f"❌ Ошибка API Яндекс Маркет: {e}")
-            tariffs = {}
-        # Шаг 2: DeepSeek AI
-        if not tariffs and use_ai_fallback:
-            logger.info(f"🤖 Прямое API недоступно, использую DeepSeek AI")
+        # Шаг 1: API Яндекс Маркет (если preferred_source 'api' или 'combined')
+        if preferred_source in ('api', 'combined'):
+            try:
+                tariffs = self.fetch_yandex_market_tariffs()
+                if tariffs and preferred_source == 'api':
+                    # если запрошен только API и он успешен, возвращаем
+                    self.save_tariffs_to_cache(tariffs)
+                    return tariffs
+            except Exception as e:
+                logger.error(f"❌ Ошибка API Яндекс Маркет: {e}")
+                tariffs = {}
+        # Шаг 2: DeepSeek AI (если preferred_source 'ai' или 'combined' и API не дал результатов)
+        if (preferred_source in ('ai', 'combined')) and not tariffs:
+            logger.info(f"🤖 Использую DeepSeek AI (preferred_source={preferred_source})")
             try:
                 ai_tariffs = self.fetch_tariffs_via_deepseek()
                 if ai_tariffs:
                     tariffs = ai_tariffs
                     logger.info(f"✅ Тарифы Яндекс Маркет получены через DeepSeek AI")
+                    if preferred_source == 'ai':
+                        self.save_tariffs_to_cache(tariffs)
+                        return tariffs
             except Exception as e:
                 logger.error(f"❌ DeepSeek также недоступен: {e}")
-        # Шаг 3: Пользовательские категории из CSV с маппингом
+        # Шаг 3: Пользовательские категории из CSV с маппингом (всегда как fallback)
         if not tariffs and user_categories_csv and column_mapping:
             logger.info(f"📄 Использую пользовательские категории из CSV с маппингом")
             csv_tariffs = self.load_user_categories(user_categories_csv, column_mapping)
@@ -1369,14 +1380,25 @@ class YandexMarketCalculator:
     def refresh_tariffs(self, force: bool = False, use_ai: bool = False,
                        user_categories_csv: Optional[str] = None,
                        user_tariffs: Optional[Dict[str, Dict]] = None,
-                       column_mapping: Dict[str, str] = None):
-        logger.info(f"🔄 Обновление тарифов Яндекс Маркет...")
+                       column_mapping: Dict[str, str] = None,
+                       preferred_source: str = 'combined'):
+        """
+        Обновить тарифы с выбором источника.
+        preferred_source: 'api', 'ai', 'combined'
+        """
+        logger.info(f"🔄 Обновление тарифов Яндекс Маркет (источник: {preferred_source})...")
+        # Для обратной совместимости: если use_ai=True и preferred_source не указан, устанавливаем 'combined'
+        if use_ai and preferred_source == 'combined':
+            pass  # уже combined
+        elif use_ai and preferred_source == 'api':
+            preferred_source = 'combined'  # если просят API с AI, то по сути combined
         self.current_tariffs = self.api_manager.get_tariffs(
             force_refresh=force,
             use_ai_fallback=use_ai,
             user_categories_csv=user_categories_csv,
             user_tariffs=user_tariffs,
-            column_mapping=column_mapping
+            column_mapping=column_mapping,
+            preferred_source=preferred_source
         )
         self.tariffs_updated_at = datetime.now()
         sources = set()
@@ -2002,6 +2024,8 @@ def init_session_state():
         st.session_state.column_mapping = {}
     if 'mapping_saved' not in st.session_state:
         st.session_state.mapping_saved = False
+    if 'preferred_source' not in st.session_state:
+        st.session_state.preferred_source = 'combined'  # 'api', 'ai', 'combined'
 
 def show_onboarding():
     with st.expander("🎓 Новичок? Начни здесь!", expanded=not st.session_state.get('onboarding_done', False)):
@@ -2068,9 +2092,9 @@ def render_sidebar():
             st.info("ℹ️ Расчеты не выполнялись")
         st.markdown("---")
         st.markdown("### ⚡ Быстрые действия")
-        if st.button("🔄 Обновить тарифы", use_container_width=True):
+        if st.button("🔄 Обновить тарифы (комб.)", use_container_width=True):
             with st.spinner("Загрузка тарифов..."):
-                calculator.refresh_tariffs(force=True)
+                calculator.refresh_tariffs(force=True, preferred_source='combined')
                 st.success("✅ Тарифы обновлены!")
                 st.rerun()
         if st.button("🗑️ Очистить результаты", use_container_width=True):
@@ -2172,6 +2196,33 @@ def render_categories():
     | **return_fee** | Возвраты (в долях) |
     | **penalty_rate** | Штраф за просрочку (в долях) |
     """)
+
+    # Выбор источника тарифов
+    st.markdown("### 🔄 Источник тарифов")
+    source_options = {
+        "Комбинированный (API → AI)": "combined",
+        "Только API Яндекс Маркет": "api",
+        "Только DeepSeek AI": "ai"
+    }
+    selected_label = st.radio(
+        "Выберите способ получения тарифов:",
+        list(source_options.keys()),
+        index=0
+    )
+    preferred_source = source_options[selected_label]
+    st.session_state.preferred_source = preferred_source
+
+    # Кнопка обновления тарифов с выбранным источником
+    if st.button("🔄 Обновить тарифы", type="primary", use_container_width=True):
+        with st.spinner(f"Загрузка тарифов из источника: {selected_label}..."):
+            calculator = st.session_state.calculator
+            calculator.refresh_tariffs(force=True, preferred_source=preferred_source)
+            st.success(f"✅ Тарифы обновлены! Источник: {calculator.tariffs_source}")
+            st.rerun()
+
+    # Загрузка пользовательских категорий через CSV
+    st.markdown("---")
+    st.markdown("### 📂 Загрузка своих категорий (CSV)")
     uploaded_categories = st.file_uploader("📁 Загрузите CSV с категориями и тарифами", type=['csv'], key="categories_upload")
     if uploaded_categories:
         try:
@@ -2203,14 +2254,15 @@ def render_categories():
                 selected = st.selectbox(f"Колонка для '{label}'", options, index=options.index(default) if default in options else 0, key=f"map_tariff_{field}")
                 if selected:
                     tariff_mapping[field] = selected
-            if st.button("📥 ЗАГРУЗИТЬ КАТЕГОРИИ В КАЛЬКУЛЯТОР", type="primary", use_container_width=True):
+            if st.button("📥 ЗАГРУЗИТЬ КАТЕГОРИИ В КАЛЬКУЛЯТОР", use_container_width=True):
                 csv_content = uploaded_categories.getvalue().decode('utf-8')
                 calculator = st.session_state.calculator
-                calculator.refresh_tariffs(force=True, user_categories_csv=csv_content, column_mapping=tariff_mapping)
+                calculator.refresh_tariffs(force=True, user_categories_csv=csv_content, column_mapping=tariff_mapping, preferred_source='combined')
                 st.success(f"✅ Загружено {len(df)} категорий с тарифами!")
                 st.rerun()
         except Exception as e:
             st.error(f"❌ Ошибка чтения файла: {e}")
+
     st.markdown("---")
     st.markdown("### 📊 Текущие тарифы")
     calculator = st.session_state.calculator
@@ -2227,14 +2279,9 @@ def render_categories():
             for cat, data in calculator.current_tariffs.items()
         ])
         st.dataframe(df_tariffs, use_container_width=True, height=300)
-        st.caption(f"📊 Всего категорий: {len(df_tariffs)} | Источник: {calculator.tariffs_source}")
-        if st.button("🔄 Обновить тарифы из API", use_container_width=True):
-            with st.spinner("Загрузка тарифов..."):
-                calculator.refresh_tariffs(force=True, use_ai=True)
-                st.success("✅ Тарифы обновлены!")
-                st.rerun()
+        st.caption(f"📊 Всего категорий: {len(df_tariffs)} | Источник: {calculator.tariffs_source} | Обновлено: {calculator.tariffs_updated_at.strftime('%d.%m.%Y %H:%M') if calculator.tariffs_updated_at else 'неизвестно'}")
     else:
-        st.warning("⚠️ Нет загруженных тарифов. Загрузите категории или используйте API.")
+        st.warning("⚠️ Нет загруженных тарифов. Загрузите категории или используйте API/AI.")
 
 def render_calculator():
     st.markdown("## 🧮 Калькулятор FBS")
@@ -2476,7 +2523,7 @@ def main():
         | Раздел | Описание |
         |--------|----------|
         | 📦 **Загрузка товаров** | CSV с артикулами, брендами, категориями, ценами и весогабаритами |
-        | 📋 **Категории и тарифы** | Загрузка своих категорий с тарифами |
+        | 📋 **Категории и тарифы** | Загрузка своих категорий с тарифами, выбор источника (API, AI, комб.) |
         | 🧮 **Калькулятор** | Расчёт юнит-экономики для всех товаров |
         | 📊 **Результаты** | Просмотр и анализ расчётов |
         | 📥 **Экспорт Excel** | Скачивание Excel с живыми формулами и 3 листами |
