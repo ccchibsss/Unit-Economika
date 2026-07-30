@@ -2585,6 +2585,9 @@ def init_session_state():
     
     if 'onboarding_done' not in st.session_state:
         st.session_state.onboarding_done = False
+    
+    if 'uploaded_df' not in st.session_state:
+        st.session_state.uploaded_df = None
 
 def show_onboarding():
     """
@@ -2707,342 +2710,340 @@ SKU-001,Samsung,electronics,15000,8000,0.5,15,10,2
 SKU-002,Nike,clothing,5000,2000,0.3,30,20,5
     """)
 
-uploaded_file = st.file_uploader(
-    "📁 Загрузите CSV с товарами",
-    type=['csv'],
-    help="Файл должен содержать колонки: artikul, brand, category, selling_price, cogs, weight_kg"
-)
+    uploaded_file = st.file_uploader(
+        "📁 Загрузите CSV с товарами",
+        type=['csv'],
+        help="Файл должен содержать колонки: artikul, brand, category, selling_price, cogs, weight_kg"
+    )
 
-if uploaded_file:
-    try:
-        df = pd.read_csv(uploaded_file)
-        
-        required_cols = ['artikul', 'category', 'selling_price', 'cogs', 'weight_kg']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        
-        if missing_cols:
-            st.error(f"❌ Отсутствуют обязательные колонки: {', '.join(missing_cols)}")
-            st.info(f"Доступные колонки: {', '.join(df.columns)}")
-            return
-        
-        st.success(f"✅ Загружено {len(df)} товаров")
-        
-        with st.expander("👁️ Превью данных", expanded=True):
-            st.dataframe(df.head(10), use_container_width=True)
-            st.caption(f"📊 Всего строк: {len(df)}")
-        
-        # Статистика по категориям
-        if 'category' in df.columns:
-            st.markdown("### 📊 Распределение по категориям")
-            category_counts = df['category'].value_counts().reset_index()
-            category_counts.columns = ['Категория', 'Количество']
-            st.dataframe(category_counts, use_container_width=True)
+    if uploaded_file:
+        try:
+            df = pd.read_csv(uploaded_file)
             
-            # Проверка соответствия категорий
-            calculator = st.session_state.calculator
-            available_categories = list(calculator.current_tariffs.keys())
-            missing_categories = set(df['category'].unique()) - set(available_categories)
+            required_cols = ['artikul', 'category', 'selling_price', 'cogs', 'weight_kg']
+            missing_cols = [col for col in required_cols if col not in df.columns]
             
-            if missing_categories:
-                st.warning(f"⚠️ Следующие категории не найдены в тарифах: {', '.join(missing_categories)}")
-                st.info("Загрузите категории с тарифами в разделе 'Категории и тарифы'")
-        
-        # Кнопка для начала расчёта
-        if st.button("🚀 ПЕРЕЙТИ К РАСЧЁТУ", type="primary", use_container_width=True):
-            st.session_state.uploaded_df = df
-            st.session_state.current_section = 'calculator'
-            st.rerun()
+            if missing_cols:
+                st.error(f"❌ Отсутствуют обязательные колонки: {', '.join(missing_cols)}")
+                st.info(f"Доступные колонки: {', '.join(df.columns)}")
+                return
             
-    except Exception as e:
-        st.error(f"❌ Ошибка чтения файла: {e}")
+            st.success(f"✅ Загружено {len(df)} товаров")
+            
+            with st.expander("👁️ Превью данных", expanded=True):
+                st.dataframe(df.head(10), use_container_width=True)
+                st.caption(f"📊 Всего строк: {len(df)}")
+            
+            # Статистика по категориям
+            if 'category' in df.columns:
+                st.markdown("### 📊 Распределение по категориям")
+                category_counts = df['category'].value_counts().reset_index()
+                category_counts.columns = ['Категория', 'Количество']
+                st.dataframe(category_counts, use_container_width=True)
+                
+                # Проверка соответствия категорий
+                calculator = st.session_state.calculator
+                available_categories = list(calculator.current_tariffs.keys())
+                missing_categories = set(df['category'].unique()) - set(available_categories)
+                
+                if missing_categories:
+                    st.warning(f"⚠️ Следующие категории не найдены в тарифах: {', '.join(missing_categories)}")
+                    st.info("Загрузите категории с тарифами в разделе 'Категории и тарифы'")
+            
+            # Кнопка для начала расчёта
+            if st.button("🚀 ПЕРЕЙТИ К РАСЧЁТУ", type="primary", use_container_width=True):
+                st.session_state.uploaded_df = df
+                st.session_state.current_section = 'calculator'
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"❌ Ошибка чтения файла: {e}")
 
 def render_categories():
-"""
-Отображение управления категориями и тарифами.
-"""
-st.markdown("## 📋 Категории и тарифы")
+    """
+    Отображение управления категориями и тарифами.
+    """
+    st.markdown("## 📋 Категории и тарифы")
+    
+    st.info("""
+    ### 📌 Загрузка категорий с тарифами
 
-st.info("""
-### 📌 Загрузка категорий с тарифами
+    Загрузите CSV файл со своими категориями и тарифами.
+    Формат должен содержать колонки:
 
-Загрузите CSV файл со своими категориями и тарифами.
-Формат должен содержать колонки:
-
-| Колонка | Описание |
-|---------|----------|
-| **category** | Название категории |
-| **commission_rate** | Комиссия (в долях, например 0.15 = 15%) |
-| **min_commission** | Минимальная комиссия, ₽ |
-| **last_mile_base** | Базовая стоимость Last Mile, ₽ |
-| **last_mile_per_kg** | Стоимость за кг, ₽ |
-| **acquiring_fee** | Эквайринг (в долях) |
-| **return_fee** | Возвраты (в долях) |
-| **penalty_rate** | Штраф за просрочку (в долях) |
-""")
-
-uploaded_categories = st.file_uploader(
-    "📁 Загрузите CSV с категориями и тарифами",
-    type=['csv'],
-    key="categories_upload"
-)
-
-if uploaded_categories:
-    try:
-        df = pd.read_csv(uploaded_categories)
-        
-        required_cols = ['category', 'commission_rate', 'min_commission', 'last_mile_base']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        
-        if missing_cols:
-            st.error(f"❌ Отсутствуют обязательные колонки: {', '.join(missing_cols)}")
-            st.info(f"Доступные колонки: {', '.join(df.columns)}")
-            return
-        
-        st.success(f"✅ Загружено {len(df)} категорий")
-        
-        with st.expander("👁️ Превью категорий", expanded=True):
-            st.dataframe(df, use_container_width=True)
-        
-        if st.button("📥 ЗАГРУЗИТЬ КАТЕГОРИИ В КАЛЬКУЛЯТОР", type="primary", use_container_width=True):
-            csv_content = uploaded_categories.getvalue().decode('utf-8')
-            calculator = st.session_state.calculator
-            calculator.refresh_tariffs(force=True, user_categories_csv=csv_content)
-            st.success(f"✅ Загружено {len(df)} категорий с тарифами!")
-            st.rerun()
+    | Колонка | Описание |
+    |---------|----------|
+    | **category** | Название категории |
+    | **commission_rate** | Комиссия (в долях, например 0.15 = 15%) |
+    | **min_commission** | Минимальная комиссия, ₽ |
+    | **last_mile_base** | Базовая стоимость Last Mile, ₽ |
+    | **last_mile_per_kg** | Стоимость за кг, ₽ |
+    | **acquiring_fee** | Эквайринг (в долях) |
+    | **return_fee** | Возвраты (в долях) |
+    | **penalty_rate** | Штраф за просрочку (в долях) |
+    """)
+    
+    uploaded_categories = st.file_uploader(
+        "📁 Загрузите CSV с категориями и тарифами",
+        type=['csv'],
+        key="categories_upload"
+    )
+    
+    if uploaded_categories:
+        try:
+            df = pd.read_csv(uploaded_categories)
             
-    except Exception as e:
-        st.error(f"❌ Ошибка чтения файла: {e}")
-
-st.markdown("---")
-st.markdown("### 📊 Текущие тарифы")
-
-calculator = st.session_state.calculator
-
-if calculator.current_tariffs:
-    df_tariffs = pd.DataFrame([
-        {
-            'Категория': cat,
-            'Комиссия, %': round(data.get('commission_rate', 0) * 100, 2),
-            'Мин. комиссия, ₽': data.get('min_commission', 0),
-            'Last Mile база, ₽': data.get('last_mile_base', 0),
-            'Last Mile за кг, ₽': data.get('last_mile_per_kg', 0),
-            'Источник': data.get('source', 'unknown')
-        }
-        for cat, data in calculator.current_tariffs.items()
-    ])
+            required_cols = ['category', 'commission_rate', 'min_commission', 'last_mile_base']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            
+            if missing_cols:
+                st.error(f"❌ Отсутствуют обязательные колонки: {', '.join(missing_cols)}")
+                st.info(f"Доступные колонки: {', '.join(df.columns)}")
+                return
+            
+            st.success(f"✅ Загружено {len(df)} категорий")
+            
+            with st.expander("👁️ Превью категорий", expanded=True):
+                st.dataframe(df, use_container_width=True)
+            
+            if st.button("📥 ЗАГРУЗИТЬ КАТЕГОРИИ В КАЛЬКУЛЯТОР", type="primary", use_container_width=True):
+                csv_content = uploaded_categories.getvalue().decode('utf-8')
+                calculator = st.session_state.calculator
+                calculator.refresh_tariffs(force=True, user_categories_csv=csv_content)
+                st.success(f"✅ Загружено {len(df)} категорий с тарифами!")
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"❌ Ошибка чтения файла: {e}")
     
-    st.dataframe(df_tariffs, use_container_width=True, height=300)
-    st.caption(f"📊 Всего категорий: {len(df_tariffs)} | Источник: {calculator.tariffs_source}")
+    st.markdown("---")
+    st.markdown("### 📊 Текущие тарифы")
     
-    if st.button("🔄 Обновить тарифы из API", use_container_width=True):
-        with st.spinner("Загрузка тарифов..."):
-            calculator.refresh_tariffs(force=True, use_ai=True)
-            st.success("✅ Тарифы обновлены!")
-            st.rerun()
-else:
-    st.warning("⚠️ Нет загруженных тарифов. Загрузите категории или используйте API.")
+    calculator = st.session_state.calculator
+    
+    if calculator.current_tariffs:
+        df_tariffs = pd.DataFrame([
+            {
+                'Категория': cat,
+                'Комиссия, %': round(data.get('commission_rate', 0) * 100, 2),
+                'Мин. комиссия, ₽': data.get('min_commission', 0),
+                'Last Mile база, ₽': data.get('last_mile_base', 0),
+                'Last Mile за кг, ₽': data.get('last_mile_per_kg', 0),
+                'Источник': data.get('source', 'unknown')
+            }
+            for cat, data in calculator.current_tariffs.items()
+        ])
+        
+        st.dataframe(df_tariffs, use_container_width=True, height=300)
+        st.caption(f"📊 Всего категорий: {len(df_tariffs)} | Источник: {calculator.tariffs_source}")
+        
+        if st.button("🔄 Обновить тарифы из API", use_container_width=True):
+            with st.spinner("Загрузка тарифов..."):
+                calculator.refresh_tariffs(force=True, use_ai=True)
+                st.success("✅ Тарифы обновлены!")
+                st.rerun()
+    else:
+        st.warning("⚠️ Нет загруженных тарифов. Загрузите категории или используйте API.")
 
 def render_calculator():
-"""
-Отображение калькулятора.
-"""
-st.markdown("## 🧮 Калькулятор FBS")
-
-if 'uploaded_df' not in st.session_state:
-    st.info("ℹ️ Сначала загрузите товары в разделе 'Загрузка товаров'")
-    if st.button("📦 Перейти к загрузке", use_container_width=True):
-        st.session_state.current_section = 'upload'
-        st.rerun()
-    return
-
-df = st.session_state.uploaded_df
-calculator = st.session_state.calculator
-
-st.success(f"✅ Загружено {len(df)} товаров")
-
-col1, col2 = st.columns(2)
-with col1:
-    # Выбор категорий для расчёта
-    all_categories = df['category'].unique().tolist() if 'category' in df.columns else []
-    selected_categories = st.multiselect(
-        "📂 Категории для расчёта",
-        all_categories,
-        default=all_categories,
-        help="Выберите категории, которые нужно рассчитать"
-    )
-
-with col2:
-    # Дополнительные параметры
-    st.markdown("### ⚙️ Параметры расчёта")
-    tax_system = st.selectbox(
-        "Система налогообложения",
-        list(TAX_SYSTEMS.keys()),
-        index=list(TAX_SYSTEMS.keys()).index(st.session_state.tax_system)
-    )
-    if tax_system != st.session_state.tax_system:
-        st.session_state.tax_system = tax_system
-        calculator.tax_system = tax_system
-
-# Фильтрация данных
-if selected_categories:
-    df_filtered = df[df['category'].isin(selected_categories)]
-else:
-    df_filtered = df
-
-st.markdown(f"📊 Будет рассчитано: **{len(df_filtered)}** товаров")
-
-if st.button("🚀 РАССЧИТАТЬ ВСЕ ТОВАРЫ", type="primary", use_container_width=True):
-    with st.spinner("Выполняется расчёт..."):
-        products = []
-        for _, row in df_filtered.iterrows():
-            try:
-                product = ProductData(
-                    artikul=str(row.get('artikul', '')),
-                    brand=str(row.get('brand', '')),
-                    category=str(row.get('category', 'default')),
-                    selling_price=float(row.get('selling_price', 0)),
-                    cogs=float(row.get('cogs', 0)),
-                    weight_kg=float(row.get('weight_kg', 0)),
-                    length_cm=float(row.get('length_cm', 0)),
-                    width_cm=float(row.get('width_cm', 0)),
-                    height_cm=float(row.get('height_cm', 0)),
-                    warehouse_distance_km=float(row.get('warehouse_distance_km', 0)),
-                    daily_sales=int(row.get('daily_sales', 5)),
-                    stock_depth_days=int(row.get('stock_depth', 30))
-                )
-                products.append(product)
-            except Exception as e:
-                st.warning(f"⚠️ Ошибка в строке {row.get('artikul', 'unknown')}: {e}")
-        
-        if products:
-            results = calculator.calculate_batch(products)
-            st.session_state.results = results
-            st.session_state.products = products
-            st.success(f"✅ Рассчитано {len(results)} товаров!")
+    """
+    Отображение калькулятора.
+    """
+    st.markdown("## 🧮 Калькулятор FBS")
+    
+    if 'uploaded_df' not in st.session_state or st.session_state.uploaded_df is None:
+        st.info("ℹ️ Сначала загрузите товары в разделе 'Загрузка товаров'")
+        if st.button("📦 Перейти к загрузке", use_container_width=True):
+            st.session_state.current_section = 'upload'
             st.rerun()
+        return
+    
+    df = st.session_state.uploaded_df
+    calculator = st.session_state.calculator
+    
+    st.success(f"✅ Загружено {len(df)} товаров")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # Выбор категорий для расчёта
+        all_categories = df['category'].unique().tolist() if 'category' in df.columns else []
+        selected_categories = st.multiselect(
+            "📂 Категории для расчёта",
+            all_categories,
+            default=all_categories,
+            help="Выберите категории, которые нужно рассчитать"
+        )
+    
+    with col2:
+        # Дополнительные параметры
+        st.markdown("### ⚙️ Параметры расчёта")
+        tax_system = st.selectbox(
+            "Система налогообложения",
+            list(TAX_SYSTEMS.keys()),
+            index=list(TAX_SYSTEMS.keys()).index(st.session_state.tax_system)
+        )
+        if tax_system != st.session_state.tax_system:
+            st.session_state.tax_system = tax_system
+            calculator.tax_system = tax_system
+    
+    # Фильтрация данных
+    if selected_categories:
+        df_filtered = df[df['category'].isin(selected_categories)]
+    else:
+        df_filtered = df
+    
+    st.markdown(f"📊 Будет рассчитано: **{len(df_filtered)}** товаров")
+    
+    if st.button("🚀 РАССЧИТАТЬ ВСЕ ТОВАРЫ", type="primary", use_container_width=True):
+        with st.spinner("Выполняется расчёт..."):
+            products = []
+            for _, row in df_filtered.iterrows():
+                try:
+                    product = ProductData(
+                        artikul=str(row.get('artikul', '')),
+                        brand=str(row.get('brand', '')),
+                        category=str(row.get('category', 'default')),
+                        selling_price=float(row.get('selling_price', 0)),
+                        cogs=float(row.get('cogs', 0)),
+                        weight_kg=float(row.get('weight_kg', 0)),
+                        length_cm=float(row.get('length_cm', 0)),
+                        width_cm=float(row.get('width_cm', 0)),
+                        height_cm=float(row.get('height_cm', 0)),
+                        warehouse_distance_km=float(row.get('warehouse_distance_km', 0)),
+                        daily_sales=int(row.get('daily_sales', 5)),
+                        stock_depth_days=int(row.get('stock_depth', 30))
+                    )
+                    products.append(product)
+                except Exception as e:
+                    st.warning(f"⚠️ Ошибка в строке {row.get('artikul', 'unknown')}: {e}")
+            
+            if products:
+                results = calculator.calculate_batch(products)
+                st.session_state.results = results
+                st.session_state.products = products
+                st.success(f"✅ Рассчитано {len(results)} товаров!")
+                st.rerun()
 
 def render_results():
-"""
-Отображение результатов.
-"""
-st.markdown("## 📊 Результаты расчётов")
-
-if not st.session_state.results:
-    st.info("ℹ️ Нет результатов. Выполните расчёт в разделе 'Калькулятор'.")
-    return
-
-results = st.session_state.results
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("📦 Товаров", len(results))
-with col2:
-    profitable = len([r for r in results if r.gross_profit > 0])
-    st.metric("✅ Прибыльных", f"{profitable} ({profitable/len(results)*100:.0f}%)")
-with col3:
-    total_profit = sum(r.gross_profit for r in results)
-    st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
-with col4:
-    avg_margin = np.mean([r.margin_percent for r in results])
-    st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
-
-st.markdown("---")
-
-# Таблица результатов
-df_results = pd.DataFrame([r.get_summary() for r in results])
-st.dataframe(df_results, use_container_width=True, height=400)
-
-# Визуализация
-st.markdown("### 📈 Визуализация")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    margins = [r.margin_percent for r in results]
-    fig = px.histogram(margins, title="Распределение маржинальности",
-                      labels={'value': 'Маржа, %', 'count': 'Количество'}, nbins=20)
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    top = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:10]
-    fig = px.bar(x=[r.artikul[:15] for r in top], y=[r.gross_profit for r in top],
-                title="Топ-10 по прибыли", labels={'x': 'Артикул', 'y': 'Прибыль, ₽'})
-    st.plotly_chart(fig, use_container_width=True)
+    """
+    Отображение результатов.
+    """
+    st.markdown("## 📊 Результаты расчётов")
+    
+    if not st.session_state.results:
+        st.info("ℹ️ Нет результатов. Выполните расчёт в разделе 'Калькулятор'.")
+        return
+    
+    results = st.session_state.results
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📦 Товаров", len(results))
+    with col2:
+        profitable = len([r for r in results if r.gross_profit > 0])
+        st.metric("✅ Прибыльных", f"{profitable} ({profitable/len(results)*100:.0f}%)")
+    with col3:
+        total_profit = sum(r.gross_profit for r in results)
+        st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
+    with col4:
+        avg_margin = np.mean([r.margin_percent for r in results])
+        st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
+    
+    st.markdown("---")
+    
+    # Таблица результатов
+    df_results = pd.DataFrame([r.get_summary() for r in results])
+    st.dataframe(df_results, use_container_width=True, height=400)
+    
+    # Визуализация
+    st.markdown("### 📈 Визуализация")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        margins = [r.margin_percent for r in results]
+        fig = px.histogram(margins, title="Распределение маржинальности",
+                          labels={'value': 'Маржа, %', 'count': 'Количество'}, nbins=20)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        top = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:10]
+        fig = px.bar(x=[r.artikul[:15] for r in top], y=[r.gross_profit for r in top],
+                    title="Топ-10 по прибыли", labels={'x': 'Артикул', 'y': 'Прибыль, ₽'})
+        st.plotly_chart(fig, use_container_width=True)
 
 def render_export():
-"""
-Отображение экспорта в Excel с живыми формулами.
-"""
-st.markdown("## 📥 Экспорт в Excel с живыми формулами")
+    """
+    Отображение экспорта в Excel с живыми формулами.
+    """
+    st.markdown("## 📥 Экспорт в Excel с живыми формулами")
+    
+    if not st.session_state.results:
+        st.warning("⚠️ Нет данных для экспорта.")
+        return
+    
+    if not OPENPYXL_AVAILABLE:
+        st.error("❌ OpenPyXL не установлен. Установите: `pip install openpyxl`")
+        return
+    
+    results = st.session_state.results
+    products = st.session_state.products
+    calculator = st.session_state.calculator
+    
+    st.info("""
+    ### 📌 Особенности экспорта:
 
-if not st.session_state.results:
-    st.warning("⚠️ Нет данных для экспорта.")
-    return
-
-if not OPENPYXL_AVAILABLE:
-    st.error("❌ OpenPyXL не установлен. Установите: `pip install openpyxl`")
-    return
-
-results = st.session_state.results
-products = st.session_state.products
-calculator = st.session_state.calculator
-
-st.info("""
-### 📌 Особенности экспорта:
-
-1. **Живые формулы** — все расчёты пересчитываются при изменении данных
-2. **Условное форматирование** — прибыль/убыток выделены цветом
-3. **Цветовая шкала** — визуализация маржинальности
-4. **Итоговые строки** — сумма по всем товарам
-5. **Отдельный лист с тарифами** — для справки
-""")
-
-st.success(f"✅ Доступно для экспорта: {len(results)} товаров")
-
-if st.button("📥 СКАЧАТЬ EXCEL С ФОРМУЛАМИ", type="primary", use_container_width=True):
-    try:
-        excel_bytes = ExcelExporter.export_with_formulas(
-            results=results,
-            products=products,
-            tariffs=calculator.current_tariffs,
-            tax_system=calculator.tax_system
-        )
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"FBS_Yandex_Market_{timestamp}.xlsx"
-        
-        st.download_button(
-            label="⬇️ Скачать Excel",
-            data=excel_bytes,
-            file_name=filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-        
-        st.success("✅ Excel файл с живыми формулами создан!")
-    except Exception as e:
-        st.error(f"❌ Ошибка создания Excel: {e}")
+    1. **Живые формулы** — все расчёты пересчитываются при изменении данных
+    2. **Условное форматирование** — прибыль/убыток выделены цветом
+    3. **Цветовая шкала** — визуализация маржинальности
+    4. **Итоговые строки** — сумма по всем товарам
+    5. **Отдельный лист с тарифами** — для справки
+    """)
+    
+    st.success(f"✅ Доступно для экспорта: {len(results)} товаров")
+    
+    if st.button("📥 СКАЧАТЬ EXCEL С ФОРМУЛАМИ", type="primary", use_container_width=True):
+        try:
+            excel_bytes = ExcelExporter.export_with_formulas(
+                results=results,
+                products=products,
+                tariffs=calculator.current_tariffs,
+                tax_system=calculator.tax_system
+            )
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"FBS_Yandex_Market_{timestamp}.xlsx"
+            
+            st.download_button(
+                label="⬇️ Скачать Excel",
+                data=excel_bytes,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
+            st.success("✅ Excel файл с живыми формулами создан!")
+        except Exception as e:
+            st.error(f"❌ Ошибка создания Excel: {e}")
 
 def render_recommendations():
-"""
-Отображение рекомендаций.
-"""
-st.markdown("## 💡 Рекомендации")
-
-if not st.session_state.results:
-    st.warning("⚠️ Нет данных. Выполните расчёт.")
-    return
-
-calculator = st.session_state.calculator
-
-if st.button("🔄 Сгенерировать рекомендации", type="primary", use_container_width=True) or st.session_state.recommendations:
-    if not st.session_state.recommendations:
+    """
+    Отображение рекомендаций.
+    """
+    st.markdown("## 💡 Рекомендации")
+    
+    if not st.session_state.results:
+        st.warning("⚠️ Нет данных. Выполните расчёт.")
+        return
+    
+    calculator = st.session_state.calculator
+    
+    if st.button("🔄 Сгенерировать рекомендации", type="primary", use_container_width=True):
         with st.spinner("Генерация рекомендаций..."):
             st.session_state.recommendations = calculator.generate_recommendations(st.session_state.results)
+        st.rerun()
     
-    if not st.session_state.recommendations:
-        st.success("✅ Все показатели в норме! Рекомендаций нет.")
-    else:
+    if st.session_state.recommendations:
         for rec in st.session_state.recommendations:
             priority_icon = "🔴" if rec['priority'] == 'high' else "🟡" if rec['priority'] == 'medium' else "🟢"
             with st.expander(f"{priority_icon} {rec['category']} - {rec['message'][:80]}..."):
@@ -3050,66 +3051,68 @@ if st.button("🔄 Сгенерировать рекомендации", type="p
                 if rec.get('affected_products'):
                     st.markdown("**📦 Затронутые товары:**")
                     st.write(", ".join(rec['affected_products'][:10]))
+    else:
+        st.success("✅ Все показатели в норме! Рекомендаций нет.")
 
 def render_settings():
-"""
-Отображение настроек.
-"""
-st.markdown("## ⚙️ Настройки")
-
-tab1, tab2 = st.tabs(["🔑 API Ключи", "🏛️ Налоговая система"])
-
-with tab1:
-    st.markdown("### 🔑 API ключи Яндекс Маркет")
-    st.info("API ключи используются для загрузки актуальных тарифов. Без них используются примерные значения.")
+    """
+    Отображение настроек.
+    """
+    st.markdown("## ⚙️ Настройки")
     
-    api_manager = st.session_state.api_manager
+    tab1, tab2 = st.tabs(["🔑 API Ключи", "🏛️ Налоговая система"])
     
-    col1, col2 = st.columns(2)
-    with col1:
-        ym_token = st.text_input("Яндекс Маркет OAuth Token", 
-                                value=api_manager.get_api_key('yandex_market') or '', 
-                                type="password")
-    with col2:
-        ym_campaign = st.text_input("Campaign ID", 
-                                   value=api_manager.get_api_key('yandex_campaign_id') or '')
+    with tab1:
+        st.markdown("### 🔑 API ключи Яндекс Маркет")
+        st.info("API ключи используются для загрузки актуальных тарифов. Без них используются примерные значения.")
+        
+        api_manager = st.session_state.api_manager
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            ym_token = st.text_input("Яндекс Маркет OAuth Token", 
+                                    value=api_manager.get_api_key('yandex_market') or '', 
+                                    type="password")
+        with col2:
+            ym_campaign = st.text_input("Campaign ID", 
+                                       value=api_manager.get_api_key('yandex_campaign_id') or '')
+        
+        if st.button("💾 Сохранить Яндекс Маркет", use_container_width=True):
+            if ym_token and ym_campaign:
+                api_manager.save_api_key('yandex_market', ym_token)
+                api_manager.save_api_key('yandex_campaign_id', ym_campaign)
+                st.success("✅ Ключи Яндекс Маркет сохранены!")
+        
+        st.markdown("---")
+        st.markdown("### 🤖 DeepSeek AI")
+        ds_key = st.text_input("DeepSeek API Key", 
+                              value=api_manager.get_api_key('deepseek') or '', 
+                              type="password")
+        if st.button("💾 Сохранить DeepSeek", use_container_width=True):
+            if ds_key:
+                api_manager.save_api_key('deepseek', ds_key)
+                st.success("✅ Ключ DeepSeek сохранен!")
     
-    if st.button("💾 Сохранить Яндекс Маркет", use_container_width=True):
-        if ym_token and ym_campaign:
-            api_manager.save_api_key('yandex_market', ym_token)
-            api_manager.save_api_key('yandex_campaign_id', ym_campaign)
-            st.success("✅ Ключи Яндекс Маркет сохранены!")
-    
-    st.markdown("---")
-    st.markdown("### 🤖 DeepSeek AI")
-    ds_key = st.text_input("DeepSeek API Key", 
-                          value=api_manager.get_api_key('deepseek') or '', 
-                          type="password")
-    if st.button("💾 Сохранить DeepSeek", use_container_width=True):
-        if ds_key:
-            api_manager.save_api_key('deepseek', ds_key)
-            st.success("✅ Ключ DeepSeek сохранен!")
-
-with tab2:
-    st.markdown("### 🏛️ Система налогообложения")
-    
-    tax_system = st.selectbox(
-        "Выберите систему",
-        list(TAX_SYSTEMS.keys()),
-        index=list(TAX_SYSTEMS.keys()).index(st.session_state.tax_system)
-    )
-    
-    if tax_system != st.session_state.tax_system:
-        st.session_state.tax_system = tax_system
-        st.session_state.calculator.tax_system = tax_system
-        st.success(f"✅ Выбрано: {tax_system}")
-    
-    tax_config = TAX_SYSTEMS.get(tax_system, {})
-    st.info(f"""
-    **{tax_system}**
-    - Ставка: {tax_config.get('rate', 0) * 100:.0f}%
-    - База: {'Доходы' if tax_config.get('base') == 'revenue' else 'Прибыль'}
-    """)
+    with tab2:
+        st.markdown("### 🏛️ Система налогообложения")
+        
+        tax_system = st.selectbox(
+            "Выберите систему",
+            list(TAX_SYSTEMS.keys()),
+            index=list(TAX_SYSTEMS.keys()).index(st.session_state.tax_system)
+        )
+        
+        if tax_system != st.session_state.tax_system:
+            st.session_state.tax_system = tax_system
+            st.session_state.calculator.tax_system = tax_system
+            st.success(f"✅ Выбрано: {tax_system}")
+        
+        tax_config = TAX_SYSTEMS.get(tax_system, {})
+        st.info(f"""
+        **{tax_system}**
+        - Ставка: {tax_config.get('rate', 0) * 100:.0f}%
+        - База: {'Доходы' if tax_config.get('base') == 'revenue' else 'Прибыль'}
+        """)
 
 
 # ============================================================================
@@ -3117,89 +3120,89 @@ with tab2:
 # ============================================================================
 
 def main():
-"""
-Главная функция приложения.
-"""
-st.set_page_config(
-    page_title=APP_NAME,
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-init_session_state()
-render_sidebar()
-
-current_section = st.session_state.get('current_section', 'main')
-calculator = st.session_state.calculator
-
-if current_section == 'main':
-    st.markdown("""
-    <div style='text-align: center; padding: 50px 30px; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); border-radius: 20px; margin-bottom: 35px;'>
-        <h1 style='color: white; font-size: 3em; margin: 0;'>🚀 FBS Юнит-экономика</h1>
-        <p style='color: #a8a8d0; font-size: 1.3em; margin: 20px 0;'>
-            Яндекс Маркет — Живые формулы в Excel
-        </p>
-        <p style='color: #6666aa; font-size: 1em; margin: 10px 0;'>
-            Загрузка товаров • Пользовательские категории • Расчёт 500K+ товаров
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    """
+    Главная функция приложения.
+    """
+    st.set_page_config(
+        page_title=APP_NAME,
+        page_icon="🚀",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
     
-    show_onboarding()
+    init_session_state()
+    render_sidebar()
     
-    st.info("""
-    ### 🎯 Что вы можете делать:
+    current_section = st.session_state.get('current_section', 'main')
+    calculator = st.session_state.calculator
     
-    | Раздел | Описание |
-    |--------|----------|
-    | 📦 **Загрузка товаров** | CSV с артикулами, брендами, категориями, ценами и весогабаритами |
-    | 📋 **Категории и тарифы** | Загрузка своих категорий с тарифами |
-    | 🧮 **Калькулятор** | Расчёт юнит-экономики для всех товаров |
-    | 📊 **Результаты** | Просмотр и анализ расчётов |
-    | 📥 **Экспорт Excel** | Скачивание Excel с живыми формулами |
-    | 💡 **Рекомендации** | Автоматические рекомендации по оптимизации |
+    if current_section == 'main':
+        st.markdown("""
+        <div style='text-align: center; padding: 50px 30px; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); border-radius: 20px; margin-bottom: 35px;'>
+            <h1 style='color: white; font-size: 3em; margin: 0;'>🚀 FBS Юнит-экономика</h1>
+            <p style='color: #a8a8d0; font-size: 1.3em; margin: 20px 0;'>
+                Яндекс Маркет — Живые формулы в Excel
+            </p>
+            <p style='color: #6666aa; font-size: 1em; margin: 10px 0;'>
+                Загрузка товаров • Пользовательские категории • Расчёт 500K+ товаров
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        show_onboarding()
+        
+        st.info("""
+        ### 🎯 Что вы можете делать:
+        
+        | Раздел | Описание |
+        |--------|----------|
+        | 📦 **Загрузка товаров** | CSV с артикулами, брендами, категориями, ценами и весогабаритами |
+        | 📋 **Категории и тарифы** | Загрузка своих категорий с тарифами |
+        | 🧮 **Калькулятор** | Расчёт юнит-экономики для всех товаров |
+        | 📊 **Результаты** | Просмотр и анализ расчётов |
+        | 📥 **Экспорт Excel** | Скачивание Excel с живыми формулами |
+        | 💡 **Рекомендации** | Автоматические рекомендации по оптимизации |
+        
+        ### 📌 Ключевые принципы:
+        1. **НИКАКИХ ЗАХАРДКОЖЕННЫХ ТАРИФОВ** — все из API, AI, CSV
+        2. **ЖИВЫЕ ФОРМУЛЫ** — при выгрузке в Excel
+        3. **ПОЛЬЗОВАТЕЛЬСКИЕ КАТЕГОРИИ** — вы управляете тарифами
+        """)
+        
+        if st.session_state.results:
+            st.markdown("---")
+            st.markdown("### 📊 Последние результаты")
+            results = st.session_state.results[-5:]
+            for r in results:
+                color = "🟢" if r.gross_profit > 0 else "🔴"
+                st.markdown(f"{color} **{r.artikul}** — Прибыль: {r.gross_profit:,.0f} ₽, Маржа: {r.margin_percent:.1f}%")
     
-    ### 📌 Ключевые принципы:
-    1. **НИКАКИХ ЗАХАРДКОЖЕННЫХ ТАРИФОВ** — все из API, AI, CSV
-    2. **ЖИВЫЕ ФОРМУЛЫ** — при выгрузке в Excel
-    3. **ПОЛЬЗОВАТЕЛЬСКИЕ КАТЕГОРИИ** — вы управляете тарифами
-    """)
+    elif current_section == 'upload':
+        render_upload()
     
-    if st.session_state.results:
-        st.markdown("---")
-        st.markdown("### 📊 Последние результаты")
-        results = st.session_state.results[-5:]
-        for r in results:
-            color = "🟢" if r.gross_profit > 0 else "🔴"
-            st.markdown(f"{color} **{r.artikul}** — Прибыль: {r.gross_profit:,.0f} ₽, Маржа: {r.margin_percent:.1f}%")
-
-elif current_section == 'upload':
-    render_upload()
-
-elif current_section == 'categories':
-    render_categories()
-
-elif current_section == 'calculator':
-    render_calculator()
-
-elif current_section == 'results':
-    render_results()
-
-elif current_section == 'export':
-    render_export()
-
-elif current_section == 'recommendations':
-    render_recommendations()
-
-elif current_section == 'settings':
-    render_settings()
-
-st.markdown("---")
-st.caption(f"🚀 FBS Unit Economics PRO v{APP_VERSION} | Яндекс Маркет | "
-          f"Источник тарифов: {calculator.tariffs_source.upper() if calculator.tariffs_source else 'НЕТ ДАННЫХ'} | "
-          f"Данные актуальны на {datetime.now().strftime('%d.%m.%Y')}")
+    elif current_section == 'categories':
+        render_categories()
+    
+    elif current_section == 'calculator':
+        render_calculator()
+    
+    elif current_section == 'results':
+        render_results()
+    
+    elif current_section == 'export':
+        render_export()
+    
+    elif current_section == 'recommendations':
+        render_recommendations()
+    
+    elif current_section == 'settings':
+        render_settings()
+    
+    st.markdown("---")
+    st.caption(f"🚀 FBS Unit Economics PRO v{APP_VERSION} | Яндекс Маркет | "
+              f"Источник тарифов: {calculator.tariffs_source.upper() if calculator.tariffs_source else 'НЕТ ДАННЫХ'} | "
+              f"Данные актуальны на {datetime.now().strftime('%d.%m.%Y')}")
 
 
 if __name__ == "__main__":
-main()
+    main()
