@@ -5,7 +5,7 @@
 ============================================================================
 🚀 FBS UNIT ECONOMICS PRO 2026 — ЯНДЕКС МАРКЕТ ВЕРСИЯ
 ============================================================================
-Версия: 9.0.0 (Yandex Market Edition)
+Версия: 9.1.0 (Исправление API ключей и параметров Streamlit)
 КЛЮЧЕВЫЕ ПРИНЦИПЫ:
 1. НИКАКИХ ЗАХАРДКОЖЕННЫХ ЗНАЧЕНИЙ — все данные из API, AI, CSV или пользовательского ввода
 2. ТОЛЬКО ЯНДЕКС МАРКЕТ — фокус на одном маркетплейсе для максимальной точности
@@ -56,7 +56,7 @@ import gc
 # БЛОК 0: БАЗОВАЯ КОНФИГУРАЦИЯ И НАСТРОЙКИ
 # ============================================================================
 
-APP_VERSION = "9.0.0"
+APP_VERSION = "9.1.0"
 APP_NAME = "🚀 FBS Юнит-экономика PRO 2026 — Яндекс Маркет"
 APP_DESCRIPTION = "Профессиональный расчет юнит-экономики для FBS-модели на Яндекс Маркет"
 
@@ -70,7 +70,7 @@ CONFIG_DIR = BASE_DIR / "config"
 TEMP_DIR = BASE_DIR / "temp"
 TARIFFS_CACHE_DIR = CACHE_DIR / "tariffs"
 USER_CATEGORIES_DIR = DATA_DIR / "user_categories"
-MAPPING_DIR = CONFIG_DIR / "mappings"          # Для сохранения маппингов колонок
+MAPPING_DIR = CONFIG_DIR / "mappings"
 
 for dir_path in [DATA_DIR, CACHE_DIR, LOGS_DIR, EXPORTS_DIR, CONFIG_DIR, TEMP_DIR,
                  TARIFFS_CACHE_DIR, USER_CATEGORIES_DIR, MAPPING_DIR]:
@@ -153,6 +153,7 @@ def timing_decorator(func):
         return result
     return wrapper
 
+
 def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
     """
     Декоратор для повторных попыток выполнения функции при ошибках.
@@ -173,6 +174,7 @@ def retry_on_failure(max_retries: int = 3, delay: float = 1.0):
         return wrapper
     return decorator
 
+
 def memoize(func):
     """
     Декоратор для кэширования результатов функции.
@@ -187,6 +189,7 @@ def memoize(func):
     wrapper.cache_clear = cache.clear
     return wrapper
 
+
 class ProgressTracker:
     """Класс для отслеживания прогресса выполнения длительных операций."""
     def __init__(self):
@@ -197,6 +200,8 @@ class ProgressTracker:
         self.start_time = None
         self.estimated_time_remaining = 0
         self.history = []
+        self._last_update_time = 0
+        self._update_interval = 0.5
 
     def start(self, total: int, status: str = ""):
         self.total = total
@@ -213,6 +218,10 @@ class ProgressTracker:
         logger.info(f"📊 Начат процесс: {status} (всего: {total} шагов)")
 
     def update(self, current: int, status: str = ""):
+        current_time = time.time()
+        if current_time - self._last_update_time < self._update_interval:
+            return
+        
         self.current = current
         self.total = max(self.total, current)
         self.progress = min(current / self.total, 1.0) if self.total > 0 else 0
@@ -221,6 +230,9 @@ class ProgressTracker:
         if self.start_time and self.progress > 0:
             elapsed = time.time() - self.start_time
             self.estimated_time_remaining = (elapsed / self.progress) * (1 - self.progress)
+        
+        self._last_update_time = current_time
+        
         if int(self.progress * 100) % 10 == 0 and self.progress > 0:
             logger.info(f"📊 Прогресс: {self.progress*100:.0f}% - {self.status}")
 
@@ -244,6 +256,7 @@ class ProgressTracker:
             'duration_seconds': time.time() - self.start_time if self.start_time else 0
         })
         logger.info(f"✅ Процесс завершён: {status}")
+
 
 class AuditLogger:
     """Класс для ведения аудиторского журнала всех действий пользователя."""
@@ -594,6 +607,7 @@ class YandexMarketAPIEndpoint(Enum):
     CATEGORIES = "https://api.partner.market.yandex.ru/v2/campaigns/{campaign_id}/categories"
     DEEPSEEK_CHAT = "https://api.deepseek.com/v1/chat/completions"
 
+
 @dataclass
 class YandexMarketTariffData:
     category: str
@@ -772,7 +786,6 @@ class YandexMarketAPIManager:
         tariffs = {}
         try:
             df = pd.read_csv(io.StringIO(csv_content))
-            # Переименовываем колонки согласно маппингу
             rename_dict = {v: k for k, v in column_mapping.items() if v in df.columns}
             if rename_dict:
                 df = df.rename(columns=rename_dict)
@@ -807,6 +820,18 @@ class YandexMarketAPIManager:
             tariffs = {}
         return tariffs
 
+    def validate_yandex_token(self, token: str) -> bool:
+        """Проверка валидности OAuth токена Яндекс Маркет"""
+        if not token or len(token) < 10:
+            return False
+        return True
+
+    def validate_deepseek_key(self, key: str) -> bool:
+        """Проверка валидности API ключа DeepSeek"""
+        if not key or len(key) < 20:
+            return False
+        return True
+
     @retry_on_failure(max_retries=2, delay=2.0)
     def fetch_yandex_market_tariffs(self) -> Dict[str, Dict]:
         tariffs = {}
@@ -814,6 +839,9 @@ class YandexMarketAPIManager:
         campaign_id = self.get_api_key('yandex_campaign_id')
         if not api_key or not campaign_id:
             logger.warning("⚠️ API ключи Яндекс Маркет не найдены")
+            return {}
+        if not self.validate_yandex_token(api_key):
+            logger.warning("⚠️ OAuth токен Яндекс Маркет выглядит невалидным")
             return {}
         self.rate_limiter.wait_if_needed('yandex_market')
         headers = {
@@ -852,6 +880,10 @@ class YandexMarketAPIManager:
                 if tariffs:
                     logger.info(f"✅ Загружено {len(tariffs)} категорий тарифов Яндекс Маркет через API")
                     self.audit_logger.log('fetch_yandex_tariffs', {'count': len(tariffs), 'status': 'success'})
+            elif response.status_code == 403:
+                logger.error("❌ OAuth токен невалиден. Проверьте правильность токена в настройках.")
+                logger.error(f"Ответ: {response.text[:500]}")
+                return {}
             else:
                 logger.error(f"❌ Яндекс Маркет API вернул статус {response.status_code}")
                 logger.error(f"Ответ: {response.text[:500]}")
@@ -860,11 +892,15 @@ class YandexMarketAPIManager:
             logger.exception(e)
         return tariffs
 
+    @retry_on_failure(max_retries=2, delay=2.0)
     def fetch_tariffs_via_deepseek(self) -> Dict[str, Dict]:
         tariffs = {}
         api_key = self.get_api_key('deepseek')
         if not api_key:
             logger.warning("⚠️ DeepSeek API ключ не найден")
+            return {}
+        if not self.validate_deepseek_key(api_key):
+            logger.warning("⚠️ DeepSeek API ключ выглядит невалидным")
             return {}
         self.rate_limiter.wait_if_needed('deepseek')
         try:
@@ -976,6 +1012,9 @@ class YandexMarketAPIManager:
                 if tariffs:
                     logger.info(f"✅ DeepSeek предоставил тарифы для {len(tariffs)} категорий Яндекс Маркет")
                     self.audit_logger.log('fetch_deepseek_tariffs', {'count': len(tariffs)})
+            elif response.status_code == 401:
+                logger.error("❌ DeepSeek API ключ невалиден. Проверьте правильность ключа в настройках.")
+                logger.error(f"Ответ: {response.text[:500]}")
             else:
                 logger.error(f"❌ DeepSeek API вернул статус {response.status_code}")
                 logger.error(f"Ответ: {response.text[:500]}")
@@ -1004,18 +1043,15 @@ class YandexMarketAPIManager:
                     return tariffs
         logger.info(f"🔄 Загрузка тарифов Яндекс Маркет (источник: {preferred_source})...")
         tariffs = {}
-        # Шаг 1: API Яндекс Маркет (если preferred_source 'api' или 'combined')
         if preferred_source in ('api', 'combined'):
             try:
                 tariffs = self.fetch_yandex_market_tariffs()
                 if tariffs and preferred_source == 'api':
-                    # если запрошен только API и он успешен, возвращаем
                     self.save_tariffs_to_cache(tariffs)
                     return tariffs
             except Exception as e:
                 logger.error(f"❌ Ошибка API Яндекс Маркет: {e}")
                 tariffs = {}
-        # Шаг 2: DeepSeek AI (если preferred_source 'ai' или 'combined' и API не дал результатов)
         if (preferred_source in ('ai', 'combined')) and not tariffs:
             logger.info(f"🤖 Использую DeepSeek AI (preferred_source={preferred_source})")
             try:
@@ -1028,14 +1064,12 @@ class YandexMarketAPIManager:
                         return tariffs
             except Exception as e:
                 logger.error(f"❌ DeepSeek также недоступен: {e}")
-        # Шаг 3: Пользовательские категории из CSV с маппингом (всегда как fallback)
         if not tariffs and user_categories_csv and column_mapping:
             logger.info(f"📄 Использую пользовательские категории из CSV с маппингом")
             csv_tariffs = self.load_user_categories(user_categories_csv, column_mapping)
             if csv_tariffs:
                 tariffs = csv_tariffs
                 logger.info(f"✅ Тарифы Яндекс Маркет загружены из пользовательского CSV")
-        # Шаг 4: Пользовательские тарифы
         if not tariffs and user_tariffs:
             logger.info(f"👤 Использую пользовательские тарифы")
             tariffs = user_tariffs
@@ -1043,7 +1077,6 @@ class YandexMarketAPIManager:
                 tariffs[category]['source'] = 'user_input'
                 tariffs[category]['last_updated'] = datetime.now().isoformat()
                 tariffs[category]['confidence'] = 1.0
-        # Шаг 5: Базовые значения (только если ничего не загрузилось)
         if not tariffs:
             logger.warning(f"⚠️ ВСЕ ИСТОЧНИКИ НЕДОСТУПНЫ. Использую базовые значения.")
             tariffs = {
@@ -1387,11 +1420,6 @@ class YandexMarketCalculator:
         preferred_source: 'api', 'ai', 'combined'
         """
         logger.info(f"🔄 Обновление тарифов Яндекс Маркет (источник: {preferred_source})...")
-        # Для обратной совместимости: если use_ai=True и preferred_source не указан, устанавливаем 'combined'
-        if use_ai and preferred_source == 'combined':
-            pass  # уже combined
-        elif use_ai and preferred_source == 'api':
-            preferred_source = 'combined'  # если просят API с AI, то по сути combined
         self.current_tariffs = self.api_manager.get_tariffs(
             force_refresh=force,
             use_ai_fallback=use_ai,
@@ -1501,35 +1529,27 @@ class YandexMarketCalculator:
             }
         result.data_source = tariff.get('source', 'unknown')
         result.data_confidence = tariff.get('confidence', 1.0)
-        # 1. Комиссия Яндекс Маркет
         commission_rate = tariff.get('commission_rate', 0.145)
         min_commission = tariff.get('min_commission', 35)
         result.commission = max(product.selling_price * commission_rate, min_commission)
-        # 2. First Mile
         if product.warehouse_distance_km > 0 and product.pallet_capacity > 0:
             cost_per_pallet = product.warehouse_distance_km * product.transport_cost_per_km * 2
             result.first_mile_cost = cost_per_pallet / product.pallet_capacity
         else:
             result.first_mile_cost = 0
-        # 3. Last Mile
         billable_weight = product.get_billable_weight()
         billable_weight = math.ceil(billable_weight * 2) / 2
         last_mile_base = tariff.get('last_mile_base', 55)
         last_mile_per_kg = tariff.get('last_mile_per_kg', 16)
         min_logistics = tariff.get('min_logistics', 30)
         result.last_mile_cost = max(last_mile_base + (billable_weight * last_mile_per_kg), min_logistics)
-        # 4. Pick & Pack
         pick_pack_hours = product.pick_pack_time_min / 60.0
         result.pick_pack_cost = pick_pack_hours * product.operator_hourly_rate
-        # 5. Упаковка
         result.packaging_cost = product.packaging_cost
-        # 6. Эквайринг
         acquiring_fee = tariff.get('acquiring_fee', 0.015)
         result.acquiring_cost = product.selling_price * acquiring_fee
-        # 7. Возвраты
         return_fee = tariff.get('return_fee', 0.025)
         result.return_cost = product.selling_price * return_fee
-        # 8. Штрафы за просрочку
         if product.has_night_shift:
             penalty_probability = 0.05
         else:
@@ -1537,19 +1557,16 @@ class YandexMarketCalculator:
         penalty_rate = tariff.get('penalty_rate', 0.07)
         result.penalty_probability = penalty_probability
         result.penalty_cost = product.selling_price * penalty_rate * penalty_probability
-        # 9. Маркетинг
         result.marketing_cost = product.marketing_budget_per_unit
-        # 10. Складские расходы
         total_stock = product.stock_depth_days * product.daily_sales
         if total_stock > 0 and product.daily_sales > 0:
-            warehouse_space = 0.01  # м² на единицу
+            warehouse_space = 0.01
             total_warehouse_space = warehouse_space * total_stock
-            warehouse_rent_per_sqm = 500  # ₽/м²
+            warehouse_rent_per_sqm = 500
             monthly_rent = warehouse_rent_per_sqm * total_warehouse_space
             result.warehouse_cost = monthly_rent / (30 * product.daily_sales)
         else:
             result.warehouse_cost = 0
-        # 11. Налог
         tax_config = TAX_SYSTEMS.get(self.tax_system, TAX_SYSTEMS["УСН 6% (доходы)"])
         if tax_config["base"] == "revenue":
             result.tax_cost = product.selling_price * tax_config["rate"]
@@ -1565,7 +1582,6 @@ class YandexMarketCalculator:
             if "min_rate" in tax_config:
                 min_tax = product.selling_price * tax_config["min_rate"]
                 result.tax_cost = max(result.tax_cost, min_tax)
-        # 12. Итого расходов и прибыль
         result.total_expenses = (
             product.cogs + result.commission + result.first_mile_cost +
             result.last_mile_cost + result.pick_pack_cost + result.packaging_cost +
@@ -1581,7 +1597,6 @@ class YandexMarketCalculator:
             result.roi_percent = (result.gross_profit / product.cogs) * 100
         else:
             result.roi_percent = 0
-        # 13. Точка безубыточности по расстоянию
         if result.first_mile_cost > 0 and product.pallet_capacity > 0:
             cost_per_km_per_unit = (product.transport_cost_per_km * 2) / product.pallet_capacity
             if cost_per_km_per_unit > 0:
@@ -1590,7 +1605,6 @@ class YandexMarketCalculator:
                 result.break_even_distance_km = float('inf')
         else:
             result.break_even_distance_km = float('inf')
-        # 14. Логистические зоны риска
         logistic_zone_info = self._get_logistic_zone(
             result.break_even_distance_km if result.break_even_distance_km != float('inf') else 200
         )
@@ -1598,7 +1612,6 @@ class YandexMarketCalculator:
         result.logistic_zone_label = logistic_zone_info['label']
         result.logistic_recommendation = logistic_zone_info['recommendation']
         result.is_logistic_critical = logistic_zone_info['is_critical']
-        # 15. Запас прочности по цене
         variable_costs_percent = (
             commission_rate + acquiring_fee + return_fee +
             penalty_rate * penalty_probability +
@@ -1619,13 +1632,11 @@ class YandexMarketCalculator:
             result.max_discount_percent = ((product.selling_price - min_price) / product.selling_price) * 100
         else:
             result.max_discount_percent = 0
-        # 16. Точка безубыточности по объему
         variable_costs = result.commission + result.last_mile_cost + result.acquiring_cost + result.return_cost + result.penalty_cost
         if (result.selling_price - variable_costs) > 0:
             result.break_even_volume = fixed_costs_per_unit / (result.selling_price - variable_costs)
         else:
             result.break_even_volume = float('inf')
-        # 17. Сезонная корректировка
         current_month = datetime.now().month
         if product.seasonal_coefficients:
             seasonal_factor = product.seasonal_coefficients.get(current_month, 1.0)
@@ -1633,7 +1644,6 @@ class YandexMarketCalculator:
             seasonal_factor = 1.0
         result.seasonal_factor = seasonal_factor
         result.adjusted_margin_percent = result.margin_percent * seasonal_factor
-        # 18. Оптимизация складских остатков (EOQ)
         daily_demand = product.daily_sales
         annual_demand = daily_demand * 365
         ordering_cost = 500.0
@@ -1659,7 +1669,6 @@ class YandexMarketCalculator:
             result.stock_turnover_rate = annual_demand / result.optimal_stock_units
         else:
             result.stock_turnover_rate = 0
-        # 19. Эффективность использования пространства
         total_stock = product.stock_depth_days * product.daily_sales
         if total_stock > 0:
             total_sqm = total_stock * 0.01
@@ -1667,7 +1676,6 @@ class YandexMarketCalculator:
                 result.space_efficiency_ratio = total_stock / total_sqm
                 result.revenue_per_sqm = (product.selling_price * product.daily_sales * 30) / total_sqm
                 result.profit_per_sqm = (result.gross_profit * product.daily_sales * 30) / total_sqm
-        # 20. Оптимальная цена
         result.optimal_price = product.selling_price
         self.audit_logger.log('calculate_unit', {
             'artikul': product.artikul,
@@ -1797,7 +1805,6 @@ class ExcelExporter:
         if not OPENPYXL_AVAILABLE:
             raise ImportError("OpenPyXL не установлен")
         wb = Workbook()
-        # -------------------- ЛИСТ 1: ТАРИФЫ --------------------
         ws_tariffs = wb.active
         ws_tariffs.title = "Тарифы"
         tariff_headers = ['Категория', 'Комиссия,%', 'Мин.комиссия', 'Last Mile база',
@@ -1820,7 +1827,6 @@ class ExcelExporter:
             ws_tariffs.cell(row=row, column=9, value=tariff.get('source', 'unknown'))
             ws_tariffs.cell(row=row, column=10, value=tariff.get('last_updated', '')[:19])
             row += 1
-        # -------------------- ЛИСТ 2: РАСЧЁТЫ --------------------
         ws_results = wb.create_sheet("Расчёты")
         headers = ['Артикул', 'Бренд', 'Категория', 'Цена, ₽', 'Себестоимость, ₽',
                   'Комиссия, ₽', 'First Mile, ₽', 'Last Mile, ₽', 'Pick&Pack, ₽',
@@ -1839,8 +1845,6 @@ class ExcelExporter:
             ws_results.cell(row=row, column=3, value=result.category)
             ws_results.cell(row=row, column=4, value=product.selling_price)
             ws_results.cell(row=row, column=5, value=product.cogs)
-            # Комиссия (формула)
-            commission_rate = tariffs.get(result.category, {}).get('commission_rate', 0.145)
             ws_results.cell(row=row, column=6, value=result.commission)
             ws_results.cell(row=row, column=7, value=result.first_mile_cost)
             ws_results.cell(row=row, column=8, value=result.last_mile_cost)
@@ -1852,27 +1856,21 @@ class ExcelExporter:
             ws_results.cell(row=row, column=14, value=result.marketing_cost)
             ws_results.cell(row=row, column=15, value=result.warehouse_cost)
             ws_results.cell(row=row, column=16, value=result.tax_cost)
-            # Итого расходов (формула)
             start_col = 5
             end_col = 16
             formula = f"=SUM({get_column_letter(start_col)}{row}:{get_column_letter(end_col)}{row})"
             ws_results.cell(row=row, column=17, value=formula)
-            # Прибыль (формула)
             ws_results.cell(row=row, column=18, value=f"=D{row}-Q{row}")
-            # Маржа (формула)
             ws_results.cell(row=row, column=19, value=f"=R{row}/D{row}*100")
-            # ROI (формула)
             ws_results.cell(row=row, column=20, value=f"=R{row}/E{row}*100")
             ws_results.cell(row=row, column=21, value=result.optimal_stock_units)
             ws_results.cell(row=row, column=22, value=result.stock_turnover_days)
             ws_results.cell(row=row, column=23, value=result.logistic_zone_label)
             ws_results.cell(row=row, column=24, value=result.data_source)
-            # Условное форматирование прибыли
             if result.gross_profit > 0:
                 ws_results.cell(row=row, column=18).fill = PatternFill(start_color="C6EFCE", fill_type="solid")
             else:
                 ws_results.cell(row=row, column=18).fill = PatternFill(start_color="FFC7CE", fill_type="solid")
-        # Итоговая строка
         last_row = len(results) + 2
         if len(results) > 0:
             total_row = last_row + 1
@@ -1881,7 +1879,6 @@ class ExcelExporter:
             for col in [4, 5, 17, 18, 19, 20]:
                 ws_results.cell(row=total_row, column=col, value=f"=SUM({get_column_letter(col)}2:{get_column_letter(col)}{last_row})")
                 ws_results.cell(row=total_row, column=col).font = Font(bold=True)
-        # Цветовая шкала для маржи
         if len(results) > 0:
             ws_results.conditional_formatting.add(
                 f"S2:S{last_row}",
@@ -1889,13 +1886,9 @@ class ExcelExporter:
                              mid_type="percentile", mid_value=50, mid_color="FFEB9C",
                              end_type="max", end_color="C6EFCE")
             )
-        # Ширина колонок
         for col in range(1, 25):
             ws_results.column_dimensions[get_column_letter(col)].width = 15
-
-        # -------------------- ЛИСТ 3: ABC/XYZ + ДАШБОРДЫ --------------------
         ws_abc = wb.create_sheet("ABC_XYZ_Dashboard")
-        # Заголовки
         abc_headers = ['Артикул', 'Прибыль, ₽', 'Доля прибыли, %', 'ABC класс',
                        'Выручка, ₽', 'Доля выручки, %', 'ABC класс (выручка)',
                        'Daily Sales', 'Среднее', 'Стд. отклонение', 'Коэф. вариации', 'XYZ класс']
@@ -1903,7 +1896,6 @@ class ExcelExporter:
             cell = ws_abc.cell(row=1, column=col, value=header)
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill(start_color="1a1a2e", fill_type="solid")
-        # Данные для ABC/XYZ
         total_profit = sum(r.gross_profit for r in results) if results else 1
         total_revenue = sum(r.selling_price for r in results) if results else 1
         for i, result in enumerate(results):
@@ -1912,7 +1904,6 @@ class ExcelExporter:
             ws_abc.cell(row=row, column=2, value=result.gross_profit)
             profit_share = (result.gross_profit / total_profit * 100) if total_profit != 0 else 0
             ws_abc.cell(row=row, column=3, value=profit_share)
-            # ABC по прибыли
             if profit_share >= 60:
                 ws_abc.cell(row=row, column=4, value="A")
             elif profit_share >= 30:
@@ -1922,21 +1913,18 @@ class ExcelExporter:
             ws_abc.cell(row=row, column=5, value=result.selling_price)
             revenue_share = (result.selling_price / total_revenue * 100) if total_revenue != 0 else 0
             ws_abc.cell(row=row, column=6, value=revenue_share)
-            # ABC по выручке
             if revenue_share >= 60:
                 ws_abc.cell(row=row, column=7, value="A")
             elif revenue_share >= 30:
                 ws_abc.cell(row=row, column=7, value="B")
             else:
                 ws_abc.cell(row=row, column=7, value="C")
-            # XYZ (симулируем на основе daily_sales)
-            daily_sales = 5  # по умолчанию
+            daily_sales = 5
             if i < len(products):
                 daily_sales = products[i].daily_sales
             ws_abc.cell(row=row, column=8, value=daily_sales)
-            # Имитация среднего и std для демонстрации (в реальности нужны исторические данные)
             avg = daily_sales * 1.0
-            std = daily_sales * 0.3  # допущение
+            std = daily_sales * 0.3
             ws_abc.cell(row=row, column=9, value=avg)
             ws_abc.cell(row=row, column=10, value=std)
             cv = (std / avg * 100) if avg != 0 else 0
@@ -1947,7 +1935,6 @@ class ExcelExporter:
                 ws_abc.cell(row=row, column=12, value="Y")
             else:
                 ws_abc.cell(row=row, column=12, value="Z")
-        # Добавляем дашборд: сводная таблица ABC/XYZ
         start_summary_row = len(results) + 4
         ws_abc.cell(row=start_summary_row, column=1, value="Сводка ABC/XYZ")
         ws_abc.cell(row=start_summary_row, column=1).font = Font(bold=True, size=14)
@@ -1957,7 +1944,6 @@ class ExcelExporter:
             ["B", 0, 0, 0],
             ["C", 0, 0, 0]
         ]
-        # Подсчёт
         for i, result in enumerate(results):
             cls = ws_abc.cell(row=i+2, column=4).value
             if cls == "A":
@@ -1977,7 +1963,6 @@ class ExcelExporter:
                 ws_abc.cell(row=r, column=c, value=val)
                 if r == start_summary_row+1:
                     ws_abc.cell(row=r, column=c).font = Font(bold=True)
-        # Диаграммы (гистограмма ABC)
         if len(results) > 1:
             chart1 = BarChart()
             chart1.title = "Распределение ABC классов"
@@ -1987,7 +1972,6 @@ class ExcelExporter:
             chart1.set_categories(cats_ref)
             chart1.legend = None
             ws_abc.add_chart(chart1, "I1")
-        # Сохраняем
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
@@ -2025,7 +2009,8 @@ def init_session_state():
     if 'mapping_saved' not in st.session_state:
         st.session_state.mapping_saved = False
     if 'preferred_source' not in st.session_state:
-        st.session_state.preferred_source = 'combined'  # 'api', 'ai', 'combined'
+        st.session_state.preferred_source = 'combined'
+
 
 def show_onboarding():
     with st.expander("🎓 Новичок? Начни здесь!", expanded=not st.session_state.get('onboarding_done', False)):
@@ -2043,10 +2028,16 @@ def show_onboarding():
         - `cogs` — себестоимость
         - `weight_kg` — вес в кг
         - `length_cm`, `width_cm`, `height_cm` — габариты (опционально)
+
+        ### ⚠️ Важно для API:
+        - Для Яндекс Маркет нужен OAuth токен и Campaign ID
+        - Для DeepSeek нужен API ключ (можно получить на platform.deepseek.com)
+        - Если API недоступны, используются базовые значения
         """)
         if st.button("✅ Понятно, больше не показывать"):
             st.session_state.onboarding_done = True
             st.rerun()
+
 
 def render_sidebar():
     with st.sidebar:
@@ -2054,7 +2045,7 @@ def render_sidebar():
         <div style='text-align: center; padding: 20px 15px; background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460); border-radius: 12px; margin-bottom: 25px;'>
             <h1 style='color: white; margin: 0; font-size: 1.5em;'>🚀 FBS PRO</h1>
             <p style='color: #a8a8d0; margin: 8px 0 0 0; font-size: 0.9em;'>Яндекс Маркет</p>
-            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v9.0.0 | Живые формулы</p>
+            <p style='color: #6666aa; margin: 5px 0 0 0; font-size: 0.7em;'>v9.1.0 | Исправлено</p>
         </div>
         """, unsafe_allow_html=True)
         st.markdown("### 🧭 Навигация")
@@ -2074,16 +2065,30 @@ def render_sidebar():
         st.markdown("### 📊 Статус системы")
         calculator = st.session_state.calculator
         st.markdown(f"**💰 Налог:** {st.session_state.tax_system.split()[0]}")
-        if calculator.tariffs_source == 'api':
-            st.success("🔌 Тарифы: API Яндекс Маркет")
-        elif calculator.tariffs_source == 'deepseek':
-            st.info("🤖 Тарифы: DeepSeek AI")
-        elif calculator.tariffs_source == 'user_categories':
-            st.info("📄 Тарифы: Пользовательские категории")
-        elif calculator.tariffs_source == 'user':
-            st.info("👤 Тарифы: Пользовательский ввод")
+        
+        api_manager = st.session_state.api_manager
+        has_yandex = api_manager.has_api_key('yandex_market') and api_manager.has_api_key('yandex_campaign_id')
+        has_deepseek = api_manager.has_api_key('deepseek')
+        
+        if has_yandex:
+            st.success("🔌 Яндекс Маркет: ✅")
         else:
-            st.warning("⚠️ Тарифы: Не загружены!")
+            st.warning("🔌 Яндекс Маркет: ❌")
+        
+        if has_deepseek:
+            st.success("🤖 DeepSeek: ✅")
+        else:
+            st.warning("🤖 DeepSeek: ❌")
+        
+        if calculator.tariffs_source == 'api':
+            st.info("📊 Тарифы: API")
+        elif calculator.tariffs_source == 'deepseek':
+            st.info("📊 Тарифы: DeepSeek")
+        elif calculator.tariffs_source == 'user_categories':
+            st.info("📊 Тарифы: Пользовательские")
+        else:
+            st.warning("⚠️ Тарифы: Базовые")
+        
         if st.session_state.results:
             st.success(f"✅ Рассчитано: {len(st.session_state.results)} товаров")
             profitable = len([r for r in st.session_state.results if r.gross_profit > 0])
@@ -2092,7 +2097,7 @@ def render_sidebar():
             st.info("ℹ️ Расчеты не выполнялись")
         st.markdown("---")
         st.markdown("### ⚡ Быстрые действия")
-        if st.button("🔄 Обновить тарифы (комб.)", use_container_width=True):
+        if st.button("🔄 Обновить тарифы", use_container_width=True):
             with st.spinner("Загрузка тарифов..."):
                 calculator.refresh_tariffs(force=True, preferred_source='combined')
                 st.success("✅ Тарифы обновлены!")
@@ -2103,6 +2108,7 @@ def render_sidebar():
             st.session_state.recommendations = []
             st.success("✅ Результаты очищены!")
             st.rerun()
+
 
 def render_upload():
     st.markdown("## 📦 Загрузка товаров")
@@ -2131,9 +2137,7 @@ SKU-002,Nike,clothing,5000,2000,0.3,30,20,5
             st.success(f"✅ Загружено {len(df)} товаров")
             with st.expander("👁️ Превью данных", expanded=True):
                 st.dataframe(df.head(10), use_container_width=True)
-            # Определение маппинга колонок
             st.markdown("### 🧩 Настройка соответствия колонок")
-            # Стандартные поля, которые ожидаются
             field_names = {
                 'artikul': 'Артикул',
                 'brand': 'Бренд',
@@ -2152,7 +2156,6 @@ SKU-002,Nike,clothing,5000,2000,0.3,30,20,5
             for field, label in field_names.items():
                 options = [''] + list(df.columns)
                 default = field if field in df.columns else ''
-                # Пытаемся найти лучшее совпадение
                 if default == '':
                     for col in df.columns:
                         if col.lower().replace(' ', '_') == field.lower():
@@ -2161,12 +2164,10 @@ SKU-002,Nike,clothing,5000,2000,0.3,30,20,5
                 selected = st.selectbox(f"Колонка для '{label}'", options, index=options.index(default) if default in options else 0, key=f"map_{field}")
                 if selected:
                     col_mapping[field] = selected
-            # Сохранить маппинг
             if st.button("💾 Сохранить маппинг", use_container_width=True):
                 st.session_state.column_mapping = col_mapping
                 st.session_state.mapping_saved = True
                 st.success("✅ Маппинг сохранён! Теперь можно перейти к расчёту.")
-            # Статистика по категориям
             if 'category' in df.columns:
                 st.markdown("### 📊 Распределение по категориям")
                 category_counts = df['category'].value_counts().reset_index()
@@ -2178,6 +2179,7 @@ SKU-002,Nike,clothing,5000,2000,0.3,30,20,5
                 st.rerun()
         except Exception as e:
             st.error(f"❌ Ошибка чтения файла: {e}")
+
 
 def render_categories():
     st.markdown("## 📋 Категории и тарифы")
@@ -2196,8 +2198,6 @@ def render_categories():
     | **return_fee** | Возвраты (в долях) |
     | **penalty_rate** | Штраф за просрочку (в долях) |
     """)
-
-    # Выбор источника тарифов
     st.markdown("### 🔄 Источник тарифов")
     source_options = {
         "Комбинированный (API → AI)": "combined",
@@ -2211,16 +2211,12 @@ def render_categories():
     )
     preferred_source = source_options[selected_label]
     st.session_state.preferred_source = preferred_source
-
-    # Кнопка обновления тарифов с выбранным источником
     if st.button("🔄 Обновить тарифы", type="primary", use_container_width=True):
         with st.spinner(f"Загрузка тарифов из источника: {selected_label}..."):
             calculator = st.session_state.calculator
             calculator.refresh_tariffs(force=True, preferred_source=preferred_source)
             st.success(f"✅ Тарифы обновлены! Источник: {calculator.tariffs_source}")
             st.rerun()
-
-    # Загрузка пользовательских категорий через CSV
     st.markdown("---")
     st.markdown("### 📂 Загрузка своих категорий (CSV)")
     uploaded_categories = st.file_uploader("📁 Загрузите CSV с категориями и тарифами", type=['csv'], key="categories_upload")
@@ -2230,7 +2226,6 @@ def render_categories():
             st.success(f"✅ Загружено {len(df)} категорий")
             with st.expander("👁️ Превью категорий", expanded=True):
                 st.dataframe(df, use_container_width=True)
-            # Маппинг для категорий
             st.markdown("### 🧩 Настройка соответствия колонок для тарифов")
             tariff_fields = {
                 'category': 'Категория',
@@ -2262,7 +2257,6 @@ def render_categories():
                 st.rerun()
         except Exception as e:
             st.error(f"❌ Ошибка чтения файла: {e}")
-
     st.markdown("---")
     st.markdown("### 📊 Текущие тарифы")
     calculator = st.session_state.calculator
@@ -2282,6 +2276,7 @@ def render_categories():
         st.caption(f"📊 Всего категорий: {len(df_tariffs)} | Источник: {calculator.tariffs_source} | Обновлено: {calculator.tariffs_updated_at.strftime('%d.%m.%Y %H:%M') if calculator.tariffs_updated_at else 'неизвестно'}")
     else:
         st.warning("⚠️ Нет загруженных тарифов. Загрузите категории или используйте API/AI.")
+
 
 def render_calculator():
     st.markdown("## 🧮 Калькулятор FBS")
@@ -2314,15 +2309,12 @@ def render_calculator():
         with st.spinner("Выполняется расчёт..."):
             products = []
             mapping = st.session_state.column_mapping
-            # Применяем маппинг для создания ProductData
             for _, row in df_filtered.iterrows():
                 try:
-                    # Получаем значения из колонок согласно маппингу
                     def get_val(field, default=0):
                         col = mapping.get(field)
                         if col and col in row:
                             return row[col]
-                        # fallback на прямое имя
                         if field in row:
                             return row[field]
                         return default
@@ -2350,6 +2342,7 @@ def render_calculator():
                 st.success(f"✅ Рассчитано {len(results)} товаров!")
                 st.rerun()
 
+
 def render_results():
     st.markdown("## 📊 Результаты расчётов")
     if not st.session_state.results:
@@ -2366,7 +2359,7 @@ def render_results():
         total_profit = sum(r.gross_profit for r in results)
         st.metric("💰 Общая прибыль", f"{total_profit:,.0f} ₽")
     with col4:
-        avg_margin = np.mean([r.margin_percent for r in results])
+        avg_margin = np.mean([r.margin_percent for r in results]) if results else 0
         st.metric("📊 Средняя маржа", f"{avg_margin:.1f}%")
     st.markdown("---")
     df_results = pd.DataFrame([r.get_summary() for r in results])
@@ -2382,6 +2375,7 @@ def render_results():
         fig = px.bar(x=[r.artikul[:15] for r in top], y=[r.gross_profit for r in top],
                     title="Топ-10 по прибыли", labels={'x': 'Артикул', 'y': 'Прибыль, ₽'})
         st.plotly_chart(fig, use_container_width=True)
+
 
 def render_export():
     st.markdown("## 📥 Экспорт в Excel с живыми формулами")
@@ -2424,6 +2418,7 @@ def render_export():
         except Exception as e:
             st.error(f"❌ Ошибка создания Excel: {e}")
 
+
 def render_recommendations():
     st.markdown("## 💡 Рекомендации")
     if not st.session_state.results:
@@ -2445,35 +2440,58 @@ def render_recommendations():
     else:
         st.success("✅ Все показатели в норме! Рекомендаций нет.")
 
+
 def render_settings():
     st.markdown("## ⚙️ Настройки")
     tab1, tab2 = st.tabs(["🔑 API Ключи", "🏛️ Налоговая система"])
     with tab1:
-        st.markdown("### 🔑 API ключи Яндекс Маркет")
-        st.info("API ключи используются для загрузки актуальных тарифов. Без них используются примерные значения.")
+        st.markdown("### 🔑 API ключи")
+        st.info("""
+        **Где взять ключи:**
+        - **Яндекс Маркет OAuth токен**: Получить в личном кабинете партнера
+        - **Campaign ID**: ID вашей кампании в Яндекс Маркет
+        - **DeepSeek API ключ**: platform.deepseek.com
+        """)
         api_manager = st.session_state.api_manager
         col1, col2 = st.columns(2)
         with col1:
             ym_token = st.text_input("Яндекс Маркет OAuth Token", 
                                     value=api_manager.get_api_key('yandex_market') or '', 
-                                    type="password")
+                                    type="password",
+                                    help="OAuth токен для доступа к API Яндекс Маркет")
         with col2:
             ym_campaign = st.text_input("Campaign ID", 
-                                       value=api_manager.get_api_key('yandex_campaign_id') or '')
+                                       value=api_manager.get_api_key('yandex_campaign_id') or '',
+                                       help="ID кампании в Яндекс Маркет")
         if st.button("💾 Сохранить Яндекс Маркет", use_container_width=True):
             if ym_token and ym_campaign:
-                api_manager.save_api_key('yandex_market', ym_token)
-                api_manager.save_api_key('yandex_campaign_id', ym_campaign)
-                st.success("✅ Ключи Яндекс Маркет сохранены!")
+                if len(ym_token) < 10:
+                    st.error("❌ Токен слишком короткий. Проверьте правильность.")
+                elif not ym_campaign.isdigit():
+                    st.error("❌ Campaign ID должен быть числом.")
+                else:
+                    api_manager.save_api_key('yandex_market', ym_token)
+                    api_manager.save_api_key('yandex_campaign_id', ym_campaign)
+                    st.success("✅ Ключи Яндекс Маркет сохранены!")
+                    st.rerun()
+            else:
+                st.warning("⚠️ Заполните оба поля")
         st.markdown("---")
         st.markdown("### 🤖 DeepSeek AI")
         ds_key = st.text_input("DeepSeek API Key", 
                               value=api_manager.get_api_key('deepseek') or '', 
-                              type="password")
+                              type="password",
+                              help="API ключ для DeepSeek. Получить на platform.deepseek.com")
         if st.button("💾 Сохранить DeepSeek", use_container_width=True):
             if ds_key:
-                api_manager.save_api_key('deepseek', ds_key)
-                st.success("✅ Ключ DeepSeek сохранен!")
+                if len(ds_key) < 20:
+                    st.error("❌ Ключ слишком короткий. Проверьте правильность.")
+                else:
+                    api_manager.save_api_key('deepseek', ds_key)
+                    st.success("✅ Ключ DeepSeek сохранен!")
+                    st.rerun()
+            else:
+                st.warning("⚠️ Введите API ключ")
     with tab2:
         st.markdown("### 🏛️ Система налогообложения")
         tax_system = st.selectbox("Выберите систему", list(TAX_SYSTEMS.keys()),
@@ -2505,6 +2523,7 @@ def main():
     render_sidebar()
     current_section = st.session_state.get('current_section', 'main')
     calculator = st.session_state.calculator
+    
     if current_section == 'main':
         st.markdown("""
         <div style='text-align: center; padding: 50px 30px; background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); border-radius: 20px; margin-bottom: 35px;'>
@@ -2518,21 +2537,36 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         show_onboarding()
+        
+        api_manager = st.session_state.api_manager
+        has_yandex = api_manager.has_api_key('yandex_market') and api_manager.has_api_key('yandex_campaign_id')
+        has_deepseek = api_manager.has_api_key('deepseek')
+        
+        if not has_yandex and not has_deepseek:
+            st.warning("""
+            ⚠️ **API ключи не настроены!**
+            
+            Для загрузки актуальных тарифов:
+            1. Перейдите в раздел **Настройки** → **API Ключи**
+            2. Введите OAuth токен Яндекс Маркет и Campaign ID
+            3. Или введите DeepSeek API ключ
+            4. Или загрузите свои категории в разделе **Категории и тарифы**
+            
+            Сейчас используются **базовые значения тарифов**.
+            """)
+        
         st.info("""
         ### 🎯 Что вы можете делать:
         | Раздел | Описание |
         |--------|----------|
         | 📦 **Загрузка товаров** | CSV с артикулами, брендами, категориями, ценами и весогабаритами |
-        | 📋 **Категории и тарифы** | Загрузка своих категорий с тарифами, выбор источника (API, AI, комб.) |
+        | 📋 **Категории и тарифы** | Загрузка своих категорий с тарифами, выбор источника |
         | 🧮 **Калькулятор** | Расчёт юнит-экономики для всех товаров |
         | 📊 **Результаты** | Просмотр и анализ расчётов |
-        | 📥 **Экспорт Excel** | Скачивание Excel с живыми формулами и 3 листами |
+        | 📥 **Экспорт Excel** | Скачивание Excel с живыми формулами |
         | 💡 **Рекомендации** | Автоматические рекомендации по оптимизации |
-        ### 📌 Ключевые принципы:
-        1. **НИКАКИХ ЗАХАРДКОЖЕННЫХ ТАРИФОВ** — все из API, AI, CSV
-        2. **ЖИВЫЕ ФОРМУЛЫ** — при выгрузке в Excel
-        3. **ПОЛЬЗОВАТЕЛЬСКИЕ КАТЕГОРИИ** — вы управляете тарифами
         """)
+        
         if st.session_state.results:
             st.markdown("---")
             st.markdown("### 📊 Последние результаты")
@@ -2540,6 +2574,7 @@ def main():
             for r in results:
                 color = "🟢" if r.gross_profit > 0 else "🔴"
                 st.markdown(f"{color} **{r.artikul}** — Прибыль: {r.gross_profit:,.0f} ₽, Маржа: {r.margin_percent:.1f}%")
+    
     elif current_section == 'upload':
         render_upload()
     elif current_section == 'categories':
@@ -2554,10 +2589,12 @@ def main():
         render_recommendations()
     elif current_section == 'settings':
         render_settings()
+    
     st.markdown("---")
     st.caption(f"🚀 FBS Unit Economics PRO v{APP_VERSION} | Яндекс Маркет | "
               f"Источник тарифов: {calculator.tariffs_source.upper() if calculator.tariffs_source else 'НЕТ ДАННЫХ'} | "
               f"Данные актуальны на {datetime.now().strftime('%d.%m.%Y')}")
+
 
 if __name__ == "__main__":
     main()
