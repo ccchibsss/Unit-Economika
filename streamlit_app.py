@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 ============================================================================
-🚀 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v15.0 - ENTERPRISE SYNC EDITION
+🚀 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v16.0 - ENTERPRISE EVOLUTION
 ============================================================================
 """
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,7 +15,6 @@ import json
 import requests
 import logging
 import warnings
-import re
 from enum import Enum
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Tuple, Optional
@@ -36,20 +33,18 @@ try:
 except ImportError:
     pass
 
-APP_VERSION = "15.0.0"
-APP_NAME = "FBS Unit Economics & Price Strategy Manager"
+APP_VERSION = "16.0.0"
+APP_NAME = "ZapStore Unit Economics & Price Strategy Manager"
 
 # ============================================================================
-# БЛОК 0: СЛУЖЕБНЫЕ УТИЛИТЫ ТОЧНЫХ РАСЧЕТОВ И ИСПРАВЛЕНИЯ КОДИРОВОК (MOJIBAKE)
+# БЛОК 0: СЛУЖЕБНЫЕ УТИЛИТЫ ТОЧНЫХ РАСЧЕТОВ И ИСПРАВЛЕНИЯ КОДИРОВОК
 # ============================================================================
 def money_round(value: float) -> float:
-    """Точное финансовое округление до 2 знаков после запятой (ROUND_HALF_UP)."""
     if np.isnan(value) or np.isinf(value):
         return 0.0
     return float(Decimal(str(value)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP))
 
 def fix_double_utf8(text: str) -> str:
-    """Исправление кракозябр (двойного UTF-8 кодирования) при импорте каталогов."""
     if not isinstance(text, str) or not text:
         return text
     for source_enc, target_enc in [('cp1251', 'utf-8'), ('latin1', 'utf-8')]:
@@ -78,12 +73,13 @@ class TaxSystem(Enum):
     @classmethod
     def by_label(cls, label):
         for item in cls:
-            if item.label == label: return item
+            if item.label == label:
+                return item
         return cls.USN_6
 
 class Tariff:
-    def __init__(self, category: str, commission_rate: float = 0.12, min_commission: float = 35.0,
-                 magma_base: float = 30.0, magma_per_kg: float = 15.0, acquiring_fee: float = 0.018,
+    def __init__(self, category: str, commission_rate: float = 0.12, min_commission: float = 35.0, 
+                 magma_base: float = 30.0, magma_per_kg: float = 15.0, acquiring_fee: float = 0.018, 
                  return_fee: float = 0.05, source: str = "Справочник оферты"):
         self.category = category
         self.commission_rate = commission_rate
@@ -95,7 +91,7 @@ class Tariff:
         self.source = source
 
 # ============================================================================
-# БЛОК 2: МОДУЛЬ ГИБРИДНОГО ПОЛУЧЕНИЯ ТАРИФОВ (API + AI DEEPSEEK + LOCAL)
+# БЛОК 2: МОДУЛЬ ГИБРИДНОГО ПОЛУЧЕНИЯ ТАРИФОВ
 # ============================================================================
 class HybridTariffManager:
     DEFAULTS = {
@@ -106,7 +102,12 @@ class HybridTariffManager:
     }
 
     def __init__(self):
-        self.tariffs = dict(self.DEFAULTS)
+        if 'tariffs' not in st.session_state:
+            st.session_state.tariffs = dict(self.DEFAULTS)
+
+    @property
+    def tariffs(self):
+        return st.session_state.tariffs
 
     def fetch_from_yandex_market_api(self, oauth_token: str, campaign_id: str) -> bool:
         url = f"[link removed]{campaign_id}/deliveries/fees"
@@ -123,32 +124,11 @@ class HybridTariffManager:
                             commission_rate=float(fee.get("commissionRate", 12)) / 100,
                             source="Яндекс.Маркет API Live"
                         )
-                return True
+                    return True
             return False
         except Exception as e:
             logger.error(f"Ошибка вызова API Яндекс Маркета: {e}")
             return False
-
-    def fetch_from_deepseek_ai(self, api_key: str, category_name: str) -> Tariff:
-        if not api_key: return self.tariffs['default']
-        url = "[link removed]"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        prompt = f"Проанализируй категорию товара '{category_name}' на Яндекс Маркет FBS. Выдай JSON с ключами commission_rate (доля от 0 до 1), return_rate (доля от 0 до 1). Только чистый JSON."
-        try:
-            payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "response_format": {"type": "json_object"}}
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
-            if res.status_code == 200:
-                ai_data = res.json()
-                content = json.loads(ai_data['choices'][0]['message']['content'])
-                return Tariff(
-                    category=category_name,
-                    commission_rate=float(content.get('commission_rate', 0.12)),
-                    return_fee=float(content.get('return_rate', 0.05)),
-                    source="DeepSeek AI Predict"
-                )
-        except Exception as e:
-            logger.error(f"Ошибка обращения к DeepSeek: {e}")
-        return self.tariffs['default']
 
     def get_best_tariff(self, category_name: str) -> Tariff:
         cat_clean = str(category_name).lower().strip()
@@ -171,21 +151,23 @@ class HybridTariffManager:
         } for k, t in self.tariffs.items()])
 
 # ============================================================================
-# БЛОК 3: ВЕКТОРИЗОВАННЫЙ ФИНАНСОВЫЙ ДВИЖОК C СТРАТЕГИЕЙ ЦЕН
+# БЛОК 3: ВЕКТОРИЗОВАННЫЙ ФИНАНСОВЫЙ ДВИЖОК
 # ============================================================================
 class VectorizedEnginePRO:
     @staticmethod
     def run_calculations(df: pd.DataFrame, tax_system: TaxSystem, manager: HybridTariffManager) -> pd.DataFrame:
-        if df.empty: return df
+        if df.empty:
+            return df
         
-        # Предварительная очистка от дубликатов и кракозябр
+        df = df.copy()
         if 'artikul' in df.columns:
             df['artikul'] = df['artikul'].astype(str).apply(fix_double_utf8)
         if 'category' in df.columns:
             df['category'] = df['category'].astype(str).apply(fix_double_utf8)
 
         for c in ['selling_price', 'cogs', 'weight_kg', 'length_cm', 'width_cm', 'height_cm', 'packaging_cost', 'marketing_budget_per_unit', 'daily_sales', 'stock_depth_days']:
-            if c not in df.columns: df[c] = 0.0
+            if c not in df.columns:
+                df[c] = 0.0
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0.0)
 
         comm_rates, min_comms, magma_bases, magma_kgs, acq_fees, ret_fees = [], [], [], [], [], []
@@ -208,7 +190,6 @@ class VectorizedEnginePRO:
         df['commission'] = np.maximum(df['selling_price'] * comm_rates, min_comms)
         df['last_mile_cost'] = np.clip(df['selling_price'] * 0.045, 60.0, 400.0)
         df['first_mile_cost'] = magma_bases + (df['billable_weight'] * magma_kgs)
-        
         df['acquiring_cost'] = df['selling_price'] * acq_fees
         df['return_cost'] = (150.0 + (df['selling_price'] * 0.30)) * ret_fees
         df['pick_pack_cost'] = 35.0
@@ -218,7 +199,6 @@ class VectorizedEnginePRO:
             df['cogs'] + df['first_mile_cost'] + df['pick_pack_cost'] + 
             df['packaging_cost'] + df['return_cost'] + df['marketing_budget_per_unit'] + df['warehouse_cost']
         )
-
         df['pre_tax_expenses'] = df['fixed_operational_costs'] + df['commission'] + df['last_mile_cost'] + df['acquiring_cost']
 
         if tax_system.base == "revenue":
@@ -237,7 +217,6 @@ class VectorizedEnginePRO:
         df['gross_profit'] = df['selling_price'] - df['total_expenses']
         df['margin_percent'] = np.where(df['selling_price'] > 0, (df['gross_profit'] / df['selling_price']) * 100, 0.0)
 
-        # РЕКОМЕНДОВАННЫЕ ЦЕНЫ С ЦЕЛЕВОЙ ДОХОДНОСТЬЮ
         tax_factor = tax_system.rate if tax_system.base == "revenue" else 0.0
         variable_fees_share = comm_rates + 0.045 + acq_fees + tax_factor
         denom = 1.0 - variable_fees_share
@@ -247,24 +226,21 @@ class VectorizedEnginePRO:
         df['rec_price_15'] = df['fixed_operational_costs'] / (denom - 0.15)
         df['rec_price_25'] = df['fixed_operational_costs'] / (denom - 0.25)
 
-        money_columns = ['commission', 'last_mile_cost', 'first_mile_cost', 'acquiring_cost', 
-                         'return_cost', 'pre_tax_expenses', 'tax_cost', 'total_expenses', 
-                         'gross_profit', 'rec_price_min', 'rec_price_15', 'rec_price_25']
+        money_columns = ['commission', 'last_mile_cost', 'first_mile_cost', 'acquiring_cost', 'return_cost', 'pre_tax_expenses', 'tax_cost', 'total_expenses', 'gross_profit', 'rec_price_min', 'rec_price_15', 'rec_price_25']
         for col in money_columns:
             df[col] = df[col].apply(money_round)
 
         return df
 
 # ============================================================================
-# БЛОК 4: ЭКСПОРТ В EXCEL С ЖИВЫМИ ФОРМУЛАМИ ПЕРЕСЧЕТА
+# БЛОК 4: ЭКСПОРТ И СИНХРОНИЗАЦИЯ
 # ============================================================================
 class ExcelDynamicExporter:
     @staticmethod
     def export(df: pd.DataFrame) -> bytes:
-        if not OPENPYXL_AVAILABLE: return b""
+        if not OPENPYXL_AVAILABLE:
+            return b""
         wb = Workbook()
-        
-        # Лист 1: Сводная панель KPI
         ws_dash = wb.active
         ws_dash.title = "📊 Дашборд"
         ws_dash.cell(1, 1, "Сводный финансовый аналитический отчет").font = Font(size=14, bold=True)
@@ -276,13 +252,8 @@ class ExcelDynamicExporter:
         ws_dash.cell(5, 2, f"=SUM('Расчет экономики'!L2:L{len(df)+1})")
         ws_dash.column_dimensions['A'].width = 30
 
-        # Лист 2: Полноформатная интерактивная модель
         ws = wb.create_sheet("Расчет экономики")
-        headers = ['Артикул', 'Категория', 'Цена продажи (Редактируемая)', 'Себестоимость (Закупка)', 
-                   'Комиссия маркетплейса', 'Магистраль (Логистика)', 'Последняя миля', 
-                   'Банковский эквайринг', 'Процент возвратов/Брак', 'Расчетный налог', 
-                   'Итого расходов (Формула)', 'Чистая прибыль (Формула)', 'Текущая маржа, % (Формула)', 
-                   'МИН. ЦЕНА (Порог маржи 0%)', 'ОПТИМАЛЬНАЯ ЦЕНА (Цель 15% маржи)', 'МАКСИМАЛЬНАЯ ЦЕНА (Цель 25% маржи)']
+        headers = ['Артикул', 'Категория', 'Цена продажи', 'Себестоимость', 'Комиссия маркетплейса', 'Магистраль', 'Последняя миля', 'Банковский эквайринг', 'Процент возвратов', 'Расчетный налог', 'Итого расходов', 'Чистая прибыль', 'Текущая маржа, %', 'МИН. ЦЕНА (0%)', 'ОПТИМАЛЬНАЯ (15%)', 'МАКСИМАЛЬНАЯ (25%)']
         
         for col_idx, text in enumerate(headers, 1):
             cell = ws.cell(1, col_idx, text)
@@ -305,199 +276,192 @@ class ExcelDynamicExporter:
             ws.cell(r, 8, float(row['acquiring_cost'])).border = data_border
             ws.cell(r, 9, float(row['return_cost'])).border = data_border
             ws.cell(r, 10, float(row['tax_cost'])).border = data_border
-            
-            # Интерактивные формулы Excel!
             ws.cell(r, 11, f"=SUM(D{r}:J{r})").border = data_border
             ws.cell(r, 12, f"=C{r}-K{r}").border = data_border
             ws.cell(r, 13, f"=IF(C{r}>0, (L{r}/C{r})*100, 0)").border = data_border
-            
-            # Границы цен для менеджеров
             ws.cell(r, 14, float(row['rec_price_min'])).border = data_border
             ws.cell(r, 15, float(row['rec_price_15'])).border = data_border
             ws.cell(r, 16, float(row['rec_price_25'])).border = data_border
 
-            # Цветовое кодирование ценовых блоков стратегий
             ws.cell(r, 14).fill = PatternFill(start_color="F2DCDB", fill_type="solid")
             ws.cell(r, 15).fill = PatternFill(start_color="E2EFDA", fill_type="solid")
             ws.cell(r, 16).fill = PatternFill(start_color="D9E1F2", fill_type="solid")
 
-        # Условное форматирование прибыли (Зеленый / Красный в зависимости от знака)
-        green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-        red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-        ws.conditional_formatting.add(f"L2:L{len(df)+1}", CellIsRule(operator='greaterThan', formula=['0'], fill=green_fill))
-        ws.conditional_formatting.add(f"L2:L{len(df)+1}", CellIsRule(operator='lessThan', formula=['0'], fill=red_fill))
-
         for col in range(1, len(headers) + 1):
-            ws.column_dimensions[get_column_letter(col)].width = 22
+            ws.column_dimensions[get_column_letter(col)].width = 20
 
         out = io.BytesIO()
         wb.save(out)
         out.seek(0)
         return out.getvalue()
 
-# ============================================================================
-# БЛОК 5: МОДУЛЬ АВТОМАТИЧЕСКОЙ СИНХРОНИЗАЦИИ ЦЕН ПО API С КАБИНЕТОМ ZAPSTORE
-# ============================================================================
 class YandexMarketApiSync:
-    """Выгрузка скорректированных цен в кабинет Яндекс Маркета по API."""
     @staticmethod
-    def update_prices(business_id: str, api_key: str, price_data: list) -> Tuple[bool, str]:
+    def update_prices(business_id: str, api_key: str, price_data: list) -> Tuple\[bool, str\]:
         url = f"[link removed]{business_id}/offers/update-prices"
-        headers = {
-            "Authorization": f"OAuth {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        offers_payload = []
-        for item in price_data:
-            offers_payload.append({
-                "offerId": str(item['artikul']),
-                "price": {
-                    "value": float(item['new_price']),
-                    "currencyId": "RUR"
-                }
-            })
-            
-        payload = {"offers": offers_payload}
+        headers = {"Authorization": f"OAuth {api_key}", "Content-Type": "application/json"}
+        offers_payload = [{"offerId": str(item['artikul']), "price": {"value": float(item['new_price']), "currencyId": "RUR"}} for item in price_data]
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            response = requests.post(url, json={"offers": offers_payload}, headers=headers, timeout=10)
             if response.status_code == 200:
-                res_json = response.json()
-                if res_json.get("status") == "ERROR":
-                    errors = res_json.get("errors", [{"message": "Неизвестная ошибка API Маркета"}])
-                    return False, errors[0].get("message")
-                return True, "Цены успешно обновлены и отправлены на модерацию в ЛК ZapStore."
-            else:
-                return False, f"Ошибка API ({response.status_code}): {response.text}"
+                return True, "Цены успешно обновлены в ZapStore."
+            return False, f"Ошибка API ({response.status_code})"
         except Exception as e:
-            return False, f"Сбой сетевого подключения к шлюзу партнерского API: {e}"
+            return False, str(e)
 
 # ============================================================================
-# БЛОК 6: STREAMLIT ИНТЕРФЕЙС УПРАВЛЕНИЯ И ЗАПУСКА
+# БЛОК 6: STREAMLIT ИНТЕРФЕЙС И НАВИГАЦИЯ
 # ============================================================================
 def main():
-    st.set_page_config(page_title=APP_NAME, page_icon="📈", layout="wide")
-    st.title(f"📈 {APP_NAME} v{APP_VERSION} — Корпоративный симулятор цен")
-    st.caption("Автоматизация маркетплейсов: Векторизованные финансовые симуляции, интерактивный расчёт рекомендованных цен и синхронизация по API.")
+    st.set_page_config(page_title=APP_NAME, page_icon="📊", layout="wide")
 
-    # Корпоративные константы из файлов конфигурации ZapStore
+    # Стилизация интерфейса
+    st.markdown("""
+    <style>
+        .reportview-container { background: #f5f7f9; }
+        .sidebar .sidebar-content { background: #1e293b; color: white; }
+        .stMetric { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_html=True)
+
     COMPANY_API_KEY = "ACMA:baYKVsVh7vORZYIZLLvZviviZAxfjcRmdrariFBH:e755690c"
     COMPANY_CAMPAIGN_ID = "78311459"
     COMPANY_BUSINESS_ID = "93193868"
 
-    if 'tm' not in st.session_state: st.session_state.tm = HybridTariffManager()
+    tm = HybridTariffManager()
+
     if 'main_df' not in st.session_state:
         st.session_state.main_df = pd.DataFrame([{
-            'artikul': 'PART-7831', 'category': 'автозапчасти', 'selling_price': 3990.0, 'cogs': 1800.0,
-            'weight_kg': 1.5, 'length_cm': 25.0, 'width_cm': 15.0, 'height_cm': 10.0,
+            'artikul': 'PART-7831', 'category': 'автозапчасти', 'selling_price': 3990.0,
+            'cogs': 1800.0, 'weight_kg': 1.5, 'length_cm': 25.0, 'width_cm': 15.0, 'height_cm': 10.0,
             'packaging_cost': 40.0, 'marketing_budget_per_unit': 200.0, 'daily_sales': 4, 'stock_depth_days': 30
         }])
 
-    # Раздел гибридного управления источниками тарификации
-    with st.expander("🌐 Настройка гибридного получения тарифов (API Яндекс Маркет / ИИ DeepSeek)", expanded=False):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**🔌 Подключение к Партнерскому API**")
-            oauth = st.text_input("OAuth Токен доступа", type="password", value=COMPANY_API_KEY)
-            camp_id = st.text_input("Идентификатор кампании (campaignId)", value=COMPANY_CAMPAIGN_ID)
-            if st.button("Синхронизировать сетку тарифов с API"):
-                if st.session_state.tm.fetch_from_yandex_market_api(oauth, camp_id):
-                    st.success("Успешное обновление тарифов из ЛК Яндекс Маркета!")
-                else:
-                    st.error("Ошибка запроса к партнерскому шлюзу API.")
-        with c2:
-            st.markdown("**🧠 Прогнозирование через DeepSeek AI**")
-            ds_key = st.text_input("DeepSeek API Key", type="password")
-            ai_cat = st.text_input("Указать категорию для AI анализа", value="Тормозные колодки")
-            if st.button("Сгенерировать тариф ИИ"):
-                if ds_key:
-                    predicted = st.session_state.tm.fetch_from_deepseek_ai(ds_key, ai_cat)
-                    st.session_state.tm.tariffs[ai_cat.lower()] = predicted
-                    st.success(f"ИИ предсказал базовую комиссию: {predicted.commission_rate*100}%")
-                else:
-                    st.warning("Необходимо указать API ключ авторизации DeepSeek.")
-        with c3:
-            st.markdown("**📊 Текущая тарифная сетка**")
-            st.dataframe(st.session_state.tm.to_dataframe(), use_container_width=True)
+    # --- НАВИГАЦИОННАЯ ПАНЕЛЬ СЛЕВА ---
+    st.sidebar.title("🧭 Навигация")
+    page = st.sidebar.radio("Перейти в раздел:", ["📊 Дашборд и Аналитика", "📝 Калькулятор экономики", "🗂️ Управление категориями", "💾 Импорт / Экспорт данных", "📡 Синхронизация API"])
+    
+    st.sidebar.markdown("---")
+    st.sidebar.info(f"**Версия системы:** {APP_VERSION}\n\n**Магазин:** ZapStore")
 
-    tax_label = st.selectbox("Налоговый режим бизнеса:", ["УСН 6% (доходы)", "УСН 15% (доходы-расходы)", "ОСН (общая с НДС 20%)"])
+    # Ввод общих глобальных параметров в Sidebar
+    st.sidebar.subheader("⚙️ Системные настройки")
+    tax_label = st.sidebar.selectbox("Налоговый режим бизнеса:", ["УСН 6% (доходы)", "УСН 15% (доходы-расходы)", "ОСН (общая с НДС 20%)"])
     current_tax = TaxSystem.by_label(tax_label)
 
-    st.markdown("### 📝 Интерактивный симулятор товарной матрицы")
-    st.info("💡 Кликните дважды на ячейку **selling_price** (Текущая цена) или **cogs** (Закупочная стоимость) для изменения параметров — вся модель пересчитается мгновенно.")
+    # Предварительный расчет данных
+    calculated_df = VectorizedEnginePRO.run_calculations(st.session_state.main_df, current_tax, tm)
 
-    # Интерактивный редактор товарной матрицы
-    edited_df = st.data_editor(st.session_state.main_df, num_rows="dynamic", use_container_width=True)
-
-    if not edited_df.empty:
-        # Запуск векторизованного пересчета измененных параметров
-        calculated_df = VectorizedEnginePRO.run_calculations(edited_df, current_tax, st.session_state.tm)
-        st.session_state.main_df = edited_df
-
-        st.markdown("### 🗠 Стратегический анализ цен, маржи и ценовых коридоров")
-        st.dataframe(calculated_df[[
-            'artikul', 'category', 'selling_price', 'cogs', 'pre_tax_expenses', 
-            'gross_profit', 'margin_percent', 'rec_price_min', 'rec_price_15', 'rec_price_25'
-        ]], use_container_width=True)
-
-        # Вывод ключевых показателей
-        c_min_p = calculated_df['rec_price_min'].mean()
-        c_15_p = calculated_df['rec_price_15'].mean()
-        c_25_p = calculated_df['rec_price_25'].mean()
+    # --- СТРАНИЦА 1: ДАШБОРД ---
+    if page == "📊 Дашборд и Аналитика":
+        st.title("📊 Панель комплексной аналитики и KPI")
+        st.caption("Ключевые экономические метрики, маржинальность портфеля и визуализация ценовых коридоров.")
         
-        met1, met2, met3 = st.columns(3)
-        met1.metric("Порог безубыточности (средний)", f"{c_min_p:,.2f} ₽", "Маржа 0%")
-        met2.metric("Рекомендованная цена (Оптимум)", f"{c_15_p:,.2f} ₽", "Чистая маржа 15%")
-        met3.metric("Цена максимальной доходности", f"{c_25_p:,.2f} ₽", "Чистая маржа 25%")
+        if not calculated_df.empty:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Всего SKU в матрице", len(calculated_df))
+            c2.metric("Ср. маржинальность портфеля", f"{calculated_df['margin_percent'].mean():.2f}%")
+            c3.metric("Рекомендованный оптимум (ср)", f"{calculated_df['rec_price_15'].mean():,.2f} ₽")
 
-        # Секция выгрузки в Excel
-        st.markdown("---")
-        st.subheader("📥 Выгрузка интерактивной Excel модели")
-        if OPENPYXL_AVAILABLE:
-            excel_bytes = ExcelDynamicExporter.export(calculated_df)
-            st.download_button(
-                label="⬇️ СКАЧАТЬ ВЫСОКОИНФОРМАТИВНЫЙ EXCEL ОТЧЕТ С ЖИВЫМИ ФОРМУЛАМИ (.XLSX)",
-                data=excel_bytes,
-                file_name=f"Market_Price_Strategy_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+            st.subheader("📈 Соотношение себестоимости и чистой прибыли по SKU")
+            fig = px.bar(calculated_df, x='artikul', y=['cogs', 'gross_profit', 'total_expenses'], 
+                         title="Структура цены единицы товара", labels={'value': 'Рубли (₽)', 'artikul': 'Артикул'})
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Установите библиотеку openpyxl.")
+            st.warning("Товарная матрица пуста. Добавьте или импортируйте данные в калькуляторе.")
 
-        # Блок автоматической отправки цен по API в ЛК ZapStore
+    # --- СТРАНИЦА 2: КАЛЬКУЛЯТОР ---
+    elif page == "📝 Калькулятор экономики":
+        st.title("📝 Интерактивный симулятор товарной матрицы")
+        st.caption("Редактируйте параметры прямо в таблице. Движок пересчитает показатели на лету.")
+        
+        edited_df = st.data_editor(st.session_state.main_df, num_rows="dynamic", use_container_width=True)
+        if not edited_df.empty:
+            st.session_state.main_df = edited_df
+            calculated_df = VectorizedEnginePRO.run_calculations(edited_df, current_tax, tm)
+
+        st.subheader("🗠 Расширенный стратегический анализ цен и коридоров маржи")
+        st.dataframe(calculated_df[['artikul', 'category', 'selling_price', 'cogs', 'pre_tax_expenses', 'gross_profit', 'margin_percent', 'rec_price_min', 'rec_price_15', 'rec_price_25']], use_container_width=True)
+
+    # --- СТРАНИЦА 3: КАТЕГОРИИ ---
+    elif page == "🗂️ Управление категориями":
+        st.title("🗂️ Настройка и добавление кастомных категорий тарификации")
+        st.caption("Создавайте новые товарные категории, чтобы финансовый движок мгновенно подтягивал их параметры при расчете.")
+        
+        with st.form("add_category_form"):
+            new_cat_name = st.text_input("Название новой категории (например: 'аксессуары')")
+            new_comm = st.number_input("Комиссия маркетплейса (%)", min_value=0.0, max_value=100.0, value=12.0) / 100
+            new_min_comm = st.number_input("Минимальная комиссия (₽)", min_value=0.0, value=35.0)
+            submitted = st.form_submit_button("➕ Добавить категорию в базу")
+            
+            if submitted and new_cat_name:
+                cleaned_name = new_cat_name.lower().strip()
+                tm.tariffs[cleaned_name] = Tariff(category=cleaned_name, commission_rate=new_comm, min_commission=new_min_comm, source="Пользовательская база")
+                st.success(f"Категория '{new_cat_name}' успешно зарегистрирована!")
+        
+        st.subheader("📊 Зарегистрированная тарифная сетка")
+        st.dataframe(tm.to_dataframe(), use_container_width=True)
+
+    # --- СТРАНИЦА 4: ИМПОРТ / ЭКСПОРТ ---
+    elif page == "💾 Импорт / Export данных":
+        st.title("💾 Централизованный импорт и экспорт данных")
+        st.caption("Масштабируйте управление каталогом с помощью сквозной загрузки файлов и генерации адаптивных Excel-моделей.")
+        
+        # Блок Загрузки (Импорта)
+        st.subheader("📥 Загрузка товарной матрицы (CSV / JSON)")
+        uploaded_file = st.file_uploader("Выберите файл для загрузки товарного каталога", type=['csv', 'json'])
+        if uploaded_file is not None:
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    uploaded_df = pd.read_csv(uploaded_file)
+                else:
+                    uploaded_df = pd.read_json(uploaded_file)
+                
+                st.session_state.main_df = uploaded_df
+                st.success(f"Каталог успешно импортирован! Загружено SKU: {len(uploaded_df)}")
+                st.dataframe(uploaded_df.head(), use_container_width=True)
+            except Exception as e:
+                st.error(f"Не удалось распарсить файл: {e}")
+
         st.markdown("---")
-        st.subheader("📡 Модуль автоматической синхронизации цен с Яндекс Маркетом")
-        selected_strategy = st.selectbox("Выберите ценовую стратегию для пакетной отправки в магазин ZapStore по API:", 
+        
+        # Блок Скачивания (Экспорта)
+        st.subheader("📤 Скачать текущие аналитические отчеты")
+        c1, c2 = st.columns(2)
+        with c1:
+            if OPENPYXL_AVAILABLE:
+                excel_bytes = ExcelDynamicExporter.export(calculated_df)
+                st.download_button(label="⬇️ СКАЧАТЬ ЭКСПОРТНЫЙ EXCEL (.XLSX)", data=excel_bytes,
+                                   file_name=f"ZapStore_Price_Strategy_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            else:
+                st.warning("Компонент openpyxl недоступен для сборки Excel.")
+        with c2:
+            csv_buffer = io.StringIO()
+            calculated_df.to_csv(csv_buffer, index=False)
+            st.download_button(label="⬇️ СКАЧАТЬ СЫРЫЕ ДАННЫЕ В CSV", data=csv_buffer.getvalue(),
+                               file_name=f"ZapStore_Matrix_{datetime.now().strftime('%d_%m_%Y')}.csv", mime="text/csv", use_container_width=True)
+
+    # --- СТРАНИЦА 5: API СИНХРОНИЗАЦИЯ ---
+    elif page == "📡 Синхронизация API":
+        st.title("📡 Модуль интеграции и управления шлюзами ZapStore")
+        st.caption("Пакетная публикация ценовых стратегий на маркетплейс в реальном времени.")
+        
+        selected_strategy = st.selectbox("Стратегия для пакетной синхронизации:", 
                                          ["Текущая установленная цена", "Минимальная цена (Безубыточность)", "Оптимальная цена (15% маржа)", "Максимальная цена (25% маржа)"])
         
-        if st.button("🚀 ОТПРАВИТЬ ОБНОВЛЕННЫЕ ЦЕНЫ НА ЯНДЕКС МАРКЕТ", type="primary", use_container_width=True):
+        if st.button("🚀 ВЫГРУЗИТЬ ЦЕНЫ НА ЯНДЕКС МАРКЕТ ПО API", type="primary", use_container_width=True):
             price_data_to_send = []
             for _, row in calculated_df.iterrows():
-                if selected_strategy == "Текущая установленная цена":
-                    target_price = row['selling_price']
-                elif selected_strategy == "Минимальная цена (Безубыточность)":
-                    target_price = row['rec_price_min']
-                elif selected_strategy == "Оптимальная цена (15% маржа)":
-                    target_price = row['rec_price_15']
-                else:
-                    target_price = row['rec_price_25']
-                    
-                price_data_to_send.append({
-                    'artikul': row['artikul'],
-                    'new_price': target_price
-                })
+                target_price = row['selling_price'] if selected_strategy == "Текущая установленная цена" else (row['rec_price_min'] if selected_strategy == "Минимальная цена (Безубыточность)" else (row['rec_price_15'] if selected_strategy == "Оптимальная цена (15% маржа)" else row['rec_price_25']))
+                price_data_to_send.append({'artikul': row['artikul'], 'new_price': target_price})
             
-            with st.spinner("Передача пакета данных по защищенному API шлюзу..."):
-                success, msg = YandexMarketApiSync.update_prices(
-                    business_id=COMPANY_BUSINESS_ID,
-                    api_key=COMPANY_API_KEY,
-                    price_data=price_data_to_send
-                )
+            with st.spinner("Передача пакета данных..."):
+                success, msg = YandexMarketApiSync.update_prices(COMPANY_BUSINESS_ID, COMPANY_API_KEY, price_data_to_send)
                 if success:
-                    st.success(f"Выгрузка успешно завершена! {msg}")
+                    st.success(f"Выгрузка завершена! {msg}")
                 else:
-                    st.error(f"Ошибка транзакции цен: {msg}")
+                    st.error(f"Ошибка API: {msg}")
 
 if __name__ == "__main__":
     main()
