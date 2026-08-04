@@ -8,7 +8,7 @@
 КЛЮЧЕВЫЕ УЛУЧШЕНИЯ:
 1. Векторизованные расчёты через pandas (50-100x быстрее)
 2. Исправлен ABC/XYZ — накопительный процент, правильная сортировка
-3. Исправлены налоги: УСН 15%% (min 1%%), ОСН с НДС 20%%
+3. Исправлены налоги: УСН 15% (min 1%), ОСН с НДС 20%
 4. Логистические зоны по доле логистики в выручке
 5. Pydantic-валидация данных
 6. Сценарный анализ чувствительности
@@ -42,7 +42,7 @@ from collections import defaultdict
 warnings.filterwarnings('ignore')
 
 # Streamlit-safe logging
-logging.basicConfig(level=logging.INFO, format='%%(asctime)s - %%(name)s - %%(levelname)s - %%(message)s',
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[logging.StreamHandler()])
 logger = logging.getLogger('FBSEconomy')
 
@@ -59,14 +59,15 @@ except ImportError:
     pass
 
 APP_VERSION = "10.0.0"
+APP_NAME = "FBS Unit Economics PRO"
 
 # ============================================================================
 # БЛОК 1: ПЕРЕЧИСЛЕНИЯ И КОНФИГУРАЦИИ
 # ============================================================================
 
 class TaxSystem(Enum):
-    USN_6 = ("УСН 6%% (доходы)", 0.06, "revenue", None)
-    USN_15 = ("УСН 15%% (доходы-расходы)", 0.15, "profit", 0.01)
+    USN_6 = ("УСН 6% (доходы)", 0.06, "revenue", None)
+    USN_15 = ("УСН 15% (доходы-расходы)", 0.15, "profit", 0.01)
     OSN = ("ОСН (общая)", 0.20, "profit_vat", None)
     NPD = ("НПД (самозанятый)", 0.06, "revenue", None)
     PATENT = ("Патент", 0.06, "revenue", None)
@@ -86,10 +87,10 @@ class TaxSystem(Enum):
 
 
 class LogisticZone(Enum):
-    CRITICAL = ("🔴 Критическая", "Логистика >15%% от цены. Срочно оптимизируйте.", True, 0.15)
-    RISK = ("🟡 Зона риска", "Логистика 8-15%%. Рассмотрите региональные склады.", False, 0.08)
-    NORMAL = ("🟢 Норма", "Логистика 4-8%%. Контролируйте динамику.", False, 0.04)
-    EXCELLENT = ("🔵 Отличная", "Логистика <4%%. Масштабируйте модель.", False, 0.0)
+    CRITICAL = ("🔴 Критическая", "Логистика >15% от цены. Срочно оптимизируйте.", True, 0.15)
+    RISK = ("🟡 Зона риска", "Логистика 8-15%. Рассмотрите региональные склады.", False, 0.08)
+    NORMAL = ("🟢 Норма", "Логистика 4-8%. Контролируйте динамику.", False, 0.04)
+    EXCELLENT = ("🔵 Отличная", "Логистика <4%. Масштабируйте модель.", False, 0.0)
 
     def __init__(self, label, recommendation, is_critical, threshold):
         self.label = label
@@ -506,9 +507,9 @@ class ExcelExporter:
         # Лист 1: Тарифы
         ws_t = wb.active
         ws_t.title = "Тарифы"
-        headers = ['Категория', 'Комиссия,%%', 'Мин.комиссия', 'Last Mile база',
-                   'Last Mile за кг', 'Эквайринг,%%', 'Возвраты,%%', 'Штрафы,%%',
-                   'Мин.логистика', 'Источник', 'Уверенность,%%']
+        headers = ['Категория', 'Комиссия,%', 'Мин.комиссия', 'Last Mile база',
+                   'Last Mile за кг', 'Эквайринг,%', 'Возвраты,%', 'Штрафы,%',
+                   'Мин.логистика', 'Источник', 'Уверенность,%']
         for c, h in enumerate(headers, 1):
             cell = ws_t.cell(1, c, h)
             cell.font = Font(bold=True, color="FFFFFF")
@@ -534,8 +535,8 @@ class ExcelExporter:
             'Артикул', 'Бренд', 'Категория', 'Цена', 'Себест.',
             'Комиссия', 'First Mile', 'Last Mile', 'Pick&Pack', 'Упаковка',
             'Эквайринг', 'Возвраты', 'Штрафы', 'Маркетинг', 'Склад', 'Налог', 'НДС',
-            'Итого расходов', 'Прибыль', 'Маржа,%%', 'ROI,%%',
-            'Логистика,%%', 'Лог.зона', 'Макс.скидка,%%', 'Мин.цена',
+            'Итого расходов', 'Прибыль', 'Маржа,%', 'ROI,%',
+            'Логистика,%', 'Лог.зона', 'Макс.скидка,%', 'Мин.цена',
             'Опт.запас', 'Точка заказа', 'Оборач.,дн', 'Источник'
         ]
         for c, h in enumerate(headers_r, 1):
@@ -562,7 +563,7 @@ class ExcelExporter:
             ws_r.cell(r, 15, res.warehouse_cost)
             ws_r.cell(r, 16, res.tax_cost)
             ws_r.cell(r, 17, res.vat_cost)
-            ws_r.cell(r, 18, f"=SUM(F{r}:Q{r})")
+            ws_r.cell(r, 18, f"=SUM(E{r}:P{r})")
             ws_r.cell(r, 19, f"=D{r}-R{r}")
             ws_r.cell(r, 20, f"=S{r}/D{r}*100")
             ws_r.cell(r, 21, f"=S{r}/E{r}*100")
@@ -601,8 +602,8 @@ class ExcelExporter:
         ws_a = wb.create_sheet("ABC_XYZ")
         abc_df = ABCXYZAnalyzer.analyze(results, products)
         if not abc_df.empty:
-            ha = ['Артикул', 'Прибыль', 'Доля прибыли,%%', 'ABC(прибыль)',
-                  'Выручка', 'Доля выручки,%%', 'ABC(выручка)', 'XYZ', 'Матрица']
+            ha = ['Артикул', 'Прибыль', 'Доля прибыли,%', 'ABC(прибыль)',
+                  'Выручка', 'Доля выручки,%', 'ABC(выручка)', 'XYZ', 'Матрица']
             for c, h in enumerate(ha, 1):
                 cell = ws_a.cell(1, c, h)
                 cell.font = Font(bold=True, color="FFFFFF")
@@ -655,13 +656,13 @@ class ExcelExporter:
 
         summary = [
             ("Всего товаров", len(results)),
-            ("Прибыльных", f"{prof} ({prof/len(results)*100:.1f}%%)"),
-            ("Убыточных", f"{len(results)-prof} ({(len(results)-prof)/len(results)*100:.1f}%%)"),
+            ("Прибыльных", f"{prof} ({prof/len(results)*100:.1f}%)"),
+            ("Убыточных", f"{len(results)-prof} ({(len(results)-prof)/len(results)*100:.1f}%)"),
             ("Критичных по логистике", crit),
             ("Общая выручка", round(total_rev, 2)),
             ("Общие расходы", round(total_exp, 2)),
             ("Общая прибыль", round(total_profit, 2)),
-            ("Средняя маржа", f"{total_profit/total_rev*100:.2f}%%" if total_rev else "0%%"),
+            ("Средняя маржа", f"{total_profit/total_rev*100:.2f}%" if total_rev else "0%"),
             ("Налоговая система", tax_system.label),
         ]
         for i, (k, v) in enumerate(summary, 2):
@@ -728,14 +729,14 @@ class TariffManager:
         for cat, t in self.tariffs.items():
             rows.append({
                 'Категория': cat,
-                'Комиссия,%%': round(t.commission_rate * 100, 2),
+                'Комиссия,%': round(t.commission_rate * 100, 2),
                 'Мин.комиссия': t.min_commission,
                 'Last Mile база': t.last_mile_base,
                 'Last Mile за кг': t.last_mile_per_kg,
-                'Эквайринг,%%': round(t.acquiring_fee * 100, 2),
-                'Возвраты,%%': round(t.return_fee * 100, 2),
+                'Эквайринг,%': round(t.acquiring_fee * 100, 2),
+                'Возвраты,%': round(t.return_fee * 100, 2),
                 'Источник': t.source,
-                'Уверенность,%%': round(t.confidence * 100, 1)
+                'Уверенность,%': round(t.confidence * 100, 1)
             })
         return pd.DataFrame(rows)
 
@@ -760,7 +761,7 @@ class RecommendationEngine:
         if len(unprofitable) / total > 0.2:
             recs.append({'priority': 'high', 'icon': '🔴',
                 'title': 'Критическая масса убыточных товаров',
-                'text': f'{len(unprofitable)} товаров ({len(unprofitable)/total*100:.0f}%%) убыточны. '
+                'text': f'{len(unprofitable)} товаров ({len(unprofitable)/total*100:.0f}%) убыточны. '
                         f'Пересмотрите цены или исключите {", ".join([r.artikul for r in unprofitable[:3]])}.'})
         elif unprofitable:
             recs.append({'priority': 'medium', 'icon': '🟡',
@@ -770,12 +771,12 @@ class RecommendationEngine:
         if critical_log:
             recs.append({'priority': 'high', 'icon': '🚚',
                 'title': 'Критическая логистическая нагрузка',
-                'text': f'{len(critical_log)} товаров: логистика >15%% от цены. Рассмотрите FBO или региональные склады.'})
+                'text': f'{len(critical_log)} товаров: логистика >15% от цены. Рассмотрите FBO или региональные склады.'})
 
         if low_margin:
             recs.append({'priority': 'medium', 'icon': '⚠️',
                 'title': 'Товары с низкой маржой',
-                'text': f'{len(low_margin)} товаров с маржой <10%%. Риск непокрытия при росте возвратов.'})
+                'text': f'{len(low_margin)} товаров с маржой <10%. Риск непокрытия при росте возвратов.'})
 
         if high_stock:
             frozen = sum(r.optimal_stock_units * r.cogs for r in high_stock)
@@ -821,8 +822,8 @@ class SensitivityAnalyzer:
         results = calc.calculate(products)
         return pd.DataFrame([{
             'Цена': r.selling_price, 'Прибыль': r.gross_profit,
-            'Маржа,%%': r.margin_percent, 'Логистика,%%': r.logistics_share * 100,
-            'Макс.скидка,%%': r.max_discount_percent
+            'Маржа,%': r.margin_percent, 'Логистика,%': r.logistics_share * 100,
+            'Макс.скидка,%': r.max_discount_percent
         } for r in results])
 
 
@@ -876,6 +877,7 @@ def render_sidebar():
             r = st.session_state.results
             p = sum(1 for x in r if x.gross_profit > 0)
             st.markdown(f"**Расчёт:** {len(r)} тов., {p} прибыл.")
+            st.markdown(f"**Прибыльных:** {p} ({p/len(r)*100:.1f}%)")
         if st.button("🗑️ Очистить результаты", use_container_width=True):
             st.session_state.results = []
             st.session_state.products = []
@@ -893,7 +895,7 @@ def render_main():
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Версия", "10.0.0")
+        st.metric("Версия", APP_VERSION)
     with col2:
         st.metric("Ускорение", "50-100x")
     with col3:
@@ -903,7 +905,7 @@ def render_main():
     ### 🎯 Возможности:
     - **Векторизация** — расчёт 10,000 товаров за секунды
     - **Исправленный ABC/XYZ** — накопительные проценты, корректная сортировка
-    - **Налоги** — УСН 6%%/15%% (min 1%%), ОСН с НДС 20%%
+    - **Налоги** — УСН 6%/15% (min 1%), ОСН с НДС 20%
     - **Логистика** — зоны по доле в выручке, а не по расстоянию
     - **Сценарии** — анализ чувствительности к цене
     - **Excel** — 4 листа с формулами, сводками и диаграммами
@@ -914,7 +916,7 @@ def render_main():
         st.markdown("### 📊 Последние результаты")
         for r in st.session_state.results[:5]:
             color = "🟢" if r.gross_profit > 0 else "🔴"
-            st.markdown(f"{color} **{r.artikul}** — Прибыль: {r.gross_profit:,.0f} ₽, Маржа: {r.margin_percent:.1f}%%")
+            st.markdown(f"{color} **{r.artikul}** — Прибыль: {r.gross_profit:,.0f} ₽, Маржа: {r.margin_percent:.1f}%")
 
 
 def render_upload():
@@ -923,7 +925,7 @@ def render_upload():
     uploaded = st.file_uploader("CSV файл", type=['csv'])
     if uploaded:
         try:
-            df = pd.read_csv(uploaded)
+            df = pd.read_csv(uploaded, encoding='utf-8')
             dups = df['artikul'].duplicated().sum() if 'artikul' in df.columns else 0
             if dups > 0:
                 st.warning(f"⚠️ Найдено {dups} дубликатов артикулов. Будут удалены.")
@@ -959,6 +961,7 @@ def render_upload():
                 st.success("✅ Маппинг сохранён!")
             if st.button("🚀 ПЕРЕЙТИ К РАСЧЁТУ", type="primary", use_container_width=True):
                 st.session_state.uploaded_df = df
+                st.session_state.column_mapping = mapping
                 st.session_state.current_section = 'calculator'
                 st.rerun()
         except Exception as e:
@@ -978,7 +981,7 @@ def render_categories():
     up = st.file_uploader("CSV с тарифами", type=['csv'], key="tariff_upload")
     if up:
         try:
-            df = pd.read_csv(up)
+            df = pd.read_csv(up, encoding='utf-8')
             st.success(f"Загружено {len(df)} строк")
             st.dataframe(df.head(), use_container_width=True)
             tfields = {
@@ -1093,7 +1096,7 @@ def render_calculator():
                 st.session_state.results = results
                 st.session_state.products = products
                 st.session_state.recommendations = RecommendationEngine.generate(results)
-                st.success(f"✅ Расчитано {len(results)} товаров за {elapsed:.3f} сек!")
+                st.success(f"✅ Рассчитано {len(results)} товаров за {elapsed:.3f} сек!")
                 st.rerun()
 
 
@@ -1115,7 +1118,7 @@ def render_results():
     with c1:
         st.metric("Товаров", len(results))
     with c2:
-        st.metric("Прибыльных", f"{prof} ({prof/len(results)*100:.0f}%%)")
+        st.metric("Прибыльных", f"{prof} ({prof/len(results)*100:.0f}%)")
     with c3:
         st.metric("Выручка", f"{total_rev:,.0f} ₽")
     with c4:
@@ -1127,7 +1130,7 @@ def render_results():
     st.markdown("---")
     fcol1, fcol2, fcol3 = st.columns(3)
     with fcol1:
-        min_margin = st.slider("Мин. маржа, %%", -50.0, 100.0, -100.0)
+        min_margin = st.slider("Мин. маржа, %", -100.0, 100.0, -100.0)
     with fcol2:
         only_profitable = st.checkbox("Только прибыльные")
     with fcol3:
@@ -1142,9 +1145,9 @@ def render_results():
         'Штрафы': r.penalty_cost, 'Маркетинг': r.marketing_cost,
         'Склад': r.warehouse_cost, 'Налог': r.tax_cost, 'НДС': r.vat_cost,
         'Итого расходов': r.total_expenses, 'Прибыль': r.gross_profit,
-        'Маржа,%%': r.margin_percent, 'ROI,%%': r.roi_percent,
-        'Логистика,%%': round(r.logistics_share * 100, 2),
-        'Лог.зона': r.logistic_zone, 'Макс.скидка,%%': r.max_discount_percent,
+        'Маржа,%': r.margin_percent, 'ROI,%': r.roi_percent,
+        'Логистика,%': round(r.logistics_share * 100, 2),
+        'Лог.зона': r.logistic_zone, 'Макс.скидка,%': r.max_discount_percent,
         'Мин.цена': r.min_viable_price, 'Опт.запас': r.optimal_stock_units,
         'Точка заказа': r.reorder_point_units, 'Оборач.,дн': r.stock_turnover_days,
         'Источник': r.data_source
@@ -1152,7 +1155,7 @@ def render_results():
 
     if only_profitable:
         df_res = df_res[df_res['Прибыль'] > 0]
-    df_res = df_res[df_res['Маржа,%%'] >= min_margin]
+    df_res = df_res[df_res['Маржа,%'] >= min_margin]
     if search:
         df_res = df_res[df_res['Артикул'].astype(str).str.contains(search, case=False, na=False)]
 
@@ -1164,7 +1167,7 @@ def render_results():
     with vcol1:
         fig = px.histogram([r.margin_percent for r in results], nbins=20,
                           title="Распределение маржинальности",
-                          labels={'value': 'Маржа, %%', 'count': 'Кол-во'})
+                          labels={'value': 'Маржа, %', 'count': 'Кол-во'})
         st.plotly_chart(fig, use_container_width=True)
     with vcol2:
         top = sorted(results, key=lambda x: x.gross_profit, reverse=True)[:10]
@@ -1202,7 +1205,7 @@ def render_scenarios():
     tm = st.session_state.tariff_manager
     tariff = tm.get_tariff(base_product.category)
 
-    st.markdown(f"**Текущая цена:** {base_product.selling_price:,.0f} ₽ | **Прибыль:** {base_result.gross_profit:,.0f} ₽ | **Маржа:** {base_result.margin_percent:.1f}%%")
+    st.markdown(f"**Текущая цена:** {base_product.selling_price:,.0f} ₽ | **Прибыль:** {base_result.gross_profit:,.0f} ₽ | **Маржа:** {base_result.margin_percent:.1f}%")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -1229,7 +1232,7 @@ def render_scenarios():
             fig.add_vline(x=base_product.selling_price, line_dash="dash", line_color="red")
             st.plotly_chart(fig, use_container_width=True)
         with s2:
-            fig = px.line(sc, x='Цена', y='Маржа,%%', title="Маржа vs Цена", markers=True)
+            fig = px.line(sc, x='Цена', y='Маржа,%', title="Маржа vs Цена", markers=True)
             fig.add_vline(x=base_product.selling_price, line_dash="dash", line_color="red")
             st.plotly_chart(fig, use_container_width=True)
 
@@ -1256,17 +1259,30 @@ def render_export():
     4. **Сводка** — ключевые показатели бизнеса
     """)
     st.success(f"Доступно: {len(st.session_state.results)} товаров")
-    if st.button("📥 СКАЧАТЬ EXCEL", type="primary", use_container_width=True):
+
+    if 'excel_data' not in st.session_state:
+        st.session_state.excel_data = None
+        st.session_state.excel_ts = ""
+
+    if st.button("📥 Сгенерировать Excel", type="primary", use_container_width=True):
         try:
-            excel = ExcelExporter.export(
-                st.session_state.results, st.session_state.products,
-                st.session_state.tariff_manager.tariffs, st.session_state.tax_system)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            st.download_button("⬇️ Скачать", excel, f"FBS_YM_{ts}.xlsx",
-                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                             use_container_width=True)
+            with st.spinner("Формирование файла..."):
+                st.session_state.excel_data = ExcelExporter.export(
+                    st.session_state.results, st.session_state.products,
+                    st.session_state.tariff_manager.tariffs, st.session_state.tax_system)
+                st.session_state.excel_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            st.success("Файл готов!")
         except Exception as e:
-            st.error(f"Ошибка: {e}")
+                        st.error(f"❌ Ошибка: {e}")
+
+    if st.session_state.excel_data is not None:
+        st.download_button(
+            label="⬇️ Скачать Excel",
+            data=st.session_state.excel_data,
+            file_name=f"FBS_YM_{st.session_state.excel_ts}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
 
 def render_recommendations():
