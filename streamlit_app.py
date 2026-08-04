@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-🚀 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v16.0 - ENTERPRISE EVOLUTION
+🚀 ULTIMATE UNIT ECONOMICS FOR AUTO PARTS v16.5 - INSTRUCTIONAL ENTERPRISE
 ============================================================================
 """
 import streamlit as st
@@ -28,12 +28,11 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
-    from openpyxl.formatting.rule import CellIsRule
     OPENPYXL_AVAILABLE = True
 except ImportError:
     pass
 
-APP_VERSION = "16.0.0"
+APP_VERSION = "16.5.0"
 APP_NAME = "ZapStore Unit Economics & Price Strategy Manager"
 
 # ============================================================================
@@ -108,27 +107,6 @@ class HybridTariffManager:
     @property
     def tariffs(self):
         return st.session_state.tariffs
-
-    def fetch_from_yandex_market_api(self, oauth_token: str, campaign_id: str) -> bool:
-        url = f"[link removed]{campaign_id}/deliveries/fees"
-        headers = {"Authorization": f"OAuth {oauth_token}", "Content-Type": "application/json"}
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if "fees" in data:
-                    for fee in data.get("fees", []):
-                        type_f = fee.get("deliveryServiceType", "default")
-                        self.tariffs[type_f.lower()] = Tariff(
-                            category=type_f,
-                            commission_rate=float(fee.get("commissionRate", 12)) / 100,
-                            source="Яндекс.Маркет API Live"
-                        )
-                    return True
-            return False
-        except Exception as e:
-            logger.error(f"Ошибка вызова API Яндекс Маркета: {e}")
-            return False
 
     def get_best_tariff(self, category_name: str) -> Tariff:
         cat_clean = str(category_name).lower().strip()
@@ -243,13 +221,9 @@ class ExcelDynamicExporter:
         wb = Workbook()
         ws_dash = wb.active
         ws_dash.title = "📊 Дашборд"
-        ws_dash.cell(1, 1, "Сводный финансовый аналитический отчет").font = Font(size=14, bold=True)
+        ws_dash.cell(1, 1, "Сводный финансовый отчет").font = Font(size=14, bold=True)
         ws_dash.cell(3, 1, "Всего SKU в обработке:")
         ws_dash.cell(3, 2, len(df))
-        ws_dash.cell(4, 1, "Суммарная плановая выручка:")
-        ws_dash.cell(4, 2, f"=SUM('Расчет экономики'!C2:C{len(df)+1})")
-        ws_dash.cell(5, 1, "Суммарная плановая прибыль:")
-        ws_dash.cell(5, 2, f"=SUM('Расчет экономики'!L2:L{len(df)+1})")
         ws_dash.column_dimensions['A'].width = 30
 
         ws = wb.create_sheet("Расчет экономики")
@@ -259,7 +233,6 @@ class ExcelDynamicExporter:
             cell = ws.cell(1, col_idx, text)
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill(start_color="1F4E78", fill_type="solid")
-            cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
         thin_side = Side(border_style="thin", color="D9D9D9")
         data_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
@@ -283,10 +256,6 @@ class ExcelDynamicExporter:
             ws.cell(r, 15, float(row['rec_price_15'])).border = data_border
             ws.cell(r, 16, float(row['rec_price_25'])).border = data_border
 
-            ws.cell(r, 14).fill = PatternFill(start_color="F2DCDB", fill_type="solid")
-            ws.cell(r, 15).fill = PatternFill(start_color="E2EFDA", fill_type="solid")
-            ws.cell(r, 16).fill = PatternFill(start_color="D9E1F2", fill_type="solid")
-
         for col in range(1, len(headers) + 1):
             ws.column_dimensions[get_column_letter(col)].width = 20
 
@@ -304,8 +273,8 @@ class YandexMarketApiSync:
         try:
             response = requests.post(url, json={"offers": offers_payload}, headers=headers, timeout=10)
             if response.status_code == 200:
-                return True, "Цены успешно обновлены в ZapStore."
-            return False, f"Ошибка API ({response.status_code})"
+                return True, "Цены успешно обновлены в ЛК ZapStore."
+            return False, f"Ошибка API ({response.status_code}): {response.text}"
         except Exception as e:
             return False, str(e)
 
@@ -313,19 +282,19 @@ class YandexMarketApiSync:
 # БЛОК 5: STREAMLIT ИНТЕРФЕЙС И НАВИГАЦИЯ
 # ============================================================================
 def main():
-    st.set_page_config(page_title=APP_NAME, page_icon="📊", layout="wide")
+    st.set_page_config(page_title=APP_NAME, page_icon="📈", layout="wide")
 
-    # Стилизация интерфейса
     st.markdown("""
     <style>
         .reportview-container { background: #f5f7f9; }
         .sidebar .sidebar-content { background: #1e293b; color: white; }
-        .stMetric { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .stMetric { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+        .instruction-box { background-color: #f8fafc; padding: 15px; border-radius: 6px; border-left: 4px solid #3b82f6; margin-bottom: 20px; color: #334155; }
     </style>
     """, unsafe_allow_html=True)
 
+    # Аутентификационные данные из настроек API
     COMPANY_API_KEY = "ACMA:baYKVsVh7vORZYIZLLvZviviZAxfjcRmdrariFBH:e755690c"
-    COMPANY_CAMPAIGN_ID = "78311459"
     COMPANY_BUSINESS_ID = "93193868"
 
     tm = HybridTariffManager()
@@ -338,24 +307,38 @@ def main():
         }])
 
     # --- НАВИГАЦИОННАЯ ПАНЕЛЬ СЛЕВА ---
-    st.sidebar.title("🧭 Навигация")
-    page = st.sidebar.radio("Перейти в раздел:", ["📊 Дашборд и Аналитика", "📝 Калькулятор экономики", "🗂️ Управление категориями", "💾 Импорт / Экспорт данных", "📡 Синхронизация API"])
+    st.sidebar.title("🧭 Навигация по системе")
+    page = st.sidebar.radio("Выберите рабочий экран:", [
+        "📊 Дашборд и Аналитика", 
+        "📝 Калькулятор экономики", 
+        "🗂️ Управление категориями", 
+        "💾 Импорт / Экспорт данных", 
+        "📡 Синхронизация API"
+    ])
     
     st.sidebar.markdown("---")
-    st.sidebar.info(f"**Версия системы:** {APP_VERSION}\n\n**Магазин:** ZapStore")
-
-    # Ввод общих глобальных параметров в Sidebar
-    st.sidebar.subheader("⚙️ Системные настройки")
-    tax_label = st.sidebar.selectbox("Налоговый режим бизнеса:", ["УСН 6% (доходы)", "УСН 15% (доходы-расходы)", "ОСН (общая с НДС 20%)"])
+    st.sidebar.subheader("⚙️ Глобальный налоговый режим")
+    tax_label = st.sidebar.selectbox(
+        "Налогообложение компании:", 
+        ["УСН 6% (доходы)", "УСН 15% (доходы-расходы)", "ОСН (общая с НДС 20%)"],
+        help="Выбор влияет на автоматический расчёт чистой маржи и генерацию коридора цен."
+    )
     current_tax = TaxSystem.by_label(tax_label)
 
-    # Предварительный расчет данных
     calculated_df = VectorizedEnginePRO.run_calculations(st.session_state.main_df, current_tax, tm)
 
     # --- СТРАНИЦА 1: ДАШБОРД ---
     if page == "📊 Дашборд и Аналитика":
         st.title("📊 Панель комплексной аналитики и KPI")
-        st.caption("Ключевые экономические метрики, маржинальность портфеля и визуализация ценовых коридоров.")
+        
+        st.markdown("""
+        <div class="instruction-box">
+            <strong>📋 Как работать с этим экраном:</strong><br>
+            1. Данная панель собирает верхнеуровневые метрики на основе вашей товарной матрицы.<br>
+            2. Используйте виджеты KPI для оценки средней маржинальности всего портфеля.<br>
+            3. Диаграмма структуры цены наглядно показывает соотношение себестоимости закупок (COGS) и чистой прибыли.
+        </div>
+        """, unsafe_allow_html=True)
         
         if not calculated_df.empty:
             c1, c2, c3 = st.columns(3)
@@ -363,105 +346,139 @@ def main():
             c2.metric("Ср. маржинальность портфеля", f"{calculated_df['margin_percent'].mean():.2f}%")
             c3.metric("Рекомендованный оптимум (ср)", f"{calculated_df['rec_price_15'].mean():,.2f} ₽")
 
-            st.subheader("📈 Соотношение себестоимости и чистой прибыли по SKU")
+            st.subheader("📈 Соотношение себестоимости и прибыли по артикулам")
             fig = px.bar(calculated_df, x='artikul', y=['cogs', 'gross_profit', 'total_expenses'], 
-                         title="Структура цены единицы товара", labels={'value': 'Рубли (₽)', 'artikul': 'Артикул'})
+                         title="Разбивка стоимости единицы товара", labels={'value': 'Рубли (₽)', 'artikul': 'Артикул'})
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Товарная матрица пуста. Добавьте или импортируйте данные в калькуляторе.")
+            st.warning("Товарная матрица пуста. Перейдите во вкладку 'Калькулятор экономики' для добавления позиций.")
 
     # --- СТРАНИЦА 2: КАЛЬКУЛЯТОР ---
     elif page == "📝 Калькулятор экономики":
         st.title("📝 Интерактивный симулятор товарной матрицы")
-        st.caption("Редактируйте параметры прямо в таблице. Движок пересчитает показатели на лету.")
         
+        st.markdown("""
+        <div class="instruction-box">
+            <strong>📋 Как работать с калькулятором:</strong><br>
+            1. Нажмите дважды на любую ячейку в таблице <b>'Редактор матрицы'</b> для изменения исходных данных.<br>
+            2. Вы можете менять текущую цену (<code>selling_price</code>), себестоимость (<code>cogs</code>) или габариты.<br>
+            3. Вторая таблица ниже автоматически пересчитает расходы на логистику, налоги и покажет три сценария идеальной цены.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("Шаг 1: Редактор исходных параметров товаров")
         edited_df = st.data_editor(st.session_state.main_df, num_rows="dynamic", use_container_width=True)
         if not edited_df.empty:
             st.session_state.main_df = edited_df
             calculated_df = VectorizedEnginePRO.run_calculations(edited_df, current_tax, tm)
 
-        st.subheader("🗠 Расширенный стратегический анализ цен и коридоров маржи")
+        st.subheader("Шаг 2: Результаты расчетов финансовых коридоров")
         st.dataframe(calculated_df[['artikul', 'category', 'selling_price', 'cogs', 'pre_tax_expenses', 'gross_profit', 'margin_percent', 'rec_price_min', 'rec_price_15', 'rec_price_25']], use_container_width=True)
 
     # --- СТРАНИЦА 3: КАТЕГОРИИ ---
     elif page == "🗂️ Управление категориями":
         st.title("🗂️ Настройка и добавление кастомных категорий тарификации")
-        st.caption("Создавайте новые товарные категории, чтобы финансовый движок мгновенно подтягивал их параметры при расчете.")
+        
+        st.markdown("""
+        <div class="instruction-box">
+            <strong>📋 Как добавить свою категорию:</strong><br>
+            1. Заполните текстовое поле с точным названием категории (в нижнем регистре, например: <code>тормозные колодки</code>).<br>
+            2. Укажите процентную ставку комиссии маркетплейса согласно договору оферты.<br>
+            3. Нажмите кнопку добавления. Теперь движок при расчёте unit-экономики для этого типа товара будет применять новые правила.
+        </div>
+        """, unsafe_allow_html=True)
         
         with st.form("add_category_form"):
-            new_cat_name = st.text_input("Название новой категории (например: 'аксессуары')")
-            new_comm = st.number_input("Комиссия маркетплейса (%)", min_value=0.0, max_value=100.0, value=12.0) / 100
-            new_min_comm = st.number_input("Минимальная комиссия (₽)", min_value=0.0, value=35.0)
-            submitted = st.form_submit_button("➕ Добавить категорию в базу")
+            new_cat_name = st.text_input("Название новой категории товара:", help="Используйте строчные буквы, например: фильтры")
+            new_comm = st.number_input("Процент комиссии оферты (%)", min_value=0.0, max_value=100.0, value=12.0) / 100
+            new_min_comm = st.number_input("Минимум комиссии маркетплейса (₽)", min_value=0.0, value=35.0)
+            submitted = st.form_submit_button("➕ Зарегистрировать категорию")
             
             if submitted and new_cat_name:
                 cleaned_name = new_cat_name.lower().strip()
                 tm.tariffs[cleaned_name] = Tariff(category=cleaned_name, commission_rate=new_comm, min_commission=new_min_comm, source="Пользовательская база")
-                st.success(f"Категория '{new_cat_name}' успешно зарегистрирована!")
+                st.success(f"Категория '{new_cat_name}' успешно добавлена в оперативную память!")
         
-        st.subheader("📊 Зарегистрированная тарифная сетка")
+        st.subheader("Действующая сетка тарифов по категориям")
         st.dataframe(tm.to_dataframe(), use_container_width=True)
 
     # --- СТРАНИЦА 4: ИМПОРТ / ЭКСПОРТ ---
     elif page == "💾 Импорт / Экспорт данных":
         st.title("💾 Централизованный импорт и экспорт данных")
-        st.caption("Масштабируйте управление каталогом с помощью сквозной загрузки файлов и генерации адаптивных Excel-моделей.")
         
-        # Блок Загрузки (Импорта)
-        st.subheader("📥 Загрузка товарной матрицы (CSV / JSON)")
-        uploaded_file = st.file_uploader("Выберите файл для загрузки товарного каталога", type=['csv', 'json'])
+        st.markdown("""
+        <div class="instruction-box">
+            <strong>📋 Инструкция по миграции данных:</strong><br>
+            • <b>Импорт:</b> Загрузите CSV-файл, содержащий заголовки: <code>artikul, category, selling_price, cogs</code>, чтобы пакетно перезаписать текущую матрицу.<br>
+            • <b>Экспорт:</b> Нажмите кнопку экспорта в Excel для получения многостраничного финансового документа с «живыми» формулами СУММ и условий.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("1. Загрузка товарного каталога")
+        uploaded_file = st.file_uploader("Перетащите файл CSV или JSON сюда", type=['csv', 'json'])
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.csv'):
                     uploaded_df = pd.read_csv(uploaded_file)
                 else:
                     uploaded_df = pd.read_json(uploaded_file)
-                
                 st.session_state.main_df = uploaded_df
-                st.success(f"Каталог успешно импортирован! Загружено SKU: {len(uploaded_df)}")
-                st.dataframe(uploaded_df.head(), use_container_width=True)
+                st.success(f"Файл успешно обработан. Импортировано SKU: {len(uploaded_df)}")
             except Exception as e:
-                st.error(f"Не удалось распарсить файл: {e}")
+                st.error(f"Ошибка парсинга структуры: {e}")
 
         st.markdown("---")
-        
-        # Блок Скачивания (Экспорта)
-        st.subheader("📤 Скачать текущие аналитические отчеты")
+        st.subheader("2. Выгрузка результатов расчетов")
         c1, c2 = st.columns(2)
         with c1:
             if OPENPYXL_AVAILABLE:
                 excel_bytes = ExcelDynamicExporter.export(calculated_df)
-                st.download_button(label="⬇️ СКАЧАТЬ ЭКСПОРТНЫЙ EXCEL (.XLSX)", data=excel_bytes,
-                                   file_name=f"ZapStore_Price_Strategy_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                st.download_button(label="⬇️ СКАЧАТЬ ФИНАНСОВУЮ МОДЕЛЬ В EXCEL (.XLSX)", data=excel_bytes,
+                                   file_name=f"ZapStore_Economics_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            else:
-                st.warning("Компонент openpyxl недоступен для сборки Excel.")
         with c2:
             csv_buffer = io.StringIO()
             calculated_df.to_csv(csv_buffer, index=False)
-            st.download_button(label="⬇️ СКАЧАТЬ СЫРЫЕ ДАННЫЕ В CSV", data=csv_buffer.getvalue(),
+            st.download_button(label="⬇️ СКАЧАТЬ ПЛОСКИЙ ОТЧЕТ В CSV", data=csv_buffer.getvalue(),
                                file_name=f"ZapStore_Matrix_{datetime.now().strftime('%d_%m_%Y')}.csv", mime="text/csv", use_container_width=True)
 
     # --- СТРАНИЦА 5: API СИНХРОНИЗАЦИЯ ---
     elif page == "📡 Синхронизация API":
         st.title("📡 Модуль интеграции и управления шлюзами ZapStore")
-        st.caption("Пакетная публикация ценовых стратегий на маркетплейс в реальном времени.")
         
-        selected_strategy = st.selectbox("Стратегия для пакетной синхронизации:", 
-                                         ["Текущая установленная цена", "Минимальная цена (Безубыточность)", "Оптимальная цена (15% маржа)", "Максимальная цена (25% маржа)"])
+        st.markdown("""
+        <div class="instruction-box">
+            <strong>📋 Правила отправки цен по API:</strong><br>
+            1. Выберите в выпадающем списке, какую именно цену вы хотите отправить на маркетплейс (например, Оптимальную с маржой 15%).<br>
+            2. Нажмите кнопку публикации. Система сформирует пакет данных и обновит цены в кабинете <b>ZapStore</b>.<br>
+            3. Процесс модерации новых цен на стороне площадки занимает от 5 до 15 минут.
+        </div>
+        """, unsafe_allow_html=True)
         
-        if st.button("🚀 ВЫГРУЗИТЬ ЦЕНЫ НА ЯНДЕКС МАРКЕТ ПО API", type="primary", use_container_width=True):
+        selected_strategy = st.selectbox(
+            "Выберите тип цены для пакетной отправки в магазин:", 
+            ["Текущая установленная цена", "Минимальная цена (Безубыточность)", "Оптимальная цена (15% маржа)", "Максимальная цена (25% маржа)"]
+        )
+        
+        if st.button("🚀 ВЫГРУЗИТЬ ОБНОВЛЕННЫЕ ЦЕНЫ НА МАРКЕТПЛЕЙС", type="primary", use_container_width=True):
             price_data_to_send = []
             for _, row in calculated_df.iterrows():
-                target_price = row['selling_price'] if selected_strategy == "Текущая установленная цена" else (row['rec_price_min'] if selected_strategy == "Минимальная цена (Безубыточность)" else (row['rec_price_15'] if selected_strategy == "Оптимальная цена (15% маржа)" else row['rec_price_25']))
+                if selected_strategy == "Текущая установленная цена":
+                    target_price = row['selling_price']
+                elif selected_strategy == "Минимальная цена (Безубыточность)":
+                    target_price = row['rec_price_min']
+                elif selected_strategy == "Оптимальная цена (15% маржа)":
+                    target_price = row['rec_price_15']
+                else:
+                    target_price = row['rec_price_25']
                 price_data_to_send.append({'artikul': row['artikul'], 'new_price': target_price})
             
-            with st.spinner("Передача пакета данных..."):
+            with st.spinner("Синхронизация данных с сервером..."):
                 success, msg = YandexMarketApiSync.update_prices(COMPANY_BUSINESS_ID, COMPANY_API_KEY, price_data_to_send)
                 if success:
                     st.success(f"Выгрузка завершена! {msg}")
                 else:
-                    st.error(f"Ошибка API: {msg}")
+                    st.error(f"Не удалось отправить данные: {msg}")
 
 if __name__ == "__main__":
     main()
