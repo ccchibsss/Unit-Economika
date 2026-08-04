@@ -297,7 +297,7 @@ class ExcelDynamicExporter:
 
 class YandexMarketApiSync:
     @staticmethod
-    def update_prices(business_id: str, api_key: str, price_data: list) -> Tuple\[bool, str\]:
+    def update_prices(business_id: str, api_key: str, price_data: list) -> Tuple[bool, str]:
         url = f"[link removed]{business_id}/offers/update-prices"
         headers = {"Authorization": f"OAuth {api_key}", "Content-Type": "application/json"}
         offers_payload = [{"offerId": str(item['artikul']), "price": {"value": float(item['new_price']), "currencyId": "RUR"}} for item in price_data]
@@ -310,7 +310,7 @@ class YandexMarketApiSync:
             return False, str(e)
 
 # ============================================================================
-# БЛОК 6: STREAMLIT ИНТЕРФЕЙС И НАВИГАЦИЯ
+# БЛОК 5: STREAMLIT ИНТЕРФЕЙС И НАВИГАЦИЯ
 # ============================================================================
 def main():
     st.set_page_config(page_title=APP_NAME, page_icon="📊", layout="wide")
@@ -403,7 +403,7 @@ def main():
         st.dataframe(tm.to_dataframe(), use_container_width=True)
 
     # --- СТРАНИЦА 4: ИМПОРТ / ЭКСПОРТ ---
-    elif page == "💾 Импорт / Export данных":
+    elif page == "💾 Импорт / Экспорт данных":
         st.title("💾 Централизованный импорт и экспорт данных")
         st.caption("Масштабируйте управление каталогом с помощью сквозной загрузки файлов и генерации адаптивных Excel-моделей.")
         
