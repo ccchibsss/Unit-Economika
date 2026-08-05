@@ -5745,6 +5745,54 @@ class DeepSeekRateUpdater:
             self.logger.error(f"Ошибка update_all_marketplaces: {e}")
         return results
 # ============================================================================
+# ============================================================================
+# 🆕 v100.5.2: DYNAMIC EXCEL OPTIMIZATION
+# ============================================================================
+def export_to_excel_dynamic(df: pd.DataFrame, file_path: str, sheet_name: str = "Report") -> bool:
+    """
+    Экспорт DataFrame в Excel с созданием 'Умной таблицы', 
+    динамическим форматированием и структурированными ссылками.
+    """
+    try:
+        # Создаем объект Workbook напрямую
+        wb = Workbook()
+        ws = wb.active
+        ws.title = sheet_name
+        # Запись данных
+        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+            for c_idx, value in enumerate(row, 1):
+                ws.cell(row=r_idx, column=c_idx, value=value)
+        # Определение диапазона для "Умной таблицы"
+        max_row = len(df) + 1
+        max_col_letter = get_column_letter(len(df.columns))
+        ref = f"A1:{max_col_letter}{max_row}"
+        # Создание "Умной таблицы" (ListObject)
+        tab = Table(displayName="DataExport", ref=ref)
+        # Стиль таблицы
+        style = TableStyleInfo(
+            name="TableStyleMedium9",
+            showFirstColumn=False, showLastColumn=False,
+            showRowStripes=True, showColumnStripes=True
+        )
+        tab.tableStyleInfo = style
+        ws.add_table(tab)
+        # Динамическое условное форматирование
+        if 'Цена' in df.columns:
+            col_idx = df.columns.get_loc('Цена') + 1
+            col_letter = get_column_letter(col_idx)
+            red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+            ws.conditional_formatting.add(
+                f"{col_letter}2:{col_letter}{max_row}",
+                FormulaRule(formula=[f'${col_letter}2>5000'], fill=red_fill)
+            )
+        # Сохранение файла
+        wb.save(file_path)
+        logger.info(f"✅ Отчет успешно экспортирован в {file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка экспорта в Excel: {e}")
+        return False
+
 # 🆕 БЛОК 18: РАСШИРЕННЫЙ API КОННЕКТОР С ВЫБОРОМ ИСТОЧНИКА
 # ============================================================================
 # 🆕 v100.10: УМНЫЙ ВЫБОР ИСТОЧНИКА ТАРИФОВ
