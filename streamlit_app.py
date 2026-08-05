@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-🚀 ULTIMATE UNIT ECONOMICS FOR YANDEX MARKET v23.4 — API-COMPLIANT & OPTIMIZED
+🚀 ULTIMATE UNIT ECONOMICS FOR YANDEX MARKET v23.3 — API-COMPLIANT & OPTIMIZED
 ============================================================================
-Исправления и улучшения (v23.4):
+Исправления и улучшения согласно лучшим практикам и аудиту кода:
 1. URL для расчёта тарифов: /v2/tariffs/calculate
 2. Получение реального categoryId через /v2/categories/tree (итеративный поиск)
 3. Пакетная отправка офферов (макс. 200 за запрос)
@@ -19,10 +19,6 @@
 12. ФИКС: Убран ProcessPoolExecutor для Pandas (оверхед сериализации), оставлен ThreadPool.
 13. ФИКС: Колонки 'source' и 'scheme' больше не удаляются из финального датафрейма (аудит).
 14. ФИКС: Безопасная работа с временными файлами и кодировками.
-15. ФИКС v23.4: Исправлено хеширование dict в st.cache_data.
-16. ФИКС v23.4: Google Sheets авторизация через память (без записи JSON на диск).
-17. ФИКС v23.4: Порог многопоточности поднят до 50 000 строк.
-18. ФИКС v23.4: Корректная обработка NaN в артикулах и жесткий clip(lower=1) для quantity.
 """
 import streamlit as st
 import pandas as pd
@@ -139,7 +135,7 @@ logger = setup_logging()
 # ----------------------------------------------------------------------------
 DEFAULT_CONFIG = {
     'app': {
-        'version': '23.4.0',
+        'version': '23.3.0',
         'cache_ttl': 3600,
         'lru_cache_size': 128,
         'max_retries': 3,
@@ -1049,10 +1045,7 @@ class DataValidator:
                     f"selling_price: {zero_prices} SKU с нулевой ценой"
                 )
         if 'quantity_per_order' in df_validated.columns:
-            # ФИКС: Жесткая гарантия, что количество в заказе не может быть < 1
-            df_validated['quantity_per_order'] = pd.to_numeric(
-                df_validated['quantity_per_order'], errors='coerce'
-            ).fillna(1).clip(lower=1).astype(int)
+            df_validated['quantity_per_order'] = df_validated['quantity_per_order'].replace(0, 1)
         return df_validated, errors
 
 # ============================================================================
@@ -1282,8 +1275,7 @@ class FinancialEngine:
 # ============================================================================
 # КЭШИРОВАННЫЙ РАСЧЁТ
 # ============================================================================
-# ФИКС: Добавлен hash_funcs для корректного хеширования словаря tariffs_map
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False, hash_funcs={dict: lambda d: str(sorted(d.items()))})
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def run_calculations_cached(
     df_hash: str,
     df: pd.DataFrame,
@@ -1307,7 +1299,7 @@ def run_calculations_cached(
         df, tax_config, scheme, payment_rate, tariffs_map
     )
     result = DtypeOptimizer.optimize(result)
-    # ФИКС: Удален дублирующий вызов MemoryOptimizer.optimize_all(result)
+    result = MemoryOptimizer.optimize_all(result)
     return result
 
 # ============================================================================
@@ -2149,12 +2141,8 @@ class UniversalDataNormalizer:
                     norm_df[col].astype(str).str.replace(r'[\s,;%₽]', '', regex=True),
                     errors='coerce'
                 ).fillna(0.0).abs()
-        
-        # ФИКС: Корректная обработка NaN в артикулах до конвертации в строку
-        norm_df['artikul'] = norm_df['artikul'].fillna('UNKNOWN').astype(str).str.strip()
-        norm_df['artikul'] = norm_df['artikul'].replace('nan', 'UNKNOWN')
-        norm_df['category'] = norm_df['category'].fillna('не указано').astype(str).str.strip().str.lower()
-        
+        norm_df['artikul'] = norm_df['artikul'].astype(str).str.strip()
+        norm_df['category'] = norm_df['category'].astype(str).str.strip().str.lower()
         return norm_df.drop_duplicates(subset=['artikul'], keep='first')
     
     @classmethod
@@ -2187,22 +2175,21 @@ class YandexDirectIntegration:
         return 0.0
 
 # ============================================================================
-# ЭКСПОРТ В GOOGLE SHEETS (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# ЭКСПОРТ В GOOGLE SHEETS (заготовка)
 # ============================================================================
 class GoogleSheetsExporter:
-    def __init__(self, credentials_info: dict):
-        """Инициализация через словарь данных, а не путь к файлу, для безопасности."""
-        self.credentials_info = credentials_info
+    def __init__(self, credentials_path: str):
+        self.credentials_path = credentials_path
         self.service = None
         try:
             from googleapiclient.discovery import build
             from google.oauth2.service_account import Credentials
-            creds = Credentials.from_service_account_info(
-                self.credentials_info,
+            creds = Credentials.from_service_account_file(
+                credentials_path,
                 scopes=["https://www.googleapis.com/auth/spreadsheets"]
             )
             self.service = build("sheets", "v4", credentials=creds)
-            logger.info("Google Sheets сервис инициализирован из памяти")
+            logger.info("Google Sheets сервис инициализирован")
         except Exception as e:
             logger.error(f"Ошибка инициализации Google Sheets: {e}")
     
@@ -2270,8 +2257,7 @@ class DataPipeline:
                 tariffs_map=tariffs_map
             )
         with (perf_monitor.measure('calc_time') if perf_monitor else contextlib.nullcontext()):
-            # ФИКС: Порог многопоточности поднят до 50 000 строк для избежания оверхеда
-            if self.parallel and CONCURRENT_AVAILABLE and len(validated_df) > 50000:
+            if self.parallel and CONCURRENT_AVAILABLE and len(validated_df) > 1000:
                 calc_df = ParallelProcessor.process_in_parallel(
                     validated_df,
                     calc_func,
@@ -2346,7 +2332,7 @@ def render_sidebar() -> DataPipeline:
             value=True
         )
         st.subheader("⚡ Производительность")
-        parallel = st.checkbox("Параллельная обработка (только для >50k строк)", value=False)
+        parallel = st.checkbox("Параллельная обработка (для больших файлов)", value=False)
         chunk_size = st.number_input("Размер чанка (строк)", min_value=100, max_value=100000, value=5000, step=100) if parallel else None
         if st.button("Показать отчёт по производительности"):
             st.session_state.perf_monitor.display_report()
@@ -2460,6 +2446,7 @@ def render_google_sheets_export(df: pd.DataFrame) -> None:
         )
         sheet_name = st.text_input("Название листа", value="Unit Economics")
         if st.button("📤 Экспортировать в Google Sheets") and sheets_url and credentials_file:
+            tmp_path = None
             try:
                 match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheets_url)
                 if not match:
@@ -2467,16 +2454,22 @@ def render_google_sheets_export(df: pd.DataFrame) -> None:
                     return
                 spreadsheet_id = match.group(1)
                 
-                # ФИКС: Чтение JSON напрямую в память, без создания временных файлов на диске
-                credentials_info = json.loads(credentials_file.getvalue().decode('utf-8'))
+                # Безопасное создание временного файла с гарантированной очисткой
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
+                    tmp.write(credentials_file.getvalue().decode('utf-8'))
+                    tmp_path = tmp.name
                 
-                exporter = GoogleSheetsExporter(credentials_info)
+                exporter = GoogleSheetsExporter(tmp_path)
                 exporter.export(df, spreadsheet_id, sheet_name)
                 st.success(f"✅ Данные успешно экспортированы в таблицу: {sheets_url}")
-            except json.JSONDecodeError:
-                st.error("❌ Ошибка: Загруженный файл не является валидным JSON.")
             except Exception as e:
                 st.error(f"❌ Ошибка экспорта: {e}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception as cleanup_err:
+                        logger.error(f"Не удалось удалить временный файл: {cleanup_err}")
 
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ
