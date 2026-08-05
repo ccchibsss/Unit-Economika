@@ -6707,6 +6707,57 @@ def show_settings_interface():
             st.metric("📈 Средняя прибыль", f"{stats.get('avg_profit', 0):.2f} ₽")
             st.metric("💰 Макс. прибыль", f"{stats.get('max_profit', 0):.2f} ₽")
         with col2:
+def export_to_excel_dynamic(df: pd.DataFrame, file_path: str, sheet_name: str = "Report") -> bool:
+    """
+    Экспорт DataFrame в Excel с созданием 'Умной таблицы' (ListObject),
+    динамическим форматированием и структурированными ссылками.
+    """
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = sheet_name
+
+        # Запись данных
+        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+            for c_idx, value in enumerate(row, 1):
+                ws.cell(row=r_idx, column=c_idx, value=value)
+
+        # Определение диапазона для "Умной таблицы"
+        max_row = len(df) + 1
+        max_col_letter = get_column_letter(len(df.columns))
+        ref = f"A1:{max_col_letter}{max_row}"
+
+        # Создание "Умной таблицы"
+        tab = Table(displayName="DataExport", ref=ref)
+
+        # Стиль таблицы
+        style = TableStyleInfo(
+            name="TableStyleMedium9",
+            showFirstColumn=False, showLastColumn=False,
+            showRowStripes=True, showColumnStripes=True
+        )
+        tab.tableStyleInfo = style
+        ws.add_table(tab)
+
+        # Динамическое условное форматирование
+        # Подсветка цен > 5000 как пример динамической визуализации
+        if 'Цена' in df.columns:
+            col_idx = df.columns.get_loc('Цена') + 1
+            col_letter = get_column_letter(col_idx)
+            red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+            ws.conditional_formatting.add(
+                f"{col_letter}2:{col_letter}{max_row}",
+                FormulaRule(formula=[f'${col_letter}2>5000'], fill=red_fill)
+            )
+
+        wb.save(file_path)
+        logger.info(f"✅ Отчет успешно экспортирован в {file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка экспорта в Excel: {e}")
+        return False
+
             st.metric("📊 Средняя маржа", f"{stats.get('avg_margin', 0):.2f}%")
             st.metric("📈 Средний ROI", f"{stats.get('avg_roi', 0):.2f}%")
         if stats.get("best_marketplace"):
@@ -6758,3 +6809,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
