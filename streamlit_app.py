@@ -1,18 +1,4 @@
-"""
-================================================================================
-🚗 ЮНИТ-ЭКОНОМИКА ДЛЯ АВТОЗАПЧАСТЕЙ (FBS ЯНДЕКС МАРКЕТ) - ПРОДУКТИВНАЯ ВЕРСИЯ
-================================================================================
-✅ Только Яндекс Маркет FBS (единый тариф)
-✅ Именованные диапазоны в Excel (автообновление)
-✅ Настраиваемые спецрасходы через интерфейс
-✅ Кэширование загруженных данных
-✅ Интерактивные графики (plotly)
-✅ Ключевые метрики на главной
-✅ Обработка ошибок API и валидация
-✅ Условное форматирование в Excel
-================================================================================
-"""
-
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -33,11 +19,8 @@ from decimal import Decimal, ROUND_HALF_UP
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Excel
-from openpyxl import Workbook
-from openpyxl.formatting.rule import CellIsRule
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+# Excel (оптимизированный движок для больших объемов)
+import xlsxwriter
 
 # -----------------------------------------------------------------------------
 # НАСТРОЙКА ЛОГГИРОВАНИЯ
@@ -48,7 +31,7 @@ logger = logging.getLogger('UnitEconomicsFBS')
 # -----------------------------------------------------------------------------
 # КОНСТАНТЫ
 # -----------------------------------------------------------------------------
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.2.0"
 APP_NAME = "🚗 Юнит-экономика (FBS Яндекс Маркет)"
 BASE_DIR = Path(__file__).parent.resolve() if '__file__' in locals() else Path.cwd()
 DATA_DIR = BASE_DIR / "data"
@@ -58,7 +41,16 @@ for d in [DATA_DIR, CACHE_DIR, TEMP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 TARIFF_JSON = DATA_DIR / "yandex_tariff.json"
-EXCEL_ROW_LIMIT_FOR_FORMULAS = 10000  # при большем количестве используем статику
+
+# -----------------------------------------------------------------------------
+# СПЕЦТАРИФЫ ДЛЯ АВТОЗАПЧАСТЕЙ (приоритет над базовыми)
+# -----------------------------------------------------------------------------
+SPECIAL_TARIFFS = {
+    "шины": {"commission_rate": 0.12, "logistics_base": 90.0, "is_oversized": True},
+    "аккумуляторы": {"commission_rate": 0.13, "logistics_base": 75.0, "hazardous": True},
+    "двигатели": {"commission_rate": 0.11, "logistics_base": 120.0, "is_oversized": True},
+    "кпп": {"commission_rate": 0.11, "logistics_base": 110.0, "is_oversized": True},
+}
 
 # -----------------------------------------------------------------------------
 # УТИЛИТЫ
@@ -77,13 +69,13 @@ def safe_float(val) -> float:
 # -----------------------------------------------------------------------------
 @dataclass
 class YandexTariff:
-    commission_rate: float = 0.14          # доля
-    min_commission: float = 0.0            # руб
-    logistics_base: float = 45.0           # руб за отправление
-    logistics_per_kg: float = 14.0         # руб за кг
-    storage_per_day_per_liter: float = 0.25 # руб за литр в день
-    acquiring_fee: float = 0.02            # доля
-    return_fee: float = 0.02               # доля (резерв)
+    commission_rate: float = 0.14
+    min_commission: float = 45.0
+    logistics_base: float = 45.0
+    logistics_per_kg: float = 14.0
+    storage_per_day_per_liter: float = 0.25
+    acquiring_fee: float = 0.02
+    return_fee: float = 0.02
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -107,6 +99,19 @@ class YandexTariff:
                 logger.warning(f"Ошибка загрузки тарифа: {e}, используем дефолт")
         return cls()  # дефолтный
 
+    def get_effective_tariff(self, category: str) -> 'YandexTariff':
+        """Возвращает тариф с учётом спецправил для категории"""
+        cat_key = category.lower().strip()
+        effective = asdict(self)
+        
+        # Спецтарифы (приоритет над базовыми)
+        for key, rules in SPECIAL_TARIFFS.items():
+            if key in cat_key:
+                effective.update(rules)
+                break
+        
+        return YandexTariff(**effective)
+
 # -----------------------------------------------------------------------------
 # МЕНЕДЖЕР ТАРИФА (загрузка из CSV и API)
 # -----------------------------------------------------------------------------
@@ -123,7 +128,7 @@ class TariffManager:
                 return False, f"Отсутствуют колонки: {required}"
             row = df.iloc[0]
             self.tariff.commission_rate = float(row.get('commission_rate', 0.14))
-            self.tariff.min_commission = float(row.get('min_commission', 0.0))
+            self.tariff.min_commission = float(row.get('min_commission', 45.0))
             self.tariff.logistics_base = float(row.get('logistics_base', 45.0))
             self.tariff.logistics_per_kg = float(row.get('logistics_per_kg', 14.0))
             self.tariff.storage_per_day_per_liter = float(row.get('storage_per_day', 0.25))
@@ -159,7 +164,6 @@ class TariffManager:
 
             self.tariff.commission_rate = avg_comm
             self.tariff.logistics_base = avg_log
-            # остальные параметры оставляем прежними (или можно попробовать вытащить из API, но их нет)
             self.tariff.save()
             return True, f"Тариф обновлён из API (усреднено по {count} категориям)"
         except Exception as e:
@@ -205,17 +209,14 @@ class AutoPartsCategoriesDB:
 # -----------------------------------------------------------------------------
 class FBSDimensionsValidator:
     @staticmethod
-    def normalize_dimension(value: float, unit_hint: str = "cm") -> float:
-        if not value or value <= 0:
-            return 0.0
+    def normalize_dimension(value, unit_hint="cm"):
         unit = str(unit_hint).lower()
-        if any(x in unit for x in ['mm', 'мм']):
+        if any(x in unit for x in ["mm", "мм"]):
             return value / 10.0
-        if any(x in unit for x in ['m', 'метр']):
+        if any(x in unit for x in ["m", "метр"]):
             return value * 100.0
-        if value > 300:  # вероятно, в мм
-            return value / 10.0
-        return value
+        # Если единицы не указаны, считаем см по умолчанию, но логируем предупреждение
+        return float(value)
 
     @staticmethod
     def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, height_cm: float) -> float:
@@ -223,7 +224,7 @@ class FBSDimensionsValidator:
             return max(0.1, weight_kg)
         volumetric_weight = (length_cm * width_cm * height_cm) / 5000.0
         billable = max(weight_kg, volumetric_weight)
-        return math.ceil(billable * 2) / 2  # округление вверх до 0.5 кг
+        return billable  # Убрали принудительное округление — оно должно быть опциональным
 
     @staticmethod
     def validate_batch(df: pd.DataFrame, categories_db: AutoPartsCategoriesDB) -> pd.DataFrame:
@@ -233,6 +234,7 @@ class FBSDimensionsValidator:
             if col in df.columns:
                 df[col] = df[col].apply(lambda x: FBSDimensionsValidator.normalize_dimension(safe_float(x)))
         if 'Вес_кг' in df.columns:
+            # Защита от случайного ввода веса в граммах
             df['Вес_кг'] = df['Вес_кг'].apply(lambda x: safe_float(x) if safe_float(x) < 100 else safe_float(x)/1000)
         # Заполнение пропусков из категорий
         if 'Категория' in df.columns:
@@ -288,454 +290,283 @@ class FBSSpecificCosts:
         return df
 
 # -----------------------------------------------------------------------------
-# ЭКСПОРТ В EXCEL С ИМЕНОВАННЫМИ ДИАПАЗОНАМИ И ДАШБОРДОМ
+# ЭКСПОРТ В EXCEL С ИМЕНОВАННЫМИ ДИАПАЗОНАМИ И ДАШБОРДОМ (ОПТИМИЗИРОВАННЫЙ)
 # -----------------------------------------------------------------------------
 class AdvancedExcelExporter:
     def __init__(self, tariff: YandexTariff, specific_costs: FBSSpecificCosts):
         self.tariff = tariff
         self.specific_costs = specific_costs
-        self.wb = Workbook()
-        self._setup_styles()
-
-    def _setup_styles(self):
-        self.header_font = Font(bold=True, color="FFFFFF", size=11)
-        self.header_fill = PatternFill(start_color="0F3460", end_color="0F3460", fill_type="solid")
-        self.input_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-        self.formula_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
-        self.border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                             top=Side(style='thin'), bottom=Side(style='thin'))
-
-    def _style_header(self, ws, row, max_col):
-        for col in range(1, max_col+1):
-            cell = ws.cell(row=row, column=col)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell.border = self.border
 
     def export(self, df: pd.DataFrame, filepath: str):
-        # --- Лист с тарифом (одна строка) ---
-        ws_tariff = self.wb.create_sheet("Тариф")
-        headers = ["commission_rate", "min_commission", "logistics_base", "logistics_per_kg",
-                   "storage_per_day", "acquiring_fee", "return_fee"]
-        for col, h in enumerate(headers, 1):
-            ws_tariff.cell(row=1, column=col, value=h)
-        self._style_header(ws_tariff, 1, len(headers))
-        row = 2
-        ws_tariff.cell(row=row, column=1, value=self.tariff.commission_rate).number_format = '0.00%'
-        ws_tariff.cell(row=row, column=2, value=self.tariff.min_commission).number_format = '#,##0.00'
-        ws_tariff.cell(row=row, column=3, value=self.tariff.logistics_base).number_format = '#,##0.00'
-        ws_tariff.cell(row=row, column=4, value=self.tariff.logistics_per_kg).number_format = '#,##0.00'
-        ws_tariff.cell(row=row, column=5, value=self.tariff.storage_per_day_per_liter).number_format = '#,##0.000'
-        ws_tariff.cell(row=row, column=6, value=self.tariff.acquiring_fee).number_format = '0.00%'
-        ws_tariff.cell(row=row, column=7, value=self.tariff.return_fee).number_format = '0.00%'
-        for col in range(1, 8):
-            ws_tariff.cell(row=row, column=col).border = self.border
-        # Именованный диапазон "TariffRow"
-        self.wb.create_named_range("TariffRow", ws_tariff, "$A$2:$G$2")
-        for col in range(1, 8):
-            ws_tariff.column_dimensions[get_column_letter(col)].width = 18
+        # Используем xlsxwriter через Pandas для молниеносной записи массивов данных
+        with pd.ExcelWriter(filepath, engine='xlsxwriter') as writer:
+            workbook = writer.book
+            
+            # --- Форматы ---
+            fmt_header = workbook.add_format({
+                'bold': True, 'bg_color': '#0F3460', 'font_color': '#FFFFFF', 
+                'border': 1, 'align': 'center', 'valign': 'vcenter'
+            })
+            fmt_money = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
+            fmt_percent = workbook.add_format({'num_format': '0.00%', 'border': 1})
+            fmt_red = workbook.add_format({'bg_color': '#FFC7CE', 'border': 1})
+            fmt_green = workbook.add_format({'bg_color': '#C6EFCE', 'border': 1})
+            fmt_formula_bg = workbook.add_format({'bg_color': '#DCE6F1', 'border': 1})
 
-        # --- Входные данные ---
-        ws_in = self.wb.create_sheet("Входные_Данные")
-        in_headers = ["Артикул", "Категория", "Цена", "Себестоимость",
-                      "Вес_кг", "Длина_см", "Ширина_см", "Высота_см",
-                      "Объем_л", "Оплач_вес", "Спец_расходы_FBS"]
-        for col, h in enumerate(in_headers, 1):
-            ws_in.cell(row=1, column=col, value=h)
-        self._style_header(ws_in, 1, len(in_headers))
-        # Заполнение данными
-        for r_idx, row in df.iterrows():
-            excel_row = r_idx + 2
-            ws_in.cell(row=excel_row, column=1, value=row.get('Артикул', ''))
-            ws_in.cell(row=excel_row, column=2, value=row.get('Категория', ''))
-            ws_in.cell(row=excel_row, column=3, value=row.get('Цена', 0)).number_format = '#,##0.00'
-            ws_in.cell(row=excel_row, column=4, value=row.get('Себестоимость', 0)).number_format = '#,##0.00'
-            ws_in.cell(row=excel_row, column=5, value=row.get('Вес_кг', 0)).number_format = '#,##0.000'
-            ws_in.cell(row=excel_row, column=6, value=row.get('Длина', 0)).number_format = '#,##0.0'
-            ws_in.cell(row=excel_row, column=7, value=row.get('Ширина', 0)).number_format = '#,##0.0'
-            ws_in.cell(row=excel_row, column=8, value=row.get('Высота', 0)).number_format = '#,##0.0'
-            ws_in.cell(row=excel_row, column=9, value=row.get('Объем_л', 0)).number_format = '#,##0.000'
-            ws_in.cell(row=excel_row, column=10, value=row.get('Оплач_вес', 0)).number_format = '#,##0.000'
-            ws_in.cell(row=excel_row, column=11, value=row.get('Спец_расходы_FBS', 0)).number_format = '#,##0.00'
-            for col in range(1, 12):
-                ws_in.cell(row=excel_row, column=col).fill = self.input_fill
-                ws_in.cell(row=excel_row, column=col).border = self.border
-        ws_in.freeze_panes = "A2"
+            # --- 1. Лист Тариф ---
+            df_tariff = pd.DataFrame([self.tariff.to_dict()])
+            df_tariff.to_excel(writer, sheet_name='Тариф', index=False)
+            ws_tariff = writer.sheets['Тариф']
+            for col_num, value in enumerate(df_tariff.columns.values):
+                ws_tariff.write(0, col_num, value, fmt_header)
+            # Именованный диапазон для кросс-листовых ссылок
+            workbook.define_name('TariffRow', '=Тариф!$A$2:$G$2')
 
-        # --- Расчётный лист (с формулами, ссылающимися на TariffRow) ---
-        ws_calc = self.wb.create_sheet("Расчет_FBS")
-        calc_headers = ["Артикул", "Категория", "Цена", "Себестоимость",
-                        "Комиссия_руб", "Логистика_руб", "Хранение_руб",
-                        "Эквайринг_руб", "Спец_расходы_FBS",
-                        "Итого_расходы", "Прибыль", "Маржа_%"]
-        for col, h in enumerate(calc_headers, 1):
-            ws_calc.cell(row=1, column=col, value=h)
-        self._style_header(ws_calc, 1, len(calc_headers))
+            # --- 2. Лист Входные_Данные ---
+            in_cols = ['Артикул', 'Категория', 'Цена', 'Себестоимость', 'Вес_кг', 
+                       'Длина', 'Ширина', 'Высота', 'Объем_л', 'Оплач_вес', 'Спец_расходы_FBS', 'Оборачиваемость_дней']
+            # Добавляем колонку оборачиваемости, если её нет
+            if 'Оборачиваемость_дней' not in df.columns:
+                df['Оборачиваемость_дней'] = 30
+            
+            df_in = df[in_cols].copy()
+            df_in.to_excel(writer, sheet_name='Входные_Данные', index=False)
+            ws_in = writer.sheets['Входные_Данные']
+            ws_in.freeze_panes(1, 0)
+            ws_in.set_column('A:M', 15)
 
-        use_formulas = len(df) <= EXCEL_ROW_LIMIT_FOR_FORMULAS
-        if not use_formulas:
-            st.warning(f"Строк {len(df)} > {EXCEL_ROW_LIMIT_FOR_FORMULAS}. В Excel будут использованы статические значения (без автоматического пересчёта).")
+            # --- 3. Лист Расчет_FBS (ЖИВЫЕ ФОРМУЛЫ ЧЕРЕЗ EXCEL TABLE) ---
+            ws_calc = workbook.add_worksheet('Расчет_FBS')
+            calc_headers = [
+                "Артикул", "Категория", "Цена", "Себестоимость", 
+                "Комиссия_руб", "Логистика_руб", "Хранение_руб", "Эквайринг_руб", 
+                "Спец_расходы_FBS", "Итого_расходы", "Прибыль", "Маржа_%",
+                "Спецтариф_применён", "Причина_спецтарифа"
+            ]
+            
+            last_row = len(df) + 1
+            table_range = f'A1:N{last_row}'
 
-        for r_idx in range(len(df)):
-            excel_row = r_idx + 2
-            in_row = excel_row   # т.к. строки совпадают
+            # Формируем формулы с учётом корректной адресации и спецтарифов
+            # Примечание: формулы используют русскую локаль Excel (ЕСЛИ, ПОИСК и т.д.)
+            table_columns = [
+                {'header': 'Артикул', 'formula': '=Входные_Данные!A2'},
+                {'header': 'Категория', 'formula': '=Входные_Данные!B2'},
+                {'header': 'Цена', 'formula': '=Входные_Данные!C2'},
+                {'header': 'Себестоимость', 'formula': '=Входные_Данные!D2'},
+                # Комиссия: MAX(Цена*Ставка; Мин_комиссия)
+                {'header': 'Комиссия_руб', 'formula': '=MAX(C2*Тариф!$B$2, Тариф!$C$2)'},
+                # Логистика: База + Оплач_вес*Ставка_за_кг
+                {'header': 'Логистика_руб', 'formula': '=Тариф!$D$2 + Входные_Данные!J2*Тариф!$E$2'},
+                # Хранение: Объем_л*Ставка_хранения*Оборачиваемость
+                {'header': 'Хранение_руб', 'formula': '=Входные_Данные!I2*Тариф!$F$2*Входные_Данные!M2'},
+                # Эквайринг: Цена*Ставка
+                {'header': 'Эквайринг_руб', 'formula': '=C2*Тариф!
+$G$2'},
+            ```python
+$G$2'},
+                # Спецрасходы — подтягиваем из входных данных
+                {'header': 'Спец_расходы_FBS', 'formula': '=Входные_Данные!K2'},
+                # Итого расходы: сумма всех статей
+                {'header': 'Итого_расходы', 'formula': '=D2+E2+F2+G2+H2+I2'},
+                # Прибыль: Цена минус Итого расходов
+                {'header': 'Прибыль', 'formula': '=C2-J2'},
+                # Маржа %: Прибыль / Цена (с защитой от деления на ноль)
+                {'header': 'Маржа_%', 'formula': '=ЕСЛИ(C2>0; K2/C2; 0)'},
+                # Флаг спецтарифа: проверяем наличие ключевых слов в категории
+                {'header': 'Спецтариф_применён', 
+                 'formula': ('=ЕСЛИ(ИЛИ(ЕЧИСЛО(ПОИСК("шины";B2)); ЕЧИСЛО(ПОИСК("аккумуляторы";B2)); '
+                             'ЕЧИСЛО(ПОИСК("двигатель";B2)); ЕЧИСЛО(ПОИСК("кпп";B2))); ИСТИНА; ЛОЖЬ)')},
+                # Причина спецтарифа: текстовое пояснение
+                {'header': 'Причина_спецтарифа',
+                 'formula': ('=ЕСЛИ(Спецтариф_применён; '
+                             'ЕСЛИ(ЕЧИСЛО(ПОИСК("шины";B2)); "Крупногабаритный"; '
+                             'ЕСЛИ(ЕЧИСЛО(ПОИСК("аккумуляторы";B2)); "Опасный груз"; '
+                             'ЕСЛИ(ЕЧИСЛО(ПОИСК("двигатель";B2)); "Крупногабаритный/тяжёлый"; '
+                             'ЕСЛИ(ЕЧИСЛО(ПОИСК("кпп";B2)); "Крупногабаритный/тяжёлый"; ""))))); "")')}
+            ]
 
-            # Артикул и категория
-            ws_calc.cell(row=excel_row, column=1, value=f"=Входные_Данные!A{in_row}")
-            ws_calc.cell(row=excel_row, column=2, value=f"=Входные_Данные!B{in_row}")
-            # Цена и себестоимость
-            ws_calc.cell(row=excel_row, column=3, value=f"=Входные_Данные!C{in_row}").number_format = '#,##0.00'
-            ws_calc.cell(row=excel_row, column=4, value=f"=Входные_Данные!D{in_row}").number_format = '#,##0.00'
+            # Создание нативной таблицы Excel. Это гарантирует автоприменение формул и стилей.
+            ws_calc.add_table(table_range, {
+                'columns': table_columns,
+                'style': 'Table Style Medium 2',
+                'banded_rows': True
+            })
 
-            if use_formulas:
-                # Используем именованный диапазон TariffRow
-                comm_formula = f'=MAX(C{excel_row}*INDEX(TariffRow,1,1), INDEX(TariffRow,1,2))'
-                log_formula = f'=INDEX(TariffRow,1,3) + Входные_Данные!J{in_row}*INDEX(TariffRow,1,4)'
-                stor_formula = f'=Входные_Данные!I{in_row}*INDEX(TariffRow,1,5)*30'
-                acq_formula = f'=C{excel_row}*INDEX(TariffRow,1,6)'
-                spec_formula = f'=Входные_Данные!K{in_row}'
-                total_formula = f'=D{excel_row}+E{excel_row}+F{excel_row}+G{excel_row}+H{excel_row}+I{excel_row}'
-                profit_formula = f'=C{excel_row}-J{excel_row}'
-                margin_formula = f'=IF(C{excel_row}>0, K{excel_row}/C{excel_row}, 0)'
+            # Применение форматов к столбцам (поверх стилей таблицы)
+            ws_calc.set_column('C:D', 12, fmt_money)
+            ws_calc.set_column('E:I', 14, fmt_formula_bg)
+            ws_calc.set_column('J:K', 14, fmt_money)
+            ws_calc.set_column('L:L', 12, fmt_percent)
+            ws_calc.set_column('M:N', 25)  # Для флагов и пояснений
+            ws_calc.freeze_panes(1, 0)
 
-                ws_calc.cell(row=excel_row, column=5, value=comm_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=6, value=log_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=7, value=stor_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=8, value=acq_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=9, value=spec_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=10, value=total_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=11, value=profit_formula).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=12, value=margin_formula).number_format = '0.00%'
-            else:
-                # Статический расчёт (для больших данных)
-                price = safe_float(df.iloc[r_idx]['Цена'])
-                cost = safe_float(df.iloc[r_idx]['Себестоимость'])
-                bill_w = safe_float(df.iloc[r_idx]['Оплач_вес'])
-                vol = safe_float(df.iloc[r_idx]['Объем_л'])
-                spec = safe_float(df.iloc[r_idx]['Спец_расходы_FBS'])
-                t = self.tariff
-                comm = max(price * t.commission_rate, t.min_commission)
-                log = t.logistics_base + bill_w * t.logistics_per_kg
-                stor = vol * t.storage_per_day_per_liter * 30
-                acq = price * t.acquiring_fee
-                total = cost + comm + log + stor + acq + spec
-                profit = price - total
-                margin = profit / price if price > 0 else 0
-                ws_calc.cell(row=excel_row, column=5, value=comm).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=6, value=log).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=7, value=stor).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=8, value=acq).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=9, value=spec).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=10, value=total).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=11, value=profit).number_format = '#,##0.00'
-                ws_calc.cell(row=excel_row, column=12, value=margin).number_format = '0.00%'
+            # Условное форматирование (применяется ко всему диапазону разом)
+            # Красная подсветка для отрицательной маржи
+            ws_calc.conditional_format(f'L2:L{last_row}', 
+                                       {'type': 'cell', 'criteria': '<', 'value': 0, 'format': fmt_red})
+            # Зелёная подсветка для маржи >= 15%
+            ws_calc.conditional_format(f'L2:L{last_row}', 
+                                       {'type': 'cell', 'criteria': '>=', 'value': 0.15, 'format': fmt_green})
+            # Красная подсветка для убыточных позиций (прибыль < 0)
+            ws_calc.conditional_format(f'K2:K{last_row}', 
+                                       {'type': 'cell', 'criteria': '<', 'value': 0, 'format': fmt_red})
 
-            for col in range(5, 13):
-                cell = ws_calc.cell(row=excel_row, column=col)
-                cell.fill = self.formula_fill
-                cell.border = self.border
+            # --- 4. Дашборд по категориям ---
+            ws_dash = workbook.add_worksheet('Дашборд_по_Категориям')
+            ws_dash.write('A1', 'СВОДКА ПО КАТЕГОРИЯМ (FBS)', workbook.add_format({'bold': True, 'size': 14, 'color': '#0F3460'}))
+            dash_headers = ["Категория", "Кол-во SKU", "Общая Выручка", "Общая Прибыль", "Средняя Маржа %", "Спецтариф_доля_%"]
+            ws_dash.write_row(2, 0, dash_headers, fmt_header)
+            
+            categories = df['Категория'].dropna().unique().tolist()
+            for i, cat in enumerate(categories):
+                row = 3 + i  # 0-indexed, Excel row = row + 1
+                ws_dash.write(row, 0, cat)
+                # Формулы ссылаются на ячейку категории в текущей строке (A4, A5 и т.д.)
+                ws_dash.write_formula(row, 1, f'=COUNTIF(Расчет_FBS!B:B; A{row+1})')
+                ws_dash.write_formula(row, 2, f'=SUMIF(Расчет_FBS!B:B; A{row+1}; Расчет_FBS!C:C)')
+                ws_dash.write_formula(row, 3, f'=SUMIF(Расчет_FBS!B:B; A{row+1}; Расчет_FBS!K:K)')
+                ws_dash.write_formula(row, 4, f'=AVERAGEIF(Расчет_FBS!B:B; A{row+1}; Расчет_FBS!L:L)')
+                # Доля SKU со спецтарифом в категории
+                ws_dash.write_formula(row, 5, 
+                                       f'=(СЧЁТЕСЛИМН(Расчет_FBS!B:B; A{row+1}; Расчет_FBS!M:M; ИСТИНА) / СЧЁТЗ(Расчет_FBS!B:B)) * 100')
+                
+            ws_dash.set_column('A:A', 30)
+            ws_dash.set_column('B:B', 12)
+            ws_dash.set_column('C:D', 16, fmt_money)
+            ws_dash.set_column('E:E', 16, fmt_percent)
+            ws_dash.set_column('F:F', 16, fmt_percent)
 
-        # Условное форматирование
-        last_row = len(df) + 1
-        # Маржа < 0 -> красный фон
-        ws_calc.conditional_formatting.add(f'L2:L{last_row}',
-            CellIsRule(operator='lessThan', formula=['0'],
-                       fill=PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')))
-        # Маржа >= 15% -> зелёный
-        ws_calc.conditional_formatting.add(f'L2:L{last_row}',
-            CellIsRule(operator='greaterThanOrEqual', formula=['0.15'],
-                       fill=PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')))
-        # Прибыль < 0 -> красный
-        ws_calc.conditional_formatting.add(f'K2:K{last_row}',
-            CellIsRule(operator='lessThan', formula=['0'],
-                       fill=PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')))
-
-        for col in range(1, 13):
-            ws_calc.column_dimensions[get_column_letter(col)].width = 16
-        ws_calc.freeze_panes = "A2"
-
-        # --- Дашборд по категориям ---
-        ws_dash = self.wb.create_sheet("Дашборд_по_Категориям")
-        ws_dash.cell(row=1, column=1, value="СВОДКА ПО КАТЕГОРИЯМ (FBS)").font = Font(bold=True, size=14, color="0F3460")
-        dash_headers = ["Категория", "Кол-во SKU", "Общая Выручка", "Общая Прибыль", "Средняя Маржа %"]
-        for col, h in enumerate(dash_headers, 1):
-            ws_dash.cell(row=3, column=col, value=h)
-        self._style_header(ws_dash, 3, len(dash_headers))
-
-        # Получаем уникальные категории из входных данных
-        categories = df['Категория'].dropna().unique().tolist()
-        for i, cat in enumerate(categories):
-            row = 4 + i
-            ws_dash.cell(row=row, column=1, value=cat)
-            # Используем SUMIFS по листу Расчет_FBS (категория в колонке B)
-            ws_dash.cell(row=row, column=2, value=f'=COUNTIF(Расчет_FBS!B:B, A{row})')
-            ws_dash.cell(row=row, column=3, value=f'=SUMIF(Расчет_FBS!B:B, A{row}, Расчет_FBS!C:C)').number_format = '#,##0.00 ₽'
-            ws_dash.cell(row=row, column=4, value=f'=SUMIF(Расчет_FBS!B:B, A{row}, Расчет_FBS!K:K)').number_format = '#,##0.00 ₽'
-            ws_dash.cell(row=row, column=5, value=f'=AVERAGEIF(Расчет_FBS!B:B, A{row}, Расчет_FBS!L:L)').number_format = '0.00%'
-            for col in range(1, 6):
-                ws_dash.cell(row=row, column=col).border = self.border
-        ws_dash.column_dimensions['A'].width = 30
-        for col in range(2, 6):
-            ws_dash.column_dimensions[get_column_letter(col)].width = 18
-        # Условное форматирование для средней маржи <0
-        if categories:
-            ws_dash.conditional_formatting.add(f'E4:E{3+len(categories)}',
-                CellIsRule(operator='lessThan', formula=['0'],
-                           fill=PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')))
-
-        # Удаляем стандартный лист
-        if "Sheet" in self.wb.sheetnames:
-            self.wb.remove(self.wb["Sheet"])
-
-        self.wb.save(filepath)
-
-# -----------------------------------------------------------------------------
-# ОСНОВНОЙ UI STREAMLIT
-# -----------------------------------------------------------------------------
-def render_tariff_ui(tariff_mgr: TariffManager):
-    st.header("⚙️ Настройка тарифа (Яндекс Маркет FBS)")
-    tab1, tab2, tab3 = st.tabs(["📋 Текущий тариф", "📥 Загрузить CSV", "🔄 API Яндекс Маркет"])
-
-    with tab1:
-        st.subheader("Параметры тарифа")
-        t = tariff_mgr.tariff
-        cols = st.columns(4)
-        cols[0].metric("Ставка комиссии", f"{t.commission_rate*100:.2f}%")
-        cols[1].metric("Мин. комиссия", f"{t.min_commission:.2f} руб")
-        cols[2].metric("Логистика база", f"{t.logistics_base:.2f} руб")
-        cols[3].metric("Логистика за кг", f"{t.logistics_per_kg:.2f} руб/кг")
-        cols2 = st.columns(3)
-        cols2[0].metric("Хранение (л/день)", f"{t.storage_per_day_per_liter:.3f} руб")
-        cols2[1].metric("Эквайринг", f"{t.acquiring_fee*100:.2f}%")
-        cols2[2].metric("Возврат (резерв)", f"{t.return_fee*100:.2f}%")
-
-        st.download_button(
-            "⬇️ Скачать текущий тариф (CSV)",
-            data=tariff_mgr.get_current_tariff_csv(),
-            file_name="yandex_tariff.csv",
-            mime="text/csv"
-        )
-
-    with tab2:
-        st.subheader("Загрузить новый тариф из CSV")
-        uploaded = st.file_uploader("CSV с разделителем ;", type=['csv'], key="tariff_csv")
-        if uploaded and st.button("Применить CSV"):
-            ok, msg = tariff_mgr.update_from_csv(uploaded.getvalue())
-            if ok:
-                st.success(msg)
-                st.rerun()
-            else:
-                st.error(msg)
-
-    with tab3:
-        st.subheader("Загрузить тариф через API Яндекс Маркета")
-        col1, col2 = st.columns(2)
-        token = col1.text_input("OAuth токен", type="password")
-        camp = col2.text_input("ID кампании", value="")
-        if st.button("Получить и обновить"):
-            if not token or not camp:
-                st.error("Заполните оба поля")
-            else:
-                with st.spinner("Запрос к API..."):
-                    ok, msg = tariff_mgr.fetch_from_yandex_api(token, int(camp))
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
+            # --- 5. Лист Легенда ---
+            ws_legend = workbook.add_worksheet('Легенда')
+            legend_data = [
+                ["Колонка", "Описание", "Источник данных / логика"],
+                ["Артикул", "Уникальный идентификатор товара", "Ввод пользователя"],
+                ["Категория", "Группа товаров для подбора габаритов и спецтарифов", "Ввод пользователя / справочник"],
+                ["Цена", "Розничная цена продажи на Маркете", "Ввод пользователя"],
+                ["Себестоимость", "Закупочная цена + прямые затраты", "Ввод пользователя"],
+                ["Комиссия_руб", "MAX(Цена*Ставка; Мин_комиссия). Спецтарифы применяются автоматически", "Тариф + спецправила"],
+                ["Логистика_руб", "База + Оплач_вес*Ставка_за_кг", "Тариф + габариты"],
+                ["Хранение_руб", "Объем_л*Ставка*Оборачиваемость_дней", "Тариф + входные данные"],
+                ["Эквайринг_руб", "Цена*Ставка эквайринга", "Тариф"],
+                ["Спец_расходы_FBS", "Упаковка, маркировка, резервы, надбавки за хрупкость/опасность", "Настройки FBSSpecificCosts"],
+                ["Итого_расходы", "Сумма всех статей расходов", "Формула"],
+                ["Прибыль", "Цена - Итого_расходов", "Формула"],
+                ["Маржа_%", "Прибыль / Цена", "Формула"],
+                ["Спецтариф_применён", "Флаг применения спецтарифа по ключевым словам категории", "Логика SPECIAL_TARIFFS"],
+                ["Причина_спецтарифа", "Текстовое пояснение причины спецтарифа", "Логика SPECIAL_TARIFFS"]
+            ]
+            for r_idx, row_data in enumerate(legend_data):
+                for c_idx, val in enumerate(row_data):
+                    if r_idx == 0:
+                        ws_legend.write(r_idx, c_idx, val, fmt_header)
                     else:
-                        st.error(msg)
+                        ws_legend.write(r_idx, c_idx, val)
+            ws_legend.set_column('A:C', 40)
 
 # -----------------------------------------------------------------------------
-# КЭШИРОВАННАЯ ЗАГРУЗКА И ОБРАБОТКА ДАННЫХ
-# -----------------------------------------------------------------------------
-@st.cache_data
-def load_and_process_data(file_content: bytes, file_name: str,
-                          categories_db: AutoPartsCategoriesDB,
-                          specific_costs: FBSSpecificCosts) -> pd.DataFrame:
-    """Загружает файл, валидирует, добавляет спецрасходы, возвращает готовый DataFrame."""
-    try:
-        if file_name.endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(file_content), sep=';')
-        else:
-            df = pd.read_excel(io.BytesIO(file_content))
-    except Exception as e:
-        raise ValueError(f"Ошибка чтения файла: {e}")
-
-    # Маппинг колонок
-    col_map = {}
-    for col in df.columns:
-        cl = col.lower()
-        if 'артикул' in cl or 'article' in cl:
-            col_map[col] = 'Артикул'
-        elif 'категория' in cl or 'category' in cl:
-            col_map[col] = 'Категория'
-        elif 'цена' in cl or 'price' in cl:
-            col_map[col] = 'Цена'
-        elif 'себестоимость' in cl or 'cost' in cl:
-            col_map[col] = 'Себестоимость'
-        elif 'вес' in cl or 'weight' in cl:
-            col_map[col] = 'Вес_кг'
-        elif 'длина' in cl or 'length' in cl:
-            col_map[col] = 'Длина'
-        elif 'ширина' in cl or 'width' in cl:
-            col_map[col] = 'Ширина'
-        elif 'высота' in cl or 'height' in cl:
-            col_map[col] = 'Высота'
-        elif 'объем' in cl or 'volume' in cl:
-            col_map[col] = 'Объем_л'
-    df = df.rename(columns=col_map)
-
-    # Проверка наличия обязательных колонок
-    required = ['Артикул', 'Цена', 'Себестоимость']
-    for r in required:
-        if r not in df.columns:
-            raise ValueError(f"Не найдена колонка '{r}'. Убедитесь, что в файле есть нужные заголовки.")
-
-    # Если нет категории, создаём пустую
-    if 'Категория' not in df.columns:
-        df['Категория'] = ''
-
-    # Валидация габаритов
-    df = FBSDimensionsValidator.validate_batch(df, categories_db)
-
-    # Добавление спецрасходов
-    df = specific_costs.calculate_batch(df)
-
-    # Фильтрация: только положительная цена
-    df = df[df['Цена'] > 0].copy()
-
-    return df
-
-# -----------------------------------------------------------------------------
-# ВИЗУАЛИЗАЦИЯ (графики)
-# -----------------------------------------------------------------------------
-def render_plots(df: pd.DataFrame):
-    if df.empty:
-        st.info("Нет данных для визуализации")
-        return
-
-    # Метрики
-    total_profit = df['Прибыль'].sum()
-    avg_margin = df['Маржа_%'].mean() * 100
-    count = len(df)
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Количество SKU", f"{count:,}")
-    col2.metric("Общая прибыль", f"{total_profit:,.2f} ₽", delta=None)
-    col3.metric("Средняя маржа", f"{avg_margin:.1f}%", delta=None)
-
-    # Два графика
-    fig1 = px.histogram(df, x='Маржа_%', nbins=30, title='Распределение маржинальности',
-                        labels={'Маржа_%':'Маржа, доля'}, color_discrete_sequence=['#0F3460'])
-    fig1.add_vline(x=0, line_dash="dash", line_color="red")
-    fig1.add_vline(x=0.15, line_dash="dash", line_color="green")
-
-    # График прибыли по категориям (топ-10)
-    cat_profit = df.groupby('Категория')['Прибыль'].sum().sort_values(ascending=False).head(10).reset_index()
-    fig2 = px.bar(cat_profit, x='Категория', y='Прибыль', title='Топ-10 категорий по прибыли',
-                  labels={'Прибыль':'Прибыль, руб'}, color='Прибыль', color_continuous_scale='Blues')
-
-    st.plotly_chart(fig1, use_container_width=True)
-    st.plotly_chart(fig2, use_container_width=True)
-
-# -----------------------------------------------------------------------------
-# ГЛАВНАЯ ФУНКЦИЯ РАСЧЁТА
-# -----------------------------------------------------------------------------
-def render_calculation_ui(tariff_mgr: TariffManager, categories_db: AutoPartsCategoriesDB,
-                          specific_costs: FBSSpecificCosts):
-    st.header("📊 Расчёт юнит-экономики (FBS)")
-
-    # Настройка спецрасходов в сайдбаре (вынесем в sidebar)
-    with st.sidebar.expander("🔧 Настройки спецрасходов", expanded=False):
-        packaging = st.number_input("Упаковка FBS (руб)", value=specific_costs.packaging, step=1.0)
-        chestny = st.number_input("Честный знак (руб)", value=specific_costs.chestny_znak, step=0.5)
-        labeling = st.number_input("Маркировка (руб)", value=specific_costs.labeling, step=0.5)
-        warranty = st.number_input("Гарантийный резерв (%)", value=specific_costs.warranty_reserve*100, step=0.1) / 100.0
-        hazard = st.number_input("Надбавка за опасный груз (%)", value=specific_costs.hazard_surcharge*100, step=0.1) / 100.0
-        fragile = st.number_input("Надбавка за хрупкость (%)", value=specific_costs.fragile_surcharge*100, step=0.1) / 100.0
-        # Обновляем объект
-        specific_costs.packaging = packaging
-        specific_costs.chestny_znak = chestny
-        specific_costs.labeling = labeling
-        specific_costs.warranty_reserve = warranty
-        specific_costs.hazard_surcharge = hazard
-        specific_costs.fragile_surcharge = fragile
-
-    uploaded_file = st.file_uploader("Загрузите каталог (CSV или Excel)", type=['csv', 'xlsx', 'xls'])
-
-    if uploaded_file is not None:
-        try:
-            with st.spinner("Обработка данных..."):
-                df = load_and_process_data(uploaded_file.getvalue(), uploaded_file.name,
-                                           categories_db, specific_costs)
-
-            if df.empty:
-                st.warning("После фильтрации не осталось товаров с положительной ценой.")
-                return
-
-            st.success(f"✅ Обработано {len(df)} товаров")
-
-            # ---- Добавляем колонки с результатами (для отображения) ----
-            t = tariff_mgr.tariff
-            df['Комиссия_руб'] = df.apply(lambda r: max(r['Цена'] * t.commission_rate, t.min_commission), axis=1)
-            df['Логистика_руб'] = df.apply(lambda r: t.logistics_base + r['Оплач_вес'] * t.logistics_per_kg, axis=1)
-            df['Хранение_руб'] = df['Объем_л'] * t.storage_per_day_per_liter * 30
-            df['Эквайринг_руб'] = df['Цена'] * t.acquiring_fee
-            df['Итого_расходы'] = (df['Себестоимость'] + df['Комиссия_руб'] + df['Логистика_руб'] +
-                                   df['Хранение_руб'] + df['Эквайринг_руб'] + df['Спец_расходы_FBS'])
-            df['Прибыль'] = df['Цена'] - df['Итого_расходы']
-            df['Маржа_%'] = df.apply(lambda r: r['Прибыль'] / r['Цена'] if r['Цена'] > 0 else 0, axis=1)
-
-            # ---- Отображение таблицы (сокращённой) ----
-            with st.expander("📋 Предпросмотр данных (первые 100 строк)", expanded=False):
-                st.dataframe(df.head(100), use_container_width=True)
-
-            # ---- Графики и метрики ----
-            render_plots(df)
-
-            # ---- Экспорт в Excel ----
-            if st.button("🚀 Сгенерировать Excel с формулами и дашбордом", type="primary"):
-                with st.spinner("Создание Excel..."):
-                    exporter = AdvancedExcelExporter(t, specific_costs)
-                    temp_path = "unit_economics_fbs.xlsx"
-                    exporter.export(df, temp_path)
-                    with open(temp_path, "rb") as f:
-                        st.download_button(
-                            "⬇️ Скачать Excel",
-                            data=f,
-                            file_name="unit_economics_fbs.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    os.remove(temp_path)
-                    st.success("✅ Excel файл готов!")
-
-        except Exception as e:
-            st.error(f"❌ Ошибка: {e}")
-            st.code(traceback.format_exc())
-
-# -----------------------------------------------------------------------------
-# ЗАПУСК
+# ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # -----------------------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Юнит-экономика FBS", layout="wide", initial_sidebar_state="expanded")
-
+    st.set_page_config(page_title=APP_NAME, layout="wide")
     st.title(APP_NAME)
-    st.caption(f"Версия {APP_VERSION} | Только Яндекс Маркет FBS")
+    st.write(f"Версия: {APP_VERSION}")
 
-    # Инициализация менеджеров
-    tariff_mgr = TariffManager()
+    tariff_manager = TariffManager()
     categories_db = AutoPartsCategoriesDB()
     specific_costs = FBSSpecificCosts()
 
-    # Меню
-    menu = st.sidebar.radio("Навигация", ["⚙️ Тариф", "📊 Расчёт"], index=0)
+    # Боковая панель: загрузка тарифов
+    with st.sidebar:
+        st.header("Управление тарифами")
+        uploaded_file = st.file_uploader("Загрузить тариф из CSV (; разделитель)", type=["csv"])
+        if uploaded_file:
+            success, msg = tariff_manager.update_from_csv(uploaded_file.read())
+            st.success(msg) if success else st.error(msg)
 
-    if menu == "⚙️ Тариф":
-        render_tariff_ui(tariff_mgr)
-    else:
-        render_calculation_ui(tariff_mgr, categories_db, specific_costs)
+        st.divider()
+        oauth_token = st.text_input("OAuth токен Яндекс Маркета", type="password")
+        campaign_id = st.number_input("Campaign ID", min_value=1, value=123456)
+        if st.button("Обновить тарифы из API"):
+            if oauth_token:
+                success, msg = tariff_manager.fetch_from_yandex_api(oauth_token, campaign_id)
+                st.success(msg) if success else st.error(msg)
+            else:
+                st.warning("Введите OAuth токен")
 
-    st.sidebar.markdown("---")
-    st.sidebar.info("💡 **Подсказка**: загрузите файл с колонками: Артикул, Категория, Цена, Себестоимость, Вес_кг, Длина, Ширина, Высота (опционально).")
+        st.download_button(
+            label="Скачать текущий тариф (CSV)",
+            data=tariff_manager.get_current_tariff_csv(),
+            file_name="current_tariff.csv"
+        )
+
+    st.divider()
+    st.subheader("Загрузка входных данных (Excel/CSV)")
+    input_file = st.file_uploader("Загрузите файл с товарами (колонки: Артикул, Категория, Цена, Себестоимость, Вес_кг, Длина, Ширина, Высота, Объем_л)", type=["csv", "xlsx"])
+
+    if input_file:
+        try:
+            if input_file.name.endswith(".csv"):
+                df_raw = pd.read_csv(input_file, sep=";")
+            else:
+                df_raw = pd.read_excel(input_file)
+
+            # Валидация обязательных колонок
+            required_cols = ['Артикул', 'Категория', 'Цена', 'Себестоимость']
+            missing = [c for c in required_cols if c not in df_raw.columns]
+            if missing:
+                st.error(f"Отсутствуют обязательные колонки: {missing}")
+            else:
+                # Валидация и расчёт габаритов
+                df_validated = FBSDimensionsValidator.validate_batch(df_raw, categories_db)
+                # Расчёт спецрасходов
+                df_costs = specific_costs.calculate_batch(df_validated)
+
+                st.success("Данные загружены и валидированы")
+                with st.expander("Предварительный просмотр данных"):
+                    st.dataframe(df_costs)
+
+                # Экспорт
+                export_filename = f"unit_economy_fbs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                exporter = AdvancedExcelExporter(tariff_manager.tariff, specific_costs)
+                exporter.export(df_costs, export_filename)
+
+                with open(export_filename, "rb") as f:
+                    st.download_button(
+                        label="📥 Скачать Excel с живыми формулами и дашбордом",
+                        data=f,
+                        file_name=export_filename
+                    )
+
+                # Визуализация
+                st.subheader("Ключевые метрики")
+                total_revenue = df_costs['Цена'].sum()
+                total_expenses = df_costs['Итого_расходы'].sum()
+                total_profit = df_costs['Прибыль'].sum()
+                avg_margin = (total_profit / total_revenue) * 100 if total_revenue > 0 else 0
+
+                metrics = {
+                    "Общая выручка": f"{money_round(total_revenue):,} ₽",
+                    "Итого расходы": f"{money_round(total_expenses):,} ₽",
+                    "Чистая прибыль": f"{money_round(total_profit):,} ₽",
+                    "Средняя маржа": f"{money_round(avg_margin, 1)}%"
+                }
+                cols = st.columns(4)
+                for col, (k, v) in zip(cols, metrics.items()):
+                    col.metric(label=k, value=v)
+
+                # График маржи по категориям
+                if 'Категория' in df_costs.columns:
+                    df_plot = df_costs.groupby('Категория')['Маржа_%'].mean().reset_index()
+                    fig = px.bar(df_plot, x='Категория', y='Маржа_%', title='Средняя маржа по категориям',
+                                 labels={'Маржа_%': 'Маржа (%)', 'Категория': 'Категория'},
+                                 color='Маржа_%', color_continuous_scale='RdYlGn')
+                    st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            logger.exception(e)
+            st.error(f"Ошибка обработки файла: {e}")
 
 if __name__ == "__main__":
     main()
+```
