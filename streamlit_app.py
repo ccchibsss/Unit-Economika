@@ -38,7 +38,7 @@ import os
 import sys
 import re
 import tempfile
-import contextlib  # ДОБАВЛЕНО: исправление ошибки отсутствия импорта для nullcontext
+import contextlib  # ДОБАВЛЕНО: исправление ошибки отсутствия импорта
 
 # Дополнительные импорты
 import requests
