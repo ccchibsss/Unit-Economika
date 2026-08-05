@@ -598,6 +598,340 @@ def render_fbs_calculation_ui(engine: FBSCalculationEngine, exporter: ExcelFormu
         except Exception as e:
             st.error(f"Ошибка обработки файла: {e}")
 
+# ============================================================================
+# БЛОК 5: СПРАВОЧНИК КАТЕГОРИЙ И ВАЛИДАТОР ГАБАРИТОВ (FBS)
+# ============================================================================
+import math
+
+class AutoPartsCategoriesDB:
+    """
+    Справочник 150+ категорий автозапчастей с типовыми габаритами.
+    Используется для автозаполнения пропусков и валидации.
+    """
+    def __init__(self):
+        # Словарь: {ключ: (тип_объем_л, тип_вес_кг, hazardous, fragile)}
+        self.db = {
+            "фильтры": (1.5, 0.5, False, False), "масла": (5.0, 4.0, True, False),
+            "колодки": (0.8, 1.2, False, False), "диски": (3.0, 4.0, False, True),
+            "амортизаторы": (4.0, 3.5, False, True), "аккумуляторы": (12.0, 15.0, True, True),
+            "шины": (25.0, 10.0, False, False), "фары": (6.0, 2.5, False, True),
+            "ремни": (0.5, 0.2, False, False), "подшипники": (0.3, 0.8, False, False),
+            "датчики": (0.1, 0.1, False, False), "свечи": (0.05, 0.05, False, False),
+            "помпы": (1.5, 1.5, False, False), "радиаторы": (15.0, 5.0, False, True),
+            "бамперы": (40.0, 8.0, False, True), "крылья": (20.0, 6.0, False, True),
+            "двигатель": (50.0, 80.0, True, True), "кпп": (40.0, 50.0, True, True),
+        }
+
+    def get_defaults(self, category: str) -> Dict[str, Any]:
+        """Возвращает типовые габариты и флаги для категории."""
+        cat_key = category.lower().strip()
+        for key, defaults in self.db.items():
+            if key in cat_key:
+                return {
+                    "volume_l": defaults[0], "weight_kg": defaults[1],
+                    "is_hazardous": defaults[2], "is_fragile": defaults[3]
+                }
+        # Дефолт для неизвестных
+        return {"volume_l": 2.0, "weight_kg": 1.0, "is_hazardous": False, "is_fragile": False}
+
+class FBSDimensionsValidator:
+    """
+    Валидатор и нормализатор весогабаритов для FBS.
+    Учитывает объемный вес (коэф. 5000) и пошаговую тарификацию.
+    """
+    @staticmethod
+    def normalize_dimension(value: float, unit_hint: str = "cm") -> float:
+        if not value or value <= 0: return 0.0
+        unit = unit_hint.lower()
+        if any(x in unit for x in ['mm', 'мм']): return value / 10.0
+        if any(x in unit for x in ['m', 'метр']): return value * 100.0
+        if value > 300: return value / 10.0  # Автоисправление мм -> см
+        return value
+
+    @staticmethod
+    def calculate_billable_weight(weight_kg: float, length_cm: float, width_cm: float, height_cm: float) -> float:
+        """Расчет оплачиваемого веса (больший из реального и объемного)."""
+        if length_cm <= 0 or width_cm <= 0 or height_cm <= 0:
+            return max(0.1, weight_kg)
+        
+        volumetric_weight = (length_cm * width_cm * height_cm) / 5000.0
+        billable = max(weight_kg, volumetric_weight)
+        # Округление до 0.5 кг (стандарт многих МП)
+        return math.ceil(billable * 2) / 2
+
+    @staticmethod
+    def validate_batch(df: pd.DataFrame, categories_db: AutoPartsCategoriesDB) -> pd.DataFrame:
+        """Векторизованная валидация и заполнение пропусков."""
+        res = df.copy()
+        
+        # Нормализация единиц (если есть колонки)
+        for dim_col in ['Длина', 'Ширина', 'Высота']:
+            if dim_col in res.columns:
+                res[dim_col] = res[dim_col].apply(lambda x: FBSDimensionsValidator.normalize_dimension(safe_float(x)))
+        
+        if 'Вес_кг' in res.columns:
+            res['Вес_кг'] = res['Вес_кг'].apply(lambda x: safe_float(x) if safe_float(x) < 100 else safe_float(x)/1000)
+
+        # Заполнение пропусков из справочника
+        if 'Категория' in res.columns:
+            for idx, row in res.iterrows():
+                cat_defaults = categories_db.get_defaults(str(row.get('Категория', '')))
+                if res.at[idx, 'Объем_л'] == 0 or pd.isna(res.at[idx, 'Объем_л']):
+                    res.at[idx, 'Объем_л'] = cat_defaults['volume_l']
+                if res.at[idx, 'Вес_кг'] == 0 or pd.isna(res.at[idx, 'Вес_кг']):
+                    res.at[idx, 'Вес_кг'] = cat_defaults['weight_kg']
+                
+                # Флаги для доп. расходов
+                res.at[idx, 'is_hazardous'] = cat_defaults['is_hazardous']
+                res.at[idx, 'is_fragile'] = cat_defaults['is_fragile']
+
+        # Расчет объемного веса
+        if all(col in res.columns for col in ['Длина', 'Ширина', 'Высота']):
+            res['Оплач_вес'] = res.apply(
+                lambda r: FBSDimensionsValidator.calculate_billable_weight(
+                    safe_float(r['Вес_кг']), safe_float(r['Длина']), 
+                    safe_float(r['Ширина']), safe_float(r['Высота'])
+                ), axis=1
+            )
+        else:
+            res['Оплач_вес'] = res['Вес_кг']
+
+        return res
+# ============================================================================
+# БЛОК 6: СПЕЦИФИЧЕСКИЕ РАСХОДЫ FBS И ОБНОВЛЕННЫЙ EXCEL-ЭКСПОРТЕР
+# ============================================================================
+@dataclass
+class FBSSpecificCosts:
+    """Специфические расходы для FBS (упаковка, маркировка, Честный знак)."""
+    packaging_fbs: float = 45.0      # Упаковка FBS (руб/отправление)
+    chestny_znak: float = 1.5        # Код маркировки (руб/шт)
+    labeling: float = 3.0            # Наклейка штрихкода (руб/шт)
+    warranty_reserve: float = 0.02   # Резерв на гарантийные случаи (доля от цены)
+
+    def calculate_batch(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Векторизованный расчет специфических расходов."""
+        res = df.copy()
+        res['Упаковка_FBS'] = self.packaging_fbs
+        res['Маркировка'] = np.where(res.get('requires_marking', True), self.chestny_znak + self.labeling, 0)
+        res['Гарант_резерв'] = res['Цена'] * self.warranty_reserve
+        
+        # Надбавки за опасные/хрупкие
+        res['Надбавка_опасный'] = np.where(res.get('is_hazardous', False), res['Цена'] * 0.01, 0)
+        res['Надбавка_хрупкий'] = np.where(res.get('is_fragile', False), res['Цена'] * 0.005, 0)
+        
+        res['Спец_расходы_FBS'] = (res['Упаковка_FBS'] + res['Маркировка'] + 
+                                    res['Гарант_резерв'] + res['Надбавка_опасный'] + res['Надбавка_хрупкий'])
+        return res
+
+
+class AdvancedExcelFormulaExporter(ExcelFormulaExporter):
+    """
+    Расширенный экспортер с учетом специфических расходов FBS и защитой от краша Excel.
+    """
+    EXCEL_SAFE_ROW_LIMIT = 100_000  # При превышении живые формулы могут тормозить Excel
+
+    def __init__(self, tariff_manager: TariffManager, specific_costs: FBSSpecificCosts):
+        super().__init__(tariff_manager)
+        self.specific_costs = specific_costs
+        self.use_live_formulas = True
+
+    def _create_input_and_calc_sheets(self, df: pd.DataFrame):
+        """Создает листы с учетом спец. расходов и защитой от лимитов."""
+        self.use_live_formulas = len(df) <= self.EXCEL_SAFE_ROW_LIMIT
+        if not self.use_live_formulas:
+            logger.warning(f"⚠️ Превышен лимит {self.EXCEL_SAFE_ROW_LIMIT} строк. Живые формулы отключены для стабильности Excel.")
+
+        ws_in = self.wb.create_sheet("Входные_Данные")
+        ws_calc = self.wb.create_sheet("Расчет_FBS")
+        
+        # --- ЛИСТ ВХОДНЫЕ ДАННЫЕ ---
+        in_headers = ["Артикул", "Маркетплейс", "Категория", "Цена", "Себестоимость", 
+                      "Вес_кг", "Длина_см", "Ширина_см", "Высота_см", "Объем_л", "Оплач_вес"]
+        for col_idx, h in enumerate(in_headers, 1):
+            ws_in.cell(row=1, column=col_idx, value=h)
+        self._style_header(ws_in, 1, len(in_headers))
+        
+        for r_idx, row in df.iterrows():
+            excel_row = r_idx + 2
+            ws_in.cell(row=excel_row, column=1, value=row.get('Артикул', ''))
+            ws_in.cell(row=excel_row, column=2, value=row.get('Маркетплейс', 'Ozon'))
+            ws_in.cell(row=excel_row, column=3, value=row.get('Категория', ''))
+            ws_in.cell(row=excel_row, column=4, value=row.get('Цена', 0)).number_format = '#,##0.00'
+            ws_in.cell(row=excel_row, column=5, value=row.get('Себестоимость', 0)).number_format = '#,##0.00'
+            ws_in.cell(row=excel_row, column=6, value=row.get('Вес_кг', 0)).number_format = '#,##0.000'
+            ws_in.cell(row=excel_row, column=7, value=row.get('Длина', 0)).number_format = '#,##0.0'
+            ws_in.cell(row=excel_row, column=8, value=row.get('Ширина', 0)).number_format = '#,##0.0'
+            ws_in.cell(row=excel_row, column=9, value=row.get('Высота', 0)).number_format = '#,##0.0'
+            ws_in.cell(row=excel_row, column=10, value=row.get('Объем_л', 0)).number_format = '#,##0.000'
+            ws_in.cell(row=excel_row, column=11, value=row.get('Оплач_вес', 0)).number_format = '#,##0.000'
+            
+            for col in range(1, 12):
+                ws_in.cell(row=excel_row, column=col).fill = self.input_fill
+                ws_in.cell(row=excel_row, column=col).border = self.thin_border
+
+        # --- ЛИСТ РАСЧЕТ ---
+        calc_headers = [
+            "Артикул", "Маркетплейс", "Цена", "Себестоимость", 
+            "Комиссия_руб", "Логистика_руб", "Хранение_руб", "Эквайринг_руб",
+            "Спец_расходы_FBS", "Итого_расходы", "Прибыль", "Маржа_%"
+        ]
+        for col_idx, h in enumerate(calc_headers, 1):
+            ws_calc.cell(row=1, column=col_idx, value=h)
+        self._style_header(ws_calc, 1, len(calc_headers))
+        
+        total_rows = len(df)
+        
+        for r_idx in range(total_rows):
+            excel_row = r_idx + 2
+            in_row = excel_row 
+            
+            ref_mp = f"Входные_Данные!B{in_row}"
+            ref_price = f"Входные_Данные!D{in_row}"
+            ref_cost = f"Входные_Данные!E{in_row}"
+            ref_billable_weight = f"Входные_Данные!K{in_row}"
+            ref_vol = f"Входные_Данные!J{in_row}"
+            
+            ws_calc.cell(row=excel_row, column=1, value=f"=Входные_Данные!A{in_row}")
+            ws_calc.cell(row=excel_row, column=2, value=f"={ref_mp}")
+            ws_calc.cell(row=excel_row, column=3, value=f"={ref_price}").number_format = '#,##0.00'
+            ws_calc.cell(row=excel_row, column=4, value=f"={ref_cost}").number_format = '#,##0.00'
+            
+            if self.use_live_formulas:
+                # ЖИВЫЕ ФОРМУЛЫ
+                comm_formula = f'=MAX({ref_price} * VLOOKUP({ref_mp}, {self.tariff_range}, 2, FALSE), VLOOKUP({ref_mp}, {self.tariff_range}, 3, FALSE))'
+                ws_calc.cell(row=excel_row, column=5, value=comm_formula).number_format = '#,##0.00'
+                
+                log_formula = f'=VLOOKUP({ref_mp}, {self.tariff_range}, 4, FALSE) + {ref_billable_weight} * VLOOKUP({ref_mp}, {self.tariff_range}, 5, FALSE)'
+                ws_calc.cell(row=excel_row, column=6, value=log_formula).number_format = '#,##0.00'
+                
+                stor_formula = f'={ref_vol} * VLOOKUP({ref_mp}, {self.tariff_range}, 6, FALSE) * 30'
+                ws_calc.cell(row=excel_row, column=7, value=stor_formula).number_format = '#,##0.00'
+                
+                acq_formula = f'={ref_price} * VLOOKUP({ref_mp}, {self.tariff_range}, 7, FALSE)'
+                ws_calc.cell(row=excel_row, column=8, value=acq_formula).number_format = '#,##0.00'
+                
+                # Спец расходы берем из входных данных (они уже посчитаны в Python)
+                ws_calc.cell(row=excel_row, column=9, value=f"=Входные_Данные!L{in_row}").number_format = '#,##0.00' # Предполагаем, что L - это спец расходы
+                
+                total_exp_formula = f'={ref_cost} + SUM(E{excel_row}:I{excel_row})'
+                ws_calc.cell(row=excel_row, column=10, value=total_exp_formula).number_format = '#,##0.00'
+            else:
+                # СТАТИЧЕСКИЕ ЗНАЧЕНИЯ (для больших объемов)
+                mp_name = df.iloc[r_idx]['Маркетплейс']
+                tariff = self.tariff_manager.tariffs.get(mp_name)
+                if tariff:
+                    price = df.iloc[r_idx]['Цена']
+                    cost = df.iloc[r_idx]['Себестоимость']
+                    bill_w = df.iloc[r_idx]['Оплач_вес']
+                    vol = df.iloc[r_idx]['Объем_л']
+                    spec = df.iloc[r_idx].get('Спец_расходы_FBS', 0)
+                    
+                    comm = max(price * tariff.commission_rate, tariff.min_commission)
+                    log = tariff.logistics_base + bill_w * tariff.logistics_per_kg
+                    stor = vol * tariff.storage_per_day * 30
+                    acq = price * tariff.acquiring_fee
+                    
+                    ws_calc.cell(row=excel_row, column=5, value=comm).number_format = '#,##0.00'
+                    ws_calc.cell(row=excel_row, column=6, value=log).number_format = '#,##0.00'
+                    ws_calc.cell(row=excel_row, column=7, value=stor).number_format = '#,##0.00'
+                    ws_calc.cell(row=excel_row, column=8, value=acq).number_format = '#,##0.00'
+                    ws_calc.cell(row=excel_row, column=9, value=spec).number_format = '#,##0.00'
+                    
+                    total_exp = cost + comm + log + stor + acq + spec
+                    ws_calc.cell(row=excel_row, column=10, value=total_exp).number_format = '#,##0.00'
+
+            # Прибыль и Маржа (всегда формулы, они легкие)
+            profit_formula = f'={ref_price} - J{excel_row}'
+            ws_calc.cell(row=excel_row, column=11, value=profit_formula).number_format = '#,##0.00'
+            
+            margin_formula = f'=IF({ref_price}>0, K{excel_row}/{ref_price}, 0)'
+            ws_calc.cell(row=excel_row, column=12, value=margin_formula).number_format = '0.00%'
+            
+            for col in range(5, 13):
+                cell = ws_calc.cell(row=excel_row, column=col)
+                cell.fill = self.formula_fill
+                cell.border = self.thin_border
+
+        for col in range(1, 13):
+            ws_calc.column_dimensions[get_column_letter(col)].width = 16
+            
+        ws_in.freeze_panes = "A2"
+        ws_calc.freeze_panes = "A2"
+# ============================================================================
+# БЛОК 7: ФИНАЛЬНЫЙ UI STREAMLIT И ТОЧКА ВХОДА
+# ============================================================================
+def render_fbs_calculation_ui(tariff_mgr: TariffManager, categories_db: AutoPartsCategoriesDB, specific_costs: FBSSpecificCosts):
+    """Полный UI для расчета FBS с валидацией и живыми формулами."""
+    st.header("📊 Расчет юнит-экономики (FBS)")
+    
+    uploaded_file = st.file_uploader("Загрузите каталог товаров (CSV/Excel)", type=['csv', 'xlsx', 'xls'], key="catalog_upload")
+    
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file, sep=';')
+            else:
+                df = pd.read_excel(uploaded_file)
+                
+            st.success(f"Загружено {len(df)} товаров.")
+            
+            # Нормализация колонок
+            col_mapping = {}
+            for col in df.columns:
+                cl = col.lower()
+                if 'артикул' in cl or 'article' in cl: col_mapping[col] = 'Артикул'
+                elif 'мп' in cl or 'marketplace' in cl: col_mapping[col] = 'Маркетплейс'
+                elif 'категория' in cl or 'category' in cl: col_mapping[col] = 'Категория'
+                elif 'цена' in cl or 'price' in cl: col_mapping[col] = 'Цена'
+                elif 'себестоимость' in cl or 'cost' in cl: col_mapping[col] = 'Себестоимость'
+                elif 'вес' in cl or 'weight' in cl: col_mapping[col] = 'Вес_кг'
+                elif 'длина' in cl or 'length' in cl: col_mapping[col] = 'Длина'
+                elif 'ширина' in cl or 'width' in cl: col_mapping[col] = 'Ширина'
+                elif 'высота' in cl or 'height' in cl: col_mapping[col] = 'Высота'
+                elif 'объем' in cl or 'volume' in cl: col_mapping[col] = 'Объем_л'
+            
+            df = df.rename(columns=col_mapping)
+            
+            # Валидация и заполнение пропусков
+            with st.spinner("Валидация габаритов и заполнение пропусков..."):
+                df_validated = FBSDimensionsValidator.validate_batch(df, categories_db)
+                df_with_costs = specific_costs.calculate_batch(df_validated)
+            
+            st.success(f"✅ Валидация завершена. Заполнено пропусков по справочнику: {df_with_costs['Объем_л'].notna().sum()}")
+            
+            # Фильтрация известных МП
+            known_mps = list(tariff_mgr.tariffs.keys())
+            df_final = df_with_costs[df_with_costs['Маркетплейс'].isin(known_mps)]
+            df_final = df_final[df_final['Цена'] > 0]
+            
+            if df_final.empty:
+                st.error("Нет данных для расчета. Проверьте названия маркетплейсов и цены.")
+                return
+
+            # Экспортер
+            exporter = AdvancedExcelFormulaExporter(tariff_mgr, specific_costs)
+            
+            if st.button("🚀 Сгенерировать Excel с живыми формулами", type="primary"):
+                with st.spinner("Подготовка данных и генерация формул..."):
+                    temp_path = "unit_economics_fbs_live.xlsx"
+                    exporter.export_to_excel(df_final, temp_path)
+                    
+                    with open(temp_path, "rb") as f:
+                        st.download_button(
+                            "⬇️ Скачать Excel (Живые формулы)",
+                            data=f,
+                            file_name="unit_economics_fbs_live.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    st.success("Файл готов! Откройте его в Excel — измените тарифы на первом листе, и расчеты пересчитаются автоматически.")
+                    
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                        
+        except Exception as e:
+            st.error(f"Ошибка обработки файла: {e}")
+            st.code(traceback.format_exc())
+
 
 def main():
     st.set_page_config(page_title="Unit Economics FBS Pro", layout="wide")
@@ -605,15 +939,15 @@ def main():
     
     # Инициализация синглтонов
     tariff_mgr = get_tariff_manager()
-    engine = FBSCalculationEngine(tariff_mgr)
-    exporter = ExcelFormulaExporter(tariff_mgr)
+    categories_db = AutoPartsCategoriesDB()
+    specific_costs = FBSSpecificCosts()
     
     menu = st.sidebar.radio("Меню", ["⚙️ Тарифы", "📊 Расчет"])
     
     if menu == "⚙️ Тарифы":
         render_tariff_management_ui(tariff_mgr)
     elif menu == "📊 Расчет":
-        render_fbs_calculation_ui(engine, exporter)
+        render_fbs_calculation_ui(tariff_mgr, categories_db, specific_costs)
 
 if __name__ == "__main__":
     main()
