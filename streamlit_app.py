@@ -1416,6 +1416,7 @@ def calculate_recommended_min_price(
 # ============================================================================
 # БЛОК 1: ENUM И ТИПЫ
 # ============================================================================
+
 class CommissionType(Enum):
     PERCENTAGE = auto()
     FIXED = auto()
@@ -1555,6 +1556,7 @@ class TariffSource(Enum):
 # ============================================================================
 # БЛОК 2: ДАТАКЛАССЫ (🆕 v100.5 - С НОВЫМИ ПОЛЯМИ)
 # ============================================================================
+
 @dataclass
 class MarketplaceConfig:
     """Расширенная конфигурация маркетплейса с сезонностью и промо"""
@@ -1618,17 +1620,38 @@ class MarketplaceConfig:
         multiplier = self.seasonal_multipliers.get(season, 1.0)
         return base_rate * multiplier
 
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД apply_promo_discount
     def apply_promo_discount(self, amount: float) -> float:
+        """
+        Применяет промо-скидку только если акция активна.
+        
+        Логика работы:
+        1. Если скидка не задана (promo_discount <= 0) → возвращаем исходную сумму
+        2. Если даты акции не заданы (promo_start или promo_end = None) → скидка не применяется
+        3. Если текущая дата входит в диапазон акции → применяем скидку
+        4. Иначе (акция неактивна) → возвращаем исходную сумму
+        
+        Args:
+            amount: Сумма, к которой применяется скидка
+            
+        Returns:
+            float: Сумма с применённой скидкой или без неё
+        """
+        # Если скидка не задана - возвращаем исходную сумму
         if self.promo_discount <= 0:
             return amount
+        
+        # Если даты акции не заданы - скидка не применяется
+        if not self.promo_start or not self.promo_end:
+            return amount
+        
+        # Проверяем, активна ли акция сейчас
         now = datetime.now()
-        if self.promo_start and self.promo_end:
-            if self.promo_start <= now <= self.promo_end:
-                return amount * (1 - self.promo_discount)
-            else:
-                return amount * (1 - self.promo_discount)   # ❌ ОШИБКА
-        else:
-            return amount * (1 - self.promo_discount)       # ❌ ОШИБКА
+        if self.promo_start <= now <= self.promo_end:
+            # Акция активна - применяем скидку
+            return amount * (1 - self.promo_discount)
+        
+        # Акция неактивна - возвращаем исходную сумму
         return amount
 
     def calculate_commission_with_dynamics(self, price: float,
@@ -1648,6 +1671,7 @@ class MarketplaceConfig:
         if self.max_commission < float('inf'):
             commission = min(commission, self.max_commission)
         return commission
+
 
 @dataclass
 class ProductDimensions:
@@ -1690,6 +1714,7 @@ class ProductDimensions:
             weight=weight,
             dimension_string=dim_str
         )
+
 
 @dataclass
 class ProductCategory:
@@ -1736,6 +1761,7 @@ class ProductCategory:
             "seasonality": self.seasonality.value,
             "risk_level": self.risk_level.value
         }
+
 
 @dataclass
 class UnitEconomicsResult:
@@ -1823,6 +1849,7 @@ class UnitEconomicsResult:
         else:
             return ProfitabilityLevel.VERY_HIGH
 
+
 @dataclass
 class ForecastResult:
     periods: List[datetime]
@@ -1845,6 +1872,7 @@ class ForecastResult:
             for rate_name, values in self.forecasted_rates.items():
                 df[f"forecast_{rate_name}"] = values[:len(df)]
         return df
+
 
 @dataclass
 class OptimizationResult:
@@ -1870,6 +1898,7 @@ class OptimizationResult:
             "recommendations": self.recommendations
         }
 
+
 @dataclass
 class ComparisonResult:
     marketplace: str
@@ -1883,6 +1912,7 @@ class ComparisonResult:
     recommended_min_price: float = 0.0
     rank: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class TariffCacheEntry:
@@ -1925,33 +1955,9 @@ class TariffCacheEntry:
             historical_data=d.get("historical_data")
         )
 # ============================================================================
-# 🆕 v100.5: АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ
-# ============================================================================
-def sensitivity_analysis(base_result: 'UnitEconomicsResult') -> pd.DataFrame:
-    """Как изменится прибыль при изменении параметров"""
-    factors = {
-        "Цена +5%": base_result.profit * 1.05,
-        "Цена -5%": base_result.profit * 0.95,
-        "Комиссия +2%": base_result.profit - base_result.price * 0.02,
-        "Логистика +20%": base_result.profit - base_result.logistics * 0.2,
-        "Курс +10% (импорт)": base_result.profit - base_result.cost * 0.1,
-    }
-    return pd.DataFrame(list(factors.items()),
-                        columns=["Сценарий", "Прибыль"])
-# ============================================================================
-# 🆕 v100.5: СРАВНЕНИЕ С РЫНКОМ
-# ============================================================================
-def compare_with_market(result: 'UnitEconomicsResult', category: str) -> Dict:
-    """Сравнение с рынком"""
-    bench = MARKET_BENCHMARKS_2026.get(category, {})
-    return {
-        "margin_vs_market": result.margin_percent - bench.get("avg_margin", 0),
-        "price_vs_market": result.price - bench.get("avg_price", 0),
-        "verdict": "Выше рынка" if result.margin_percent > bench.get("avg_margin", 0) else "Ниже рынка"
-    }
-# ============================================================================
 # БЛОК 3: ПОСТОЯННОЕ ХРАНИЛИЩЕ ИСТОРИИ (🆕 v100.5 - С МИГРАЦИЕЙ)
 # ============================================================================
+
 @st.cache_resource
 def get_persistent_history_db(db_path: Optional[Path] = None):
     return PersistentHistoryDB(db_path)
