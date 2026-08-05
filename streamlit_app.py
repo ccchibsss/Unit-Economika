@@ -1,24 +1,18 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 ============================================================================
-🚀 ULTIMATE UNIT ECONOMICS FOR YANDEX MARKET v23.3 — API-COMPLIANT & OPTIMIZED
+🚀 ULTIMATE UNIT ECONOMICS FOR YANDEX MARKET v23.2 — API-COMPLIANT
 ============================================================================
-Исправления и улучшения согласно лучшим практикам и аудиту кода:
-1. URL для расчёта тарифов: /v2/tariffs/calculate
-2. Получение реального categoryId через /v2/categories/tree (итеративный поиск)
-3. Пакетная отправка офферов (макс. 200 за запрос)
-4. Rate limiter: 1 запрос в секунду
+Исправления и улучшения согласно документации Яндекс.Маркет API:
+1. URL для расчёта тарифов исправлен на /v2/tariffs/calculate
+2. Добавлено получение реального categoryId через /v2/categories/tree
+3. Реализована пакетная отправка офферов (макс. 200 за запрос)
+4. Rate limiter настроен на 1 запрос в секунду (вместо 10)
 5. В запрос тарифов передаются реальные параметры товаров
 6. Добавлены параметры transitWarehouseType и orderCargoType
 7. Использование Enum для sellingProgram
-8. Обработка ошибок с логированием ответов
+8. Добавлена обработка ошибок с логированием ответов
 9. Улучшена структура конфигурации
-10. ФИКС: Удален псевдовекторизованный Decimal, заменен на нативный NumPy round.
-11. ФИКС: Математика анализа чувствительности переписана через реальный пересчет P&L.
-12. ФИКС: Убран ProcessPoolExecutor для Pandas (оверхед сериализации), оставлен ThreadPool.
-13. ФИКС: Колонки 'source' и 'scheme' больше не удаляются из финального датафрейма (аудит).
-14. ФИКС: Безопасная работа с временными файлами и кодировками.
 """
 import streamlit as st
 import pandas as pd
@@ -29,11 +23,12 @@ import logging
 import warnings
 from datetime import datetime, timedelta
 from enum import Enum
+from decimal import Decimal, ROUND_HALF_UP
 from typing import (
     Dict, List, Optional, Tuple, Any, Union, TypedDict, Final, Callable
 )
-from dataclasses import dataclass
-from functools import wraps
+from dataclasses import dataclass, field
+from functools import lru_cache, wraps
 from collections import OrderedDict
 import time
 from contextlib import contextmanager
@@ -61,7 +56,7 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 try:
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
     import multiprocessing as mp
     CONCURRENT_AVAILABLE = True
 except ImportError:
@@ -84,15 +79,13 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-# Подавляем только конкретные ожидаемые предупреждения, а не все подряд
-warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
-warnings.filterwarnings('ignore', message='.*openpyxl.*')
+warnings.filterwarnings('ignore')
 
 # ----------------------------------------------------------------------------
-# НАСТРОЙКА ЛОГИРОВАНИЯ (с безопасным путем и ротацией)
+# НАСТРОЙКА ЛОГИРОВАНИЯ (с ротацией)
 # ----------------------------------------------------------------------------
 def setup_logging():
-    """Настройка логирования с ротацией файлов в безопасной директории."""
+    """Настройка логирования с ротацией файлов."""
     logger = logging.getLogger('YandexMarketUE')
     logger.setLevel(logging.INFO)
     if logger.handlers:
@@ -109,22 +102,19 @@ def setup_logging():
     
     try:
         from logging.handlers import RotatingFileHandler
-        # Используем временную директорию ОС или текущую, чтобы избежать ошибок прав доступа
-        log_dir = tempfile.gettempdir()
-        log_file = os.path.join(log_dir, 'yandex_market_ue.log')
-        
         fh = RotatingFileHandler(
-            log_file,
+            'app.log',
             maxBytes=10*1024*1024,
-            backupCount=5,
-            encoding='utf-8'
+            backupCount=5
         )
         fh.setLevel(logging.INFO)
         fh.setFormatter(formatter)
         logger.addHandler(fh)
-    except Exception as e:
-        # Фоллбэк, если даже временная директория недоступна (редкий случай)
-        logger.error(f"Не удалось настроить файловый логгер: {e}")
+    except ImportError:
+        fh = logging.FileHandler('app.log')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
     
     return logger
 
@@ -135,7 +125,7 @@ logger = setup_logging()
 # ----------------------------------------------------------------------------
 DEFAULT_CONFIG = {
     'app': {
-        'version': '23.3.0',
+        'version': '23.2.0',
         'cache_ttl': 3600,
         'lru_cache_size': 128,
         'max_retries': 3,
@@ -235,37 +225,36 @@ class PaymentRate(TypedDict):
 # УТИЛИТЫ (БЛОК 0)
 # ============================================================================
 class NumericUtils:
-    """Утилиты для точных и БЫСТРЫХ денежных расчётов (нативная векторизация NumPy)."""
+    """Утилиты для точных денежных расчётов."""
     
     @staticmethod
-    def money_round(values: Union[pd.Series, np.ndarray]) -> Union[pd.Series, np.ndarray]:
-        """Быстрое округление до 2 знаков без создания объектов Decimal."""
-        if isinstance(values, pd.Series):
-            return values.fillna(0.0).round(2)
-        return np.round(np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0), 2)
+    @np.vectorize
+    def money_round(value: float) -> float:
+        if not np.isfinite(value):
+            return 0.0
+        return float(Decimal(str(value)).quantize(
+            Decimal("0.00"), rounding=ROUND_HALF_UP
+        ))
     
     @staticmethod
-    def percent_round(values: Union[pd.Series, np.ndarray]) -> Union[pd.Series, np.ndarray]:
-        """Быстрое округление процентов до 2 знаков."""
-        if isinstance(values, pd.Series):
-            return values.fillna(0.0).round(2)
-        return np.round(np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0), 2)
+    @np.vectorize
+    def percent_round(value: float) -> float:
+        if not np.isfinite(value):
+            return 0.0
+        return float(Decimal(str(value)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        ))
     
     @staticmethod
     def safe_divide(
-        numerator: Union[pd.Series, np.ndarray],
-        denominator: Union[pd.Series, np.ndarray],
+        numerator: np.ndarray,
+        denominator: np.ndarray,
         default: float = 0.0
-    ) -> Union[pd.Series, np.ndarray]:
-        """Безопасное деление без предупреждений и деления на ноль."""
-        if isinstance(numerator, pd.Series):
-            return np.where(denominator != 0, numerator / denominator, default)
-        
-        # Для numpy массивов
-        with np.errstate(divide='ignore', invalid='ignore'):
-            result = np.divide(numerator, denominator)
-            result[~np.isfinite(result)] = default
-            return result
+    ) -> np.ndarray:
+        mask = (np.abs(denominator) < 1e-10) | ~np.isfinite(denominator) | ~np.isfinite(numerator)
+        result = np.divide(numerator, denominator, where=~mask)
+        result[mask] = default
+        return result
 
 class DtypeOptimizer:
     """Оптимизация типов данных для экономии памяти."""
@@ -281,7 +270,7 @@ class DtypeOptimizer:
     def optimize(cls, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         for col in ['artikul', 'category', 'abc_category', 'xyz_category', 
-                     'profitability_status', 'source', 'scheme']:
+                     'profitability_status']:
             if col in df.columns:
                 df[col] = df[col].astype('category')
         for col in cls.INT_COLS:
@@ -301,28 +290,15 @@ class StringUtils:
     
     @staticmethod
     def fix_double_utf8(text: str) -> str:
-        """Безопасное исправление двойной кодировки (mojibake)."""
         if not isinstance(text, str) or not text:
             return text
-        
-        # Проверяем наличие типичных артефактов двойной кодировки UTF-8 -> Windows-1251
-        if 'Ð' in text or 'Ã' in text or 'â€™' in text:
+        for source_enc, target_enc in [('cp1251', 'utf-8'), ('latin1', 'utf-8')]:
             try:
-                # Пытаемся декодировать как если бы UTF-8 был прочитан как cp1251
-                fixed = text.encode('cp1251').decode('utf-8')
-                # Дополнительная проверка, чтобы не испортить валидные строки
-                if fixed and len(fixed) > 0:
+                fixed = text.encode(source_enc).decode(target_enc)
+                if fixed and 'Ð' not in fixed[:2]:
                     return fixed
             except (UnicodeEncodeError, UnicodeDecodeError):
-                pass
-            
-            try:
-                fixed = text.encode('latin1').decode('utf-8')
-                if fixed and len(fixed) > 0:
-                    return fixed
-            except (UnicodeEncodeError, UnicodeDecodeError):
-                pass
-                
+                continue
         return text
     
     @staticmethod
@@ -332,7 +308,7 @@ class StringUtils:
                 return hashlib.sha256(
                     pd.util.hash_pandas_object(obj, index=True).values.tobytes()
                 ).hexdigest()[:16]
-            return hashlib.sha256(str(obj).encode('utf-8')).hexdigest()[:16]
+            return hashlib.sha256(str(obj).encode()).hexdigest()[:16]
         except Exception:
             return hashlib.sha256(b"hash_fallback").hexdigest()[:16]
 
@@ -415,10 +391,10 @@ class PerformanceMonitor:
                 memories = [v['memory_mb'] for v in values if 'memory_mb' in v and v['memory_mb'] is not None]
                 report[key] = {
                     'count': len(values),
-                    'avg_duration': float(np.mean(durations)) if durations else 0.0,
-                    'total_duration': float(np.sum(durations)) if durations else 0.0,
-                    'avg_memory': float(np.mean(memories)) if memories else 0.0,
-                    'max_memory': float(np.max(memories)) if memories else 0.0
+                    'avg_duration': np.mean(durations) if durations else 0,
+                    'total_duration': np.sum(durations) if durations else 0,
+                    'avg_memory': np.mean(memories) if memories else 0,
+                    'max_memory': np.max(memories) if memories else 0
                 }
         return report
     
@@ -483,7 +459,7 @@ class MemoryOptimizer:
         return df
 
 # ============================================================================
-# ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА (Безопасная для Pandas)
+# ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА
 # ============================================================================
 class ParallelProcessor:
     @staticmethod
@@ -499,35 +475,27 @@ class ParallelProcessor:
         df: pd.DataFrame,
         func: Callable[[pd.DataFrame], pd.DataFrame],
         n_workers: Optional[int] = None,
+        use_processes: bool = False,
         chunk_size: Optional[int] = None
     ) -> pd.DataFrame:
-        """
-        Используем ТОЛЬКО ThreadPoolExecutor. 
-        ProcessPoolExecutor для Pandas вызывает огромный оверхед на pickle-сериализацию 
-        при передаче данных между процессами, что делает его медленнее последовательного 
-        выполнения для чанков < 50 000 строк. NumPy освобождает GIL, поэтому потоки эффективны.
-        """
         if not CONCURRENT_AVAILABLE:
             logger.warning("Модуль concurrent.futures не доступен, выполняем последовательно")
             return func(df)
-            
         if n_workers is None:
             n_workers = max(1, mp.cpu_count() - 1)
-            
         if chunk_size is not None:
             chunks = [df.iloc[i:i+chunk_size].copy() for i in range(0, len(df), chunk_size)]
         else:
             chunks = cls.chunk_dataframe(df, n_workers)
-            
         if len(chunks) <= 1:
             return func(df)
-            
-        logger.info(f"Потоковая обработка: {len(chunks)} чанков, {n_workers} потоков")
-        
-        # Используем ThreadPoolExecutor, так как он безопасен и эффективен для C-расширений Pandas/NumPy
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            results = list(executor.map(func, chunks))
-            
+        logger.info(f"Параллельная обработка: {len(chunks)} чанков, использование {'процессов' if use_processes else 'потоков'}")
+        if use_processes:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(func, chunks))
+        else:
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(func, chunks))
         return pd.concat(results, ignore_index=True)
 
 # ============================================================================
@@ -610,7 +578,7 @@ class Tariff:
         return cls(category=category)
 
 # ============================================================================
-# API КЛИЕНТ (БЛОК 2)
+# API КЛИЕНТ (БЛОК 2) — улучшенный retry и backoff, rate limit 1/сек
 # ============================================================================
 class RateLimiter:
     def __init__(self, max_calls: int = RATE_LIMIT_PER_SECOND, period: float = 1.0):
@@ -731,28 +699,25 @@ class YandexMarketAPI(APIClient):
         return data.get("result", {}).get("categories", [])
     
     def get_category_id_by_name(self, category_name: str) -> Optional[int]:
-        """Поиск categoryId по названию категории с кэшированием (итеративный BFS для безопасности)."""
+        """Поиск categoryId по названию категории с кэшированием."""
         if category_name in self._category_cache:
             return self._category_cache[category_name]
         
         categories = self.get_categories_tree()
+        def find_category(cats, name):
+            for cat in cats:
+                if cat.get('name', '').lower() == name.lower():
+                    return cat.get('id')
+                if 'children' in cat:
+                    found = find_category(cat['children'], name)
+                    if found:
+                        return found
+            return None
         
-        # Итеративный поиск в ширину (BFS) вместо рекурсии, чтобы избежать RecursionError
-        queue = list(categories)
-        found_id = None
-        
-        while queue:
-            cat = queue.pop(0)
-            if cat.get('name', '').lower() == category_name.lower():
-                found_id = cat.get('id')
-                break
-            if 'children' in cat and cat['children']:
-                queue.extend(cat['children'])
-        
-        if found_id is not None:
-            self._category_cache[category_name] = found_id
-            
-        return found_id
+        cat_id = find_category(categories, category_name)
+        if cat_id is not None:
+            self._category_cache[category_name] = cat_id
+        return cat_id
     
     def calculate_tariffs_batch(
         self,
@@ -1258,18 +1223,20 @@ class FinancialEngine:
         ]
         for col in money_cols:
             if col in df.columns:
-                df[col] = NumericUtils.money_round(df[col])
+                df[col] = NumericUtils.money_round(df[col].values)
         pct_cols = ['margin_percent', 'roi_percent']
         for col in pct_cols:
             if col in df.columns:
-                df[col] = NumericUtils.percent_round(df[col])
-        
-        # ВАЖНО: Мы сохраняем 'source' и 'scheme' для аудита, удаляем только чисто технические расчетные поля,
-        # которые не несут смысловой нагрузки для конечного пользователя, но оставляем ключевые.
-        tech_cols_to_drop = [
+                df[col] = NumericUtils.percent_round(df[col].values)
+        tech_cols = [
+            'commission_rate', 'min_commission', 'sorting_cost',
+            'delivery_rate', 'delivery_min', 'delivery_max',
+            'acquiring_transfer_rate', 'acquiring_sku_cost',
+            'return_rate', 'return_processing', 'storage_fee_per_day',
+            'special_tariff_rate', 'source', 'scheme',
             'is_special_tariff', 'billable_weight'
         ]
-        df = df.drop(columns=[c for c in tech_cols_to_drop if c in df.columns])
+        df = df.drop(columns=[c for c in tech_cols if c in df.columns])
         return df
 
 # ============================================================================
@@ -1303,9 +1270,21 @@ def run_calculations_cached(
     return result
 
 # ============================================================================
-# ЭКСПОРТ EXCEL — ULTRA DESIGN v3
+# ЭКСПОРТ EXCEL — ULTRA DESIGN v3 (с расширенными листами)
 # ============================================================================
 class UltimateExcelExporter:
+    """
+    Профессиональный Excel-экспорт с:
+    - Дашбордом (KPI-карточки, диаграммы через формулы)
+    - Детальной таблицей с зебра-полосами и светофором
+    - Листом рекомендаций с условным форматированием
+    - Листом ABC/XYZ матрицы
+    - Листом тарифов и параметров
+    - Листом анализа чувствительности
+    - Листом прогноза
+    """
+
+    # ── Палитра бренда ───────────────────────────────────────────────────────
     C = {
         "navy":       "1F4E79",
         "blue":       "2E75B6",
@@ -1332,6 +1311,7 @@ class UltimateExcelExporter:
         "abc_c":      "BDD7EE",
     }
 
+    # ── Вспомогательные конструкторы стилей ──────────────────────────────────
     @classmethod
     def _fill(cls, hex_color: str) -> PatternFill:
         return PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid")
@@ -1345,22 +1325,44 @@ class UltimateExcelExporter:
         italic: bool = False,
         name: str = "Calibri",
     ) -> Font:
-        return Font(bold=bold, color=color, size=size, italic=italic, name=name)
+        return Font(bold=bold, color=color, size=size,
+                    italic=italic, name=name)
 
     @classmethod
-    def _align(cls, h: str = "left", v: str = "center", wrap: bool = False) -> Alignment:
+    def _align(
+        cls,
+        h: str = "left",
+        v: str = "center",
+        wrap: bool = False,
+    ) -> Alignment:
         return Alignment(horizontal=h, vertical=v, wrap_text=wrap)
 
+    # ── Стиль шапки таблицы ──────────────────────────────────────────────────
     @classmethod
-    def _style_header_row(cls, ws, row: int, col_start: int, col_end: int, bg: str = "navy") -> None:
+    def _style_header_row(
+        cls,
+        ws,
+        row: int,
+        col_start: int,
+        col_end: int,
+        bg: str = "navy",
+    ) -> None:
         for c in range(col_start, col_end + 1):
             cell = ws.cell(row=row, column=c)
             cell.fill = cls._fill(cls.C[bg])
             cell.font = cls._font(bold=True, color="FFFFFF", size=10)
             cell.alignment = cls._align(h="center", wrap=True)
 
+    # ── Зебра-строки ─────────────────────────────────────────────────────────
     @classmethod
-    def _apply_zebra(cls, ws, row_start: int, row_end: int, col_start: int, col_end: int) -> None:
+    def _apply_zebra(
+        cls,
+        ws,
+        row_start: int,
+        row_end: int,
+        col_start: int,
+        col_end: int,
+    ) -> None:
         for r in range(row_start, row_end + 1):
             bg = cls.C["gray"] if r % 2 == 0 else cls.C["white"]
             for c in range(col_start, col_end + 1):
@@ -1368,12 +1370,14 @@ class UltimateExcelExporter:
                 if cell.fill.patternType in (None, "none", ""):
                     cell.fill = cls._fill(bg)
 
+    # ── Числовые форматы ─────────────────────────────────────────────────────
     FMT_MONEY   = '#,##0.00 ₽'
     FMT_PCT     = '0.00%'
     FMT_PCT1    = '0.0%'
     FMT_INT     = '#,##0'
     FMT_DATE    = 'DD.MM.YYYY HH:MM'
 
+    # ── Главный метод экспорта ───────────────────────────────────────────────
     @classmethod
     def export_max_info(
         cls,
@@ -1388,26 +1392,42 @@ class UltimateExcelExporter:
 
         try:
             from openpyxl import Workbook
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-            from openpyxl.formatting.rule import ColorScaleRule, DataBarRule
+            from openpyxl.styles import (
+                Font, PatternFill, Alignment, Border, Side, GradientFill
+            )
+            from openpyxl.formatting.rule import (
+                ColorScaleRule, DataBarRule, IconSetRule,
+                CellIsRule, FormulaRule,
+                ConditionalFormattingValueObject
+            )
             from openpyxl.utils import get_column_letter
+            from openpyxl.utils.dataframe import dataframe_to_rows
             from openpyxl.worksheet.table import Table, TableStyleInfo
-            from openpyxl.chart import PieChart, Reference, LineChart
+            from openpyxl.chart import BarChart, Reference, PieChart, LineChart
             from openpyxl.chart.label import DataLabelList
         except ImportError as e:
             logger.error(f"openpyxl import error: {e}")
             return b""
 
-        def thin_border(left=True, right=True, top=True, bottom=True) -> Border:
+        # ── утилита границы ─────────────────────────────────────────────────
+        def thin_border(
+            left=True, right=True, top=True, bottom=True
+        ) -> Border:
             s = Side(style="thin", color="D9D9D9")
-            return Border(left=s if left else None, right=s if right else None,
-                          top=s if top else None, bottom=s if bottom else None)
+            return Border(
+                left=s if left else None,
+                right=s if right else None,
+                top=s if top else None,
+                bottom=s if bottom else None,
+            )
 
         def thick_border_bottom() -> Border:
-            s_thin = Side(style="thin", color="D9D9D9")
-            s_med = Side(style="medium", color=cls.C["navy"])
-            return Border(left=s_thin, right=s_thin, top=s_thin, bottom=s_med)
+            s_thin = Side(style="thin",  color="D9D9D9")
+            s_med  = Side(style="medium", color=cls.C["navy"])
+            return Border(left=s_thin, right=s_thin,
+                          top=s_thin, bottom=s_med)
 
+        # ── подготовка данных ────────────────────────────────────────────────
         df = df.copy()
         for col in df.select_dtypes(include=['category']).columns:
             df[col] = df[col].astype(str)
@@ -1422,11 +1442,11 @@ class UltimateExcelExporter:
             'margin_percent', 'roi_percent', 'break_even_units',
             'rec_price_min', 'rec_price_15', 'rec_price_25',
             'daily_sales', 'abc_category', 'xyz_category',
-            'abc_xyz', 'profitability_status', 'source', 'scheme'
+            'abc_xyz', 'profitability_status'
         ]
         for col in expected_cols:
             if col not in df.columns:
-                if col in ('artikul', 'category', 'source', 'scheme'):
+                if col in ('artikul', 'category'):
                     df[col] = "—"
                 elif col in ('margin_percent', 'roi_percent'):
                     df[col] = 0.0
@@ -1435,7 +1455,9 @@ class UltimateExcelExporter:
 
         wb = Workbook()
 
+        # ════════════════════════════════════════════════════════════════════
         # ① ДАШБОРД
+        # ════════════════════════════════════════════════════════════════════
         ws_dash = wb.active
         ws_dash.title = "📊 Дашборд"
         ws_dash.sheet_view.showGridLines = False
@@ -1450,40 +1472,60 @@ class UltimateExcelExporter:
         ws_dash.merge_cells("B2:N2")
         title_cell = ws_dash["B2"]
         title_cell.value = "📊 UNIT-ECONOMICS · ЯНДЕКС МАРКЕТ"
-        title_cell.font = Font(name="Calibri", bold=True, size=20, color=cls.C["white"])
+        title_cell.font = Font(
+            name="Calibri", bold=True, size=20, color=cls.C["white"]
+        )
         title_cell.fill = cls._fill(cls.C["navy"])
         title_cell.alignment = cls._align(h="center")
 
         ws_dash.merge_cells("B3:N3")
         sub_cell = ws_dash["B3"]
-        sub_cell.value = f"{scheme_label} · {tax_label} · {payment_frequency} · Сформировано: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
-        sub_cell.font = Font(name="Calibri", italic=True, size=10, color=cls.C["white"])
+        sub_cell.value = (
+            f"{scheme_label}  ·  {tax_label}  ·  "
+            f"{payment_frequency}  ·  "
+            f"Сформировано: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        )
+        sub_cell.font = Font(
+            name="Calibri", italic=True, size=10, color=cls.C["white"]
+        )
         sub_cell.fill = cls._fill(cls.C["blue"])
         sub_cell.alignment = cls._align(h="center")
 
         ws_dash.row_dimensions[4].height = 10
 
-        total_sku = len(df)
-        avg_margin = df["margin_percent"].mean() if "margin_percent" in df.columns else 0
+        total_sku      = len(df)
+        avg_margin     = df["margin_percent"].mean() if "margin_percent" in df.columns else 0
         profitable_cnt = int((df["gross_profit"] > 0).sum()) if "gross_profit" in df.columns else 0
-        loss_cnt = int((df["gross_profit"] < 0).sum()) if "gross_profit" in df.columns else 0
-        hi_margin_cnt = int((df["profitability_status"] == "Высокомаржинальный").sum()) if "profitability_status" in df.columns else 0
-        avg_roi = df["roi_percent"].mean() if "roi_percent" in df.columns else 0
+        loss_cnt       = int((df["gross_profit"] < 0).sum()) if "gross_profit" in df.columns else 0
+        hi_margin_cnt  = int(
+            (df["profitability_status"] == "Высокомаржинальный").sum()
+        ) if "profitability_status" in df.columns else 0
+        avg_roi        = df["roi_percent"].mean() if "roi_percent" in df.columns else 0
+        total_profit   = df["gross_profit"].sum() if "gross_profit" in df.columns else 0
 
         kpi_cards = [
-            ("Всего SKU", total_sku, "#,##0", cls.C["navy"], cls.C["sky"], "🏷️"),
-            ("Средняя маржа", avg_margin / 100, "0.0%", cls.C["green"], cls.C["lime"], "📈"),
-            ("Прибыльных", profitable_cnt, "#,##0", cls.C["green"], cls.C["lime"], "✅"),
-            ("Убыточных", loss_cnt, "#,##0", cls.C["crimson"], cls.C["orange"], "❌"),
-            ("Высокомаржинальных", hi_margin_cnt, "#,##0", cls.C["navy"], cls.C["sky"], "⭐"),
-            ("Средний ROI", avg_roi / 100, "0.0%", cls.C["blue"], cls.C["light_blue"], "💰"),
+            ("Всего SKU",         total_sku,         "#,##0",   cls.C["navy"],    cls.C["sky"],    "🏷️"),
+            ("Средняя маржа",     avg_margin / 100,  "0.0%",    cls.C["green"],   cls.C["lime"],   "📈"),
+            ("Прибыльных",        profitable_cnt,    "#,##0",   cls.C["green"],   cls.C["lime"],   "✅"),
+            ("Убыточных",         loss_cnt,          "#,##0",   cls.C["crimson"], cls.C["orange"], "❌"),
+            ("Высокомаржинальных",hi_margin_cnt,     "#,##0",   cls.C["navy"],    cls.C["sky"],    "⭐"),
+            ("Средний ROI",       avg_roi / 100,     "0.0%",    cls.C["blue"],    cls.C["light_blue"], "💰"),
         ]
 
-        card_cols = [("B", "C"), ("D", "E"), ("F", "G"), ("H", "I"), ("J", "K"), ("L", "M")]
+        card_cols = [
+            ("B", "C"),
+            ("D", "E"),
+            ("F", "G"),
+            ("H", "I"),
+            ("J", "K"),
+            ("L", "M"),
+        ]
 
-        for idx, ((label, value, fmt, fg, bg, icon), (start_col, end_col)) in enumerate(zip(kpi_cards, card_cols)):
+        for idx, ((label, value, fmt, fg, bg, icon), (start_col, end_col)) in enumerate(
+            zip(kpi_cards, card_cols)
+        ):
             sc = ord(start_col) - ord("A") + 1
-            ec = ord(end_col) - ord("A") + 1
+            ec = ord(end_col)   - ord("A") + 1
 
             for r in range(5, 10):
                 for c in range(sc, ec + 1):
@@ -1491,18 +1533,27 @@ class UltimateExcelExporter:
                     cell.fill = cls._fill(bg)
                     cell.border = thin_border()
 
-            ws_dash.merge_cells(start_row=5, start_column=sc, end_row=5, end_column=ec)
-            lbl = ws_dash.cell(row=5, column=sc, value=f"{icon} {label}")
-            lbl.font = Font(name="Calibri", bold=True, size=9, color=fg)
-            lbl.fill = cls._fill(bg)
+            ws_dash.merge_cells(
+                start_row=5, start_column=sc,
+                end_row=5,   end_column=ec
+            )
+            lbl = ws_dash.cell(row=5, column=sc,
+                                value=f"{icon} {label}")
+            lbl.font      = Font(name="Calibri", bold=True,
+                                 size=9, color=fg)
+            lbl.fill      = cls._fill(bg)
             lbl.alignment = cls._align(h="center")
 
-            ws_dash.merge_cells(start_row=6, start_column=sc, end_row=8, end_column=ec)
+            ws_dash.merge_cells(
+                start_row=6, start_column=sc,
+                end_row=8,   end_column=ec
+            )
             val_cell = ws_dash.cell(row=6, column=sc, value=value)
-            val_cell.font = Font(name="Calibri", bold=True, size=22, color=fg)
-            val_cell.fill = cls._fill(bg)
-            val_cell.number_format = fmt
-            val_cell.alignment = cls._align(h="center", v="center")
+            val_cell.font = Font(name="Calibri", bold=True,
+                                 size=22, color=fg)
+            val_cell.fill             = cls._fill(bg)
+            val_cell.number_format    = fmt
+            val_cell.alignment        = cls._align(h="center", v="center")
 
             ws_dash.row_dimensions[5].height = 18
             ws_dash.row_dimensions[6].height = 38
@@ -1513,113 +1564,187 @@ class UltimateExcelExporter:
 
         status_header_row = 11
         ws_dash.merge_cells(f"B{status_header_row}:F{status_header_row}")
-        h = ws_dash.cell(row=status_header_row, column=2, value="Структура портфеля по маржинальности")
-        h.font = cls._font(bold=True, color="FFFFFF", size=11)
-        h.fill = cls._fill(cls.C["navy"])
+        h = ws_dash.cell(row=status_header_row, column=2,
+                         value="Структура портфеля по маржинальности")
+        h.font      = cls._font(bold=True, color="FFFFFF", size=11)
+        h.fill      = cls._fill(cls.C["navy"])
         h.alignment = cls._align(h="center")
 
         if "profitability_status" in df.columns and "gross_profit" in df.columns:
             status_summary = (
                 df.groupby("profitability_status", observed=True)
-                  .agg(SKU=("artikul", "count"), Прибыль=("gross_profit", "sum"), Маржа_avg=("margin_percent", "mean"))
-                  .reset_index().rename(columns={"profitability_status": "Статус"})
+                  .agg(
+                      SKU=("artikul", "count"),
+                      Прибыль=("gross_profit", "sum"),
+                      Маржа_avg=("margin_percent", "mean"),
+                  )
+                  .reset_index()
+                  .rename(columns={"profitability_status": "Статус"})
             )
 
             col_hdrs = ["Статус", "SKU, шт.", "Сум. прибыль, ₽", "Ср. маржа, %"]
             STATUS_COLORS = {
-                "Высокомаржинальный": (cls.C["profit_hi"], cls.C["profit_hi_bg"]),
-                "Низкомаржинальный": (cls.C["profit_lo"], cls.C["profit_lo_bg"]),
-                "Убыточный": (cls.C["loss"], cls.C["loss_bg"]),
+                "Высокомаржинальный": (cls.C["profit_hi"],  cls.C["profit_hi_bg"]),
+                "Низкомаржинальный":  (cls.C["profit_lo"],  cls.C["profit_lo_bg"]),
+                "Убыточный":          (cls.C["loss"],       cls.C["loss_bg"]),
             }
 
             for ci, hdr in enumerate(col_hdrs, 2):
-                cell = ws_dash.cell(row=status_header_row + 1, column=ci, value=hdr)
-                cell.font = cls._font(bold=True, color="FFFFFF", size=9)
-                cell.fill = cls._fill(cls.C["blue"])
+                cell = ws_dash.cell(
+                    row=status_header_row + 1,
+                    column=ci, value=hdr
+                )
+                cell.font      = cls._font(bold=True, color="FFFFFF", size=9)
+                cell.fill      = cls._fill(cls.C["blue"])
                 cell.alignment = cls._align(h="center")
-                cell.border = thin_border()
+                cell.border    = thin_border()
 
             for ri, row_data in enumerate(status_summary.itertuples(), 2):
                 fg, bg = STATUS_COLORS.get(row_data.Статус, ("000000", "FFFFFF"))
                 row_idx = status_header_row + ri
-                values = [row_data.Статус, row_data.SKU, row_data.Прибыль, row_data.Маржа_avg / 100 if row_data.Маржа_avg else 0]
+
+                values = [
+                    row_data.Статус,
+                    row_data.SKU,
+                    row_data.Прибыль,
+                    row_data.Маржа_avg / 100 if row_data.Маржа_avg else 0,
+                ]
                 fmts = [None, "#,##0", "#,##0.00 ₽", "0.0%"]
 
                 for ci, (val, fmt2) in enumerate(zip(values, fmts), 2):
-                    cell = ws_dash.cell(row=row_idx, column=ci, value=val)
-                    cell.fill = cls._fill(bg)
-                    cell.font = Font(name="Calibri", bold=(ci == 2), color=fg, size=10)
-                    cell.alignment = cls._align(h="center" if ci > 2 else "left")
-                    cell.border = thin_border()
+                    cell = ws_dash.cell(
+                        row=row_idx, column=ci, value=val
+                    )
+                    cell.fill      = cls._fill(bg)
+                    cell.font      = Font(
+                        name="Calibri", bold=(ci == 2),
+                        color=fg, size=10
+                    )
+                    cell.alignment = cls._align(
+                        h="center" if ci > 2 else "left"
+                    )
+                    cell.border    = thin_border()
                     if fmt2:
                         cell.number_format = fmt2
 
         if "profitability_status" in df.columns:
             try:
                 pc = PieChart()
-                pc.title = "Структура по статусам"
-                pc.width = 14
+                pc.title  = "Структура по статусам"
+                pc.width  = 14
                 pc.height = 10
+
                 status_counts = df["profitability_status"].value_counts()
                 hidden_start = 20
-                ws_dash.cell(row=hidden_start, column=17, value="Статус")
-                ws_dash.cell(row=hidden_start, column=18, value="Кол-во")
+                ws_dash.cell(row=hidden_start,     column=17, value="Статус")
+                ws_dash.cell(row=hidden_start,     column=18, value="Кол-во")
                 for i, (st_name, cnt) in enumerate(status_counts.items(), 1):
                     ws_dash.cell(row=hidden_start + i, column=17, value=st_name)
                     ws_dash.cell(row=hidden_start + i, column=18, value=int(cnt))
 
-                data_ref = Reference(ws_dash, min_col=18, min_row=hidden_start, max_row=hidden_start + len(status_counts))
-                labels_ref = Reference(ws_dash, min_col=17, min_row=hidden_start + 1, max_row=hidden_start + len(status_counts))
+                data_ref   = Reference(ws_dash,
+                                       min_col=18,
+                                       min_row=hidden_start,
+                                       max_row=hidden_start + len(status_counts))
+                labels_ref = Reference(ws_dash,
+                                       min_col=17,
+                                       min_row=hidden_start + 1,
+                                       max_row=hidden_start + len(status_counts))
                 pc.add_data(data_ref, titles_from_data=True)
                 pc.set_categories(labels_ref)
                 dl = DataLabelList()
                 dl.showPercent = True
                 dl.showVal = False
                 pc.dataLabels = dl
+
                 ws_dash.add_chart(pc, "H11")
             except Exception as chart_err:
                 logger.warning(f"PieChart: {chart_err}")
 
+        # ════════════════════════════════════════════════════════════════════
         # ② ДЕТАЛЬНЫЙ РАСЧЁТ
+        # ════════════════════════════════════════════════════════════════════
         ws_det = wb.create_sheet("📋 Детальный расчёт")
         ws_det.sheet_view.showGridLines = False
         ws_det.freeze_panes = "C2"
 
         COLUMN_GROUPS: List[Tuple[str, List[str], str]] = [
-            ("🏷️ Товар", ["artikul", "category"], cls.C["navy"]),
-            ("💰 Цены", ["selling_price", "cogs"], cls.C["blue"]),
-            ("📦 Затраты МП", ["commission", "delivery_to_customer", "middle_mile_cost", "sorting_cost", "acquiring_cost"], "366092"),
-            ("🔄 Возвраты", ["return_cost"], "7F6000"),
-            ("🏭 Опер. затраты", ["pick_pack_cost", "packaging_cost", "first_mile_cost", "marketing_budget_per_unit", "warehouse_cost"], "375623"),
-            ("💸 Налоги", ["tax_cost", "total_expenses"], "595959"),
-            ("📈 Финрезультат", ["gross_profit", "margin_percent", "roi_percent", "break_even_units"], cls.C["green"]),
-            ("🎯 Рекомендации", ["rec_price_min", "rec_price_15", "rec_price_25"], "833C00"),
-            ("📊 ABC/XYZ", ["daily_sales", "abc_category", "xyz_category", "abc_xyz", "profitability_status"], "1F4E79"),
-            ("🔍 Аудит", ["source", "scheme"], cls.C["mid_gray"]),
+            ("🏷️ Товар",         ["artikul", "category"],                   cls.C["navy"]),
+            ("💰 Цены",          ["selling_price", "cogs"],                 cls.C["blue"]),
+            ("📦 Затраты МП",    ["commission", "delivery_to_customer",
+                                   "middle_mile_cost", "sorting_cost",
+                                   "acquiring_cost"],                       "366092"),
+            ("🔄 Возвраты",      ["return_cost"],                           "7F6000"),
+            ("🏭 Опер. затраты", ["pick_pack_cost", "packaging_cost",
+                                   "first_mile_cost", "marketing_budget_per_unit",
+                                   "warehouse_cost"],                       "375623"),
+            ("💸 Налоги",        ["tax_cost", "total_expenses"],            "595959"),
+            ("📈 Финрезультат",  ["gross_profit", "margin_percent",
+                                   "roi_percent",
+                                   "break_even_units"],                     cls.C["green"]),
+            ("🎯 Рекомендации",  ["rec_price_min", "rec_price_15",
+                                   "rec_price_25"],                         "833C00"),
+            ("📊 ABC/XYZ",       ["daily_sales", "abc_category",
+                                   "xyz_category", "abc_xyz",
+                                   "profitability_status"],                 "1F4E79"),
         ]
 
         COL_DISPLAY_NAMES: Dict[str, str] = {
-            "artikul": "Артикул", "category": "Категория", "selling_price": "Цена продажи", "cogs": "Себестоимость",
-            "commission": "Комиссия МП", "delivery_to_customer": "Доставка покупателю", "middle_mile_cost": "Магистраль",
-            "sorting_cost": "Сортировка", "acquiring_cost": "Эквайринг", "return_cost": "Затраты на возврат",
-            "pick_pack_cost": "Пик/Пак", "packaging_cost": "Упаковка", "first_mile_cost": "Первая миля",
-            "marketing_budget_per_unit": "Маркетинг / ед.", "warehouse_cost": "Хранение", "tax_cost": "Налоги",
-            "total_expenses": "Итого затраты", "gross_profit": "Прибыль", "margin_percent": "Маржа, %",
-            "roi_percent": "ROI, %", "break_even_units": "Точка безубыт., шт.", "rec_price_min": "Цена 0% маржа",
-            "rec_price_15": "Цена 15% маржа", "rec_price_25": "Цена 25% маржа", "daily_sales": "Продажи / день",
-            "abc_category": "ABC", "xyz_category": "XYZ", "abc_xyz": "ABC·XYZ", "profitability_status": "Статус",
-            "source": "Источник тарифа", "scheme": "Схема"
+            "artikul":                    "Артикул",
+            "category":                   "Категория",
+            "selling_price":              "Цена продажи",
+            "cogs":                       "Себестоимость",
+            "commission":                 "Комиссия МП",
+            "delivery_to_customer":       "Доставка покупателю",
+            "middle_mile_cost":           "Магистраль",
+            "sorting_cost":               "Сортировка",
+            "acquiring_cost":             "Эквайринг",
+            "return_cost":                "Затраты на возврат",
+            "pick_pack_cost":             "Пик/Пак",
+            "packaging_cost":             "Упаковка",
+            "first_mile_cost":            "Первая миля",
+            "marketing_budget_per_unit":  "Маркетинг / ед.",
+            "warehouse_cost":             "Хранение",
+            "tax_cost":                   "Налоги",
+            "total_expenses":             "Итого затраты",
+            "gross_profit":               "Прибыль",
+            "margin_percent":             "Маржа, %",
+            "roi_percent":                "ROI, %",
+            "break_even_units":           "Точка безубыт., шт.",
+            "rec_price_min":              "Цена 0% маржа",
+            "rec_price_15":               "Цена 15% маржа",
+            "rec_price_25":               "Цена 25% маржа",
+            "daily_sales":                "Продажи / день",
+            "abc_category":               "ABC",
+            "xyz_category":               "XYZ",
+            "abc_xyz":                    "ABC·XYZ",
+            "profitability_status":       "Статус",
         }
 
         COL_FORMATS: Dict[str, str] = {
-            "selling_price": cls.FMT_MONEY, "cogs": cls.FMT_MONEY, "commission": cls.FMT_MONEY,
-            "delivery_to_customer": cls.FMT_MONEY, "middle_mile_cost": cls.FMT_MONEY, "sorting_cost": cls.FMT_MONEY,
-            "acquiring_cost": cls.FMT_MONEY, "return_cost": cls.FMT_MONEY, "pick_pack_cost": cls.FMT_MONEY,
-            "packaging_cost": cls.FMT_MONEY, "first_mile_cost": cls.FMT_MONEY, "marketing_budget_per_unit": cls.FMT_MONEY,
-            "warehouse_cost": cls.FMT_MONEY, "tax_cost": cls.FMT_MONEY, "total_expenses": cls.FMT_MONEY,
-            "gross_profit": cls.FMT_MONEY, "margin_percent": "0.00", "roi_percent": "0.00",
-            "break_even_units": "#,##0.0", "rec_price_min": cls.FMT_MONEY, "rec_price_15": cls.FMT_MONEY,
-            "rec_price_25": cls.FMT_MONEY, "daily_sales": "#,##0",
+            "selling_price":              cls.FMT_MONEY,
+            "cogs":                       cls.FMT_MONEY,
+            "commission":                 cls.FMT_MONEY,
+            "delivery_to_customer":       cls.FMT_MONEY,
+            "middle_mile_cost":           cls.FMT_MONEY,
+            "sorting_cost":               cls.FMT_MONEY,
+            "acquiring_cost":             cls.FMT_MONEY,
+            "return_cost":                cls.FMT_MONEY,
+            "pick_pack_cost":             cls.FMT_MONEY,
+            "packaging_cost":             cls.FMT_MONEY,
+            "first_mile_cost":            cls.FMT_MONEY,
+            "marketing_budget_per_unit":  cls.FMT_MONEY,
+            "warehouse_cost":             cls.FMT_MONEY,
+            "tax_cost":                   cls.FMT_MONEY,
+            "total_expenses":             cls.FMT_MONEY,
+            "gross_profit":               cls.FMT_MONEY,
+            "margin_percent":             "0.00",
+            "roi_percent":                "0.00",
+            "break_even_units":           "#,##0.0",
+            "rec_price_min":              cls.FMT_MONEY,
+            "rec_price_15":               cls.FMT_MONEY,
+            "rec_price_25":               cls.FMT_MONEY,
+            "daily_sales":                "#,##0",
         }
 
         ordered_cols: List[str] = []
@@ -1627,6 +1752,7 @@ class UltimateExcelExporter:
             for c in cols:
                 if c in df.columns and c not in ordered_cols:
                     ordered_cols.append(c)
+
         for c in df.columns:
             if c not in ordered_cols:
                 ordered_cols.append(c)
@@ -1643,56 +1769,96 @@ class UltimateExcelExporter:
             end_col = current_col + span - 1
 
             if span > 1:
-                ws_det.merge_cells(start_row=group_row, start_column=current_col, end_row=group_row, end_column=end_col)
-            cell = ws_det.cell(row=group_row, column=current_col, value=group_name)
-            cell.fill = cls._fill(group_color)
-            cell.font = cls._font(bold=True, color="FFFFFF", size=9)
+                ws_det.merge_cells(
+                    start_row=group_row, start_column=current_col,
+                    end_row=group_row,   end_column=end_col
+                )
+            cell = ws_det.cell(row=group_row, column=current_col,
+                               value=group_name)
+            cell.fill      = cls._fill(group_color)
+            cell.font      = cls._font(bold=True, color="FFFFFF", size=9)
             cell.alignment = cls._align(h="center")
-            cell.border = thick_border_bottom()
+            cell.border    = thick_border_bottom()
+
             current_col = end_col + 1
 
         ws_det.row_dimensions[group_row].height = 22
 
         header_row = 2
         for ci, col in enumerate(df_export.columns, 1):
-            cell = ws_det.cell(row=header_row, column=ci, value=COL_DISPLAY_NAMES.get(col, col))
-            cell.fill = cls._fill(cls.C["navy"])
-            cell.font = cls._font(bold=True, color="FFFFFF", size=9)
+            cell = ws_det.cell(
+                row=header_row, column=ci,
+                value=COL_DISPLAY_NAMES.get(col, col)
+            )
+            cell.fill      = cls._fill(cls.C["navy"])
+            cell.font      = cls._font(bold=True, color="FFFFFF", size=9)
             cell.alignment = cls._align(h="center", wrap=True)
-            cell.border = thin_border()
+            cell.border    = thin_border()
+
         ws_det.row_dimensions[header_row].height = 32
 
         STATUS_BG_MAP = {
-            "Высокомаржинальный": cls.C["profit_hi_bg"], "Низкомаржинальный": cls.C["profit_lo_bg"], "Убыточный": cls.C["loss_bg"],
+            "Высокомаржинальный": cls.C["profit_hi_bg"],
+            "Низкомаржинальный":  cls.C["profit_lo_bg"],
+            "Убыточный":          cls.C["loss_bg"],
         }
         STATUS_FG_MAP = {
-            "Высокомаржинальный": cls.C["profit_hi"], "Низкомаржинальный": cls.C["profit_lo"], "Убыточный": cls.C["loss"],
+            "Высокомаржинальный": cls.C["profit_hi"],
+            "Низкомаржинальный":  cls.C["profit_lo"],
+            "Убыточный":          cls.C["loss"],
         }
         ABC_BG_MAP = {
-            "A": cls.C["abc_a"], "B": cls.C["abc_b"], "C": cls.C["abc_c"],
-            "AX": cls.C["profit_hi_bg"], "AY": cls.C["lime"], "AZ": cls.C["yellow"],
-            "BX": cls.C["sky"], "BY": cls.C["sky"], "BZ": cls.C["yellow"],
-            "CX": cls.C["gray"], "CY": cls.C["orange"], "CZ": cls.C["loss_bg"],
+            "A":  cls.C["abc_a"],
+            "B":  cls.C["abc_b"],
+            "C":  cls.C["abc_c"],
+            "AX": cls.C["profit_hi_bg"],
+            "AY": cls.C["lime"],
+            "AZ": cls.C["yellow"],
+            "BX": cls.C["sky"],
+            "BY": cls.C["sky"],
+            "BZ": cls.C["yellow"],
+            "CX": cls.C["gray"],
+            "CY": cls.C["orange"],
+            "CZ": cls.C["loss_bg"],
         }
 
         data_start_row = 3
         n_rows = len(df_export)
         n_cols = len(df_export.columns)
 
-        margin_col_idx = col_name_list.index("margin_percent") + 1 if "margin_percent" in (col_name_list := list(df_export.columns)) else None
-        profit_col_idx = col_name_list.index("gross_profit") + 1 if "gross_profit" in col_name_list else None
+        status_col_idx:  Optional[int] = None
+        margin_col_idx:  Optional[int] = None
+        profit_col_idx:  Optional[int] = None
+        abc_col_idx:     Optional[int] = None
+        abcxyz_col_idx:  Optional[int] = None
+
+        col_name_list = list(df_export.columns)
+        if "profitability_status" in col_name_list:
+            status_col_idx = col_name_list.index("profitability_status") + 1
+        if "margin_percent" in col_name_list:
+            margin_col_idx = col_name_list.index("margin_percent") + 1
+        if "gross_profit" in col_name_list:
+            profit_col_idx = col_name_list.index("gross_profit") + 1
+        if "abc_category" in col_name_list:
+            abc_col_idx    = col_name_list.index("abc_category") + 1
+        if "abc_xyz" in col_name_list:
+            abcxyz_col_idx = col_name_list.index("abc_xyz") + 1
 
         for ri, (_, row_data) in enumerate(df_export.iterrows()):
-            r_idx = data_start_row + ri
-            zebra = cls.C["gray"] if ri % 2 == 0 else cls.C["white"]
+            r_idx  = data_start_row + ri
+            zebra  = cls.C["gray"] if ri % 2 == 0 else cls.C["white"]
             status = str(row_data.get("profitability_status", ""))
+
             row_bg = STATUS_BG_MAP.get(status, zebra)
 
             for ci, col in enumerate(col_name_list, 1):
-                val = row_data[col]
+                val  = row_data[col]
                 cell = ws_det.cell(row=r_idx, column=ci, value=val)
-                cell.border = thin_border()
-                cell.alignment = cls._align(h="right" if col in COL_FORMATS else "left", v="center")
+                cell.border    = thin_border()
+                cell.alignment = cls._align(
+                    h="right" if col in COL_FORMATS else "left",
+                    v="center"
+                )
 
                 if col in COL_FORMATS:
                     cell.fill = cls._fill(row_bg)
@@ -1702,12 +1868,29 @@ class UltimateExcelExporter:
                     else:
                         cell.font = cls._font(size=10)
                 elif col == "profitability_status":
-                    cell.fill = cls._fill(STATUS_BG_MAP.get(status, cls.C["white"]))
-                    cell.font = Font(name="Calibri", bold=True, size=9, color=STATUS_FG_MAP.get(status, "000000"))
+                    cell.fill = cls._fill(
+                        STATUS_BG_MAP.get(status, cls.C["white"])
+                    )
+                    cell.font = Font(
+                        name="Calibri", bold=True, size=9,
+                        color=STATUS_FG_MAP.get(status, "000000")
+                    )
                     cell.alignment = cls._align(h="center")
-                elif col in ("abc_category", "abc_xyz"):
-                    cell.fill = cls._fill(ABC_BG_MAP.get(str(val), cls.C["white"]))
-                    cell.font = cls._font(bold=True, color="FFFFFF" if str(val) in ("A", "B") else "000000", size=10)
+                elif col in ("abc_category",):
+                    cell.fill = cls._fill(
+                        ABC_BG_MAP.get(str(val), cls.C["white"])
+                    )
+                    cell.font = cls._font(
+                        bold=True, color="FFFFFF"
+                        if str(val) in ("A", "B") else "000000",
+                        size=10
+                    )
+                    cell.alignment = cls._align(h="center")
+                elif col == "abc_xyz":
+                    cell.fill = cls._fill(
+                        ABC_BG_MAP.get(str(val), cls.C["white"])
+                    )
+                    cell.font = cls._font(bold=True, size=10)
                     cell.alignment = cls._align(h="center")
                 else:
                     cell.fill = cls._fill(zebra)
@@ -1715,18 +1898,29 @@ class UltimateExcelExporter:
 
         if margin_col_idx:
             m_col_letter = get_column_letter(margin_col_idx)
-            m_range = f"{m_col_letter}{data_start_row}:{m_col_letter}{data_start_row + n_rows - 1}"
+            m_range      = (f"{m_col_letter}{data_start_row}:"
+                            f"{m_col_letter}{data_start_row + n_rows - 1}")
+
             try:
-                db_rule = DataBarRule(start_type="num", start_value=-50, end_type="num", end_value=50, color=cls.C["blue"])
+                db_rule = DataBarRule(
+                    start_type="num", start_value=-50,
+                    end_type="num",   end_value=50,
+                    color=cls.C["blue"]
+                )
                 ws_det.conditional_formatting.add(m_range, db_rule)
             except Exception:
                 pass
 
         if profit_col_idx:
             p_col_letter = get_column_letter(profit_col_idx)
-            p_range = f"{p_col_letter}{data_start_row}:{p_col_letter}{data_start_row + n_rows - 1}"
+            p_range      = (f"{p_col_letter}{data_start_row}:"
+                            f"{p_col_letter}{data_start_row + n_rows - 1}")
             try:
-                cs_rule = ColorScaleRule(start_type="min", start_color="FFC7CE", mid_type="num", mid_value=0, mid_color="FFEB9C", end_type="max", end_color="C6EFCE")
+                cs_rule = ColorScaleRule(
+                    start_type="min",  start_color="FFC7CE",
+                    mid_type="num",    mid_value=0, mid_color="FFEB9C",
+                    end_type="max",    end_color="C6EFCE",
+                )
                 ws_det.conditional_formatting.add(p_range, cs_rule)
             except Exception:
                 pass
@@ -1735,21 +1929,38 @@ class UltimateExcelExporter:
         for ci, col in enumerate(col_name_list, 1):
             col_letter = get_column_letter(ci)
             sample_vals = df_export[col].astype(str).str.len()
-            best_len = max(len(COL_DISPLAY_NAMES.get(col, col)), sample_vals.quantile(0.95) if not sample_vals.empty else 0)
-            ws_det.column_dimensions[col_letter].width = min(max(float(best_len) + 2, MIN_WIDTH), MAX_WIDTH)
+            best_len = max(
+                len(COL_DISPLAY_NAMES.get(col, col)),
+                sample_vals.quantile(0.95) if not sample_vals.empty else 0
+            )
+            ws_det.column_dimensions[col_letter].width = min(
+                max(best_len + 2, MIN_WIDTH), MAX_WIDTH
+            )
 
-        table_ref = f"A{header_row}:{get_column_letter(n_cols)}{data_start_row + n_rows - 1}"
+        table_ref = (
+            f"A{header_row}:"
+            f"{get_column_letter(n_cols)}{data_start_row + n_rows - 1}"
+        )
         try:
             tab = Table(displayName="UnitEconomics", ref=table_ref)
-            tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True, showFirstColumn=False, showLastColumn=False)
+            tab.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium2",
+                showRowStripes=True,
+                showFirstColumn=False,
+                showLastColumn=False,
+            )
             ws_det.add_table(tab)
         except Exception as te:
             logger.warning(f"Table add error: {te}")
+
         ws_det.row_dimensions[1].height = 6
 
+        # ════════════════════════════════════════════════════════════════════
         # ③ ЛИСТ РЕКОМЕНДАЦИЙ
+        # ════════════════════════════════════════════════════════════════════
         ws_rec = wb.create_sheet("💡 Рекомендации")
         ws_rec.sheet_view.showGridLines = False
+
         ws_rec.merge_cells("A1:G1")
         h = ws_rec["A1"]
         h.value = "💡 ЦЕНОВЫЕ РЕКОМЕНДАЦИИ И СТАТУС SKU"
@@ -1758,44 +1969,68 @@ class UltimateExcelExporter:
         h.alignment = cls._align(h="center")
         ws_rec.row_dimensions[1].height = 32
 
-        rec_cols = ["artikul", "category", "selling_price", "cogs", "gross_profit", "margin_percent", "rec_price_min", "rec_price_15", "rec_price_25", "profitability_status"]
+        rec_cols = ["artikul", "category", "selling_price", "cogs",
+                    "gross_profit", "margin_percent",
+                    "rec_price_min", "rec_price_15", "rec_price_25",
+                    "profitability_status"]
         rec_cols = [c for c in rec_cols if c in df.columns]
-        df_rec = df[rec_cols].copy()
+        df_rec   = df[rec_cols].copy()
 
         REC_HEADER_NAMES = {
-            "artikul": "Артикул", "category": "Категория", "selling_price": "Цена продажи", "cogs": "Себестоимость",
-            "gross_profit": "Прибыль / ед.", "margin_percent": "Маржа, %", "rec_price_min": "▶ Цена 0%",
-            "rec_price_15": "▶ Цена 15%", "rec_price_25": "▶ Цена 25%", "profitability_status": "Статус",
+            "artikul":            "Артикул",
+            "category":           "Категория",
+            "selling_price":      "Цена продажи",
+            "cogs":               "Себестоимость",
+            "gross_profit":       "Прибыль / ед.",
+            "margin_percent":     "Маржа, %",
+            "rec_price_min":      "▶ Цена 0%",
+            "rec_price_15":       "▶ Цена 15%",
+            "rec_price_25":       "▶ Цена 25%",
+            "profitability_status": "Статус",
         }
         REC_FMTS = {
-            "selling_price": cls.FMT_MONEY, "cogs": cls.FMT_MONEY, "gross_profit": cls.FMT_MONEY,
-            "margin_percent": "0.00", "rec_price_min": cls.FMT_MONEY, "rec_price_15": cls.FMT_MONEY, "rec_price_25": cls.FMT_MONEY,
+            "selling_price":  cls.FMT_MONEY,
+            "cogs":           cls.FMT_MONEY,
+            "gross_profit":   cls.FMT_MONEY,
+            "margin_percent": "0.00",
+            "rec_price_min":  cls.FMT_MONEY,
+            "rec_price_15":   cls.FMT_MONEY,
+            "rec_price_25":   cls.FMT_MONEY,
         }
 
         hdr_row = 2
         for ci, col in enumerate(rec_cols, 1):
-            cell = ws_rec.cell(row=hdr_row, column=ci, value=REC_HEADER_NAMES.get(col, col))
-            cell.fill = cls._fill(cls.C["blue"])
-            cell.font = cls._font(bold=True, color="FFFFFF", size=9)
+            cell = ws_rec.cell(row=hdr_row, column=ci,
+                               value=REC_HEADER_NAMES.get(col, col))
+            cell.fill      = cls._fill(cls.C["blue"])
+            cell.font      = cls._font(bold=True, color="FFFFFF", size=9)
             cell.alignment = cls._align(h="center", wrap=True)
-            cell.border = thin_border()
+            cell.border    = thin_border()
         ws_rec.row_dimensions[hdr_row].height = 30
 
         for ri, (_, row_data) in enumerate(df_rec.iterrows()):
-            r_idx = hdr_row + 1 + ri
+            r_idx  = hdr_row + 1 + ri
             status = str(row_data.get("profitability_status", ""))
-            zebra = cls.C["gray"] if ri % 2 == 0 else cls.C["white"]
+            zebra  = cls.C["gray"] if ri % 2 == 0 else cls.C["white"]
 
             for ci, col in enumerate(rec_cols, 1):
-                val = row_data[col]
+                val  = row_data[col]
                 cell = ws_rec.cell(row=r_idx, column=ci, value=val)
-                cell.border = thin_border()
-                cell.alignment = cls._align(h="right" if col in REC_FMTS else "center" if col == "profitability_status" else "left")
+                cell.border    = thin_border()
+                cell.alignment = cls._align(
+                    h="right" if col in REC_FMTS else "center"
+                    if col == "profitability_status" else "left"
+                )
                 if col in REC_FMTS:
                     cell.number_format = REC_FMTS[col]
                 if col == "profitability_status":
-                    cell.fill = cls._fill(STATUS_BG_MAP.get(status, cls.C["white"]))
-                    cell.font = Font(name="Calibri", bold=True, size=9, color=STATUS_FG_MAP.get(status, "000000"))
+                    cell.fill = cls._fill(
+                        STATUS_BG_MAP.get(status, cls.C["white"])
+                    )
+                    cell.font = Font(
+                        name="Calibri", bold=True, size=9,
+                        color=STATUS_FG_MAP.get(status, "000000")
+                    )
                 elif col in ("rec_price_min", "rec_price_15", "rec_price_25"):
                     cell.fill = cls._fill(cls.C["sky"])
                     cell.font = cls._font(bold=True, color=cls.C["navy"])
@@ -1805,98 +2040,138 @@ class UltimateExcelExporter:
 
         for ci, col in enumerate(rec_cols, 1):
             cl = get_column_letter(ci)
-            ws_rec.column_dimensions[cl].width = min(max(len(REC_HEADER_NAMES.get(col, col)) + 2, df_rec[col].astype(str).str.len().quantile(0.9) + 2 if not df_rec.empty else 10), 30)
+            ws_rec.column_dimensions[cl].width = min(
+                max(
+                    len(REC_HEADER_NAMES.get(col, col)) + 2,
+                    df_rec[col].astype(str).str.len().quantile(0.9) + 2
+                    if not df_rec.empty else 10
+                ),
+                30
+            )
+
         ws_rec.freeze_panes = "C3"
 
+        # ════════════════════════════════════════════════════════════════════
         # ④ ABC/XYZ МАТРИЦА
+        # ════════════════════════════════════════════════════════════════════
         ws_abc = wb.create_sheet("🔢 ABC·XYZ матрица")
         ws_abc.sheet_view.showGridLines = False
+
         ws_abc.merge_cells("A1:D1")
         t = ws_abc["A1"]
         t.value = "🔢 ABC·XYZ МАТРИЦА ПОРТФЕЛЯ"
-        t.font = cls._font(bold=True, color="FFFFFF", size=14)
-        t.fill = cls._fill(cls.C["navy"])
+        t.font  = cls._font(bold=True, color="FFFFFF", size=14)
+        t.fill  = cls._fill(cls.C["navy"])
         t.alignment = cls._align(h="center")
         ws_abc.row_dimensions[1].height = 32
 
         if "abc_xyz" in df.columns:
             matrix_data = (
                 df.groupby("abc_xyz", observed=True)
-                  .agg(SKU=("artikul", "count"), Прибыль=("gross_profit", "sum") if "gross_profit" in df.columns else ("artikul", "count"), Маржа=("margin_percent", "mean") if "margin_percent" in df.columns else ("artikul", "count"))
-                  .reset_index().sort_values("abc_xyz")
+                  .agg(
+                      SKU=("artikul",       "count"),
+                      Прибыль=("gross_profit",   "sum") if "gross_profit" in df.columns else ("artikul", "count"),
+                      Маржа=("margin_percent","mean")  if "margin_percent" in df.columns else ("artikul", "count"),
+                  )
+                  .reset_index()
+                  .sort_values("abc_xyz")
             )
+
             mat_hdrs = ["Сегмент", "SKU, шт.", "Сум. прибыль, ₽", "Ср. маржа, %"]
             for ci, hdr in enumerate(mat_hdrs, 1):
                 c = ws_abc.cell(row=2, column=ci, value=hdr)
-                c.fill = cls._fill(cls.C["blue"])
-                c.font = cls._font(bold=True, color="FFFFFF", size=10)
+                c.fill      = cls._fill(cls.C["blue"])
+                c.font      = cls._font(bold=True, color="FFFFFF", size=10)
                 c.alignment = cls._align(h="center")
-                c.border = thin_border()
+                c.border    = thin_border()
             ws_abc.row_dimensions[2].height = 26
 
             for ri, row_data in enumerate(matrix_data.itertuples(), 3):
                 seg = row_data.abc_xyz
                 seg_bg = ABC_BG_MAP.get(seg, cls.C["white"])
+
                 cells_data = [
-                    (seg, None, "center"),
-                    (row_data.SKU, "#,##0", "center"),
+                    (seg,            None,       "center"),
+                    (row_data.SKU,   "#,##0",    "center"),
                     (row_data.Прибыль, cls.FMT_MONEY, "right"),
                     (row_data.Маржа / 100 if row_data.Маржа else 0, "0.0%", "right"),
                 ]
                 for ci, (val, fmt2, h_align) in enumerate(cells_data, 1):
                     c = ws_abc.cell(row=ri, column=ci, value=val)
-                    c.fill = cls._fill(seg_bg)
-                    c.font = cls._font(bold=(ci == 1), size=10, color=cls.C["navy"] if ci == 1 else "000000")
+                    c.fill      = cls._fill(seg_bg)
+                    c.font      = cls._font(
+                        bold=(ci == 1), size=10,
+                        color=cls.C["navy"] if ci == 1 else "000000"
+                    )
                     c.alignment = cls._align(h=h_align)
-                    c.border = thin_border()
+                    c.border    = thin_border()
                     if fmt2:
                         c.number_format = fmt2
+
             for col_letter, width in zip("ABCD", [14, 12, 22, 16]):
                 ws_abc.column_dimensions[col_letter].width = width
 
+        # ════════════════════════════════════════════════════════════════════
         # ⑤ ПАРАМЕТРЫ РАСЧЁТА
+        # ════════════════════════════════════════════════════════════════════
         ws_par = wb.create_sheet("⚙️ Параметры")
         ws_par.sheet_view.showGridLines = False
+
         ws_par.merge_cells("A1:C1")
         p_title = ws_par["A1"]
         p_title.value = "⚙️ ПАРАМЕТРЫ РАСЧЁТА"
-        p_title.font = cls._font(bold=True, color="FFFFFF", size=13)
-        p_title.fill = cls._fill(cls.C["navy"])
+        p_title.font  = cls._font(bold=True, color="FFFFFF", size=13)
+        p_title.fill  = cls._fill(cls.C["navy"])
         p_title.alignment = cls._align(h="center")
         ws_par.row_dimensions[1].height = 28
 
         params_list = [
-            ("Версия приложения", APP_VERSION),
-            ("Дата формирования", datetime.now().strftime("%d.%m.%Y %H:%M:%S")),
+            ("Версия приложения",       APP_VERSION),
+            ("Дата формирования",       datetime.now().strftime("%d.%m.%Y %H:%M:%S")),
             ("Система налогообложения", tax_label),
-            ("Схема работы", scheme_label),
-            ("Частота выплат", payment_frequency),
-            ("Всего SKU", len(df)),
-            ("Прибыльных SKU", int((df["gross_profit"] > 0).sum()) if "gross_profit" in df.columns else "—"),
-            ("Убыточных SKU", int((df["gross_profit"] < 0).sum()) if "gross_profit" in df.columns else "—"),
-            ("Средняя маржа", f"{df['margin_percent'].mean():.2f}%" if "margin_percent" in df.columns else "—"),
+            ("Схема работы",            scheme_label),
+            ("Частота выплат",          payment_frequency),
+            ("Всего SKU",               len(df)),
+            ("Прибыльных SKU",          int((df["gross_profit"] > 0).sum())
+             if "gross_profit" in df.columns else "—"),
+            ("Убыточных SKU",           int((df["gross_profit"] < 0).sum())
+             if "gross_profit" in df.columns else "—"),
+            ("Средняя маржа",           f"{df['margin_percent'].mean():.2f}%"
+             if "margin_percent" in df.columns else "—"),
         ]
+
         for ri, (param, val) in enumerate(params_list, 2):
             bg = cls.C["sky"] if ri % 2 == 0 else cls.C["white"]
+
             p_cell = ws_par.cell(row=ri, column=1, value=param)
-            p_cell.font = cls._font(bold=True, size=10)
-            p_cell.fill = cls._fill(bg)
+            p_cell.font      = cls._font(bold=True, size=10)
+            p_cell.fill      = cls._fill(bg)
             p_cell.alignment = cls._align(h="left")
-            p_cell.border = thin_border()
+            p_cell.border    = thin_border()
+
             v_cell = ws_par.cell(row=ri, column=2, value=val)
-            v_cell.font = cls._font(size=10)
-            v_cell.fill = cls._fill(bg)
+            v_cell.font      = cls._font(size=10)
+            v_cell.fill      = cls._fill(bg)
             v_cell.alignment = cls._align(h="left")
-            v_cell.border = thin_border()
+            v_cell.border    = thin_border()
+
         ws_par.column_dimensions["A"].width = 30
         ws_par.column_dimensions["B"].width = 40
 
-        # ⑥ ДОПОЛНИТЕЛЬНЫЕ ЛИСТЫ
+        # ════════════════════════════════════════════════════════════════════
+        # ⑥ ДОПОЛНИТЕЛЬНЫЕ ЛИСТЫ (анализ чувствительности, прогноз)
+        # ════════════════════════════════════════════════════════════════════
         if include_advanced:
             cls.add_sensitivity_analysis(wb, df)
             cls.add_forecast(wb, df)
 
-        sheet_order = ["📊 Дашборд", "📋 Детальный расчёт", "💡 Рекомендации", "🔢 ABC·XYZ матрица", "⚙️ Параметры"]
+        sheet_order = [
+            "📊 Дашборд",
+            "📋 Детальный расчёт",
+            "💡 Рекомендации",
+            "🔢 ABC·XYZ матрица",
+            "⚙️ Параметры"
+        ]
         if include_advanced:
             sheet_order.extend(["🎯 Анализ чувствительности", "📈 Прогноз"])
 
@@ -1909,18 +2184,15 @@ class UltimateExcelExporter:
         output.seek(0)
         return output.getvalue()
 
+    # ── Дополнительные методы для расширенного экспорта ──────────────────
     @classmethod
     def add_sensitivity_analysis(cls, wb: Workbook, df: pd.DataFrame):
-        """
-        ИСПРАВЛЕННАЯ ВЕРСИЯ: Пересчитывает P&L математически корректно, 
-        а не линейно масштабирует проценты, что давало ложные результаты.
-        """
         ws = wb.create_sheet("🎯 Анализ чувствительности")
         ws.sheet_view.showGridLines = False
         
         ws.merge_cells("A1:E1")
         title = ws["A1"]
-        title.value = "🎯 АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ (реальный пересчет P&L)"
+        title.value = "🎯 АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ (изменение маржи при изменении цены и комиссии)"
         title.font = cls._font(bold=True, color="FFFFFF", size=14)
         title.fill = cls._fill(cls.C["navy"])
         title.alignment = cls._align(h="center")
@@ -1938,43 +2210,20 @@ class UltimateExcelExporter:
         price_changes = [-20, -10, 0, 10, 20]
         commission_changes = [-5, -2, 0, 2, 5]
         
-        # Базовые постоянные издержки для пересчета
-        base_fixed = (df['cogs'] + df['first_mile_cost'] + df['pick_pack_cost'] + 
-                      df['packaging_cost'] + df['marketing_budget_per_unit'] + df['warehouse_cost'])
-        acq_rate = df['acquiring_transfer_rate'].values if 'acquiring_transfer_rate' in df.columns else np.full(len(df), 0.016)
-        acq_sku = df['acquiring_sku_cost'].values if 'acquiring_sku_cost' in df.columns else np.full(len(df), 0.12)
-        
         row = 3
         for pc in price_changes:
             for cc in commission_changes:
-                # 1. Новая цена
-                new_price = df['selling_price'].values * (1 + pc / 100)
-                
-                # 2. Пересчет комиссии (зависит от цены) + дельта комиссии в п.п.
-                new_comm_rate = np.maximum(0, df['commission_rate'].values + (cc / 100))
-                new_commission = np.maximum(new_price * new_comm_rate, df['min_commission'].values)
-                
-                # 3. Пересчет эквайринга (зависит от цены)
-                new_acquiring = acq_sku + (new_price * acq_rate)
-                
-                # 4. Новые полные затраты
-                new_total_expenses = (base_fixed.values + new_commission + df['delivery_to_customer'].values + 
-                                      df['middle_mile_cost'].values + df['sorting_cost'].values + 
-                                      new_acquiring + df['return_cost'].values)
-                
-                # 5. Новая прибыль и маржа
-                new_gross_profit = new_price - new_total_expenses
-                new_margin = np.where(new_price > 0, (new_gross_profit / new_price) * 100, 0.0)
-                
-                avg_margin = float(np.mean(new_margin))
-                profit_cnt = int(np.sum(new_gross_profit > 0))
-                loss_cnt = int(np.sum(new_gross_profit <= 0))
+                new_margin = df['margin_percent'] * (1 + pc/100) - cc
+                new_profit = (df['gross_profit'] * (1 + pc/100) - df['selling_price'] * (cc/100))
+                avg_margin = new_margin.mean()
+                profit_cnt = (new_profit > 0).sum()
+                loss_cnt = (new_profit <= 0).sum()
                 
                 ws.cell(row=row, column=1, value=pc)
                 ws.cell(row=row, column=2, value=cc)
                 ws.cell(row=row, column=3, value=avg_margin / 100)
-                ws.cell(row=row, column=4, value=profit_cnt)
-                ws.cell(row=row, column=5, value=loss_cnt)
+                ws.cell(row=row, column=4, value=int(profit_cnt))
+                ws.cell(row=row, column=5, value=int(loss_cnt))
                 
                 ws.cell(row=row, column=3).number_format = "0.0%"
                 ws.cell(row=row, column=4).number_format = "#,##0"
@@ -2024,8 +2273,8 @@ class UltimateExcelExporter:
             ("Прогноз прибыли, ₽", None)
         ]
         
-        base_profit = float(df['gross_profit'].mean()) if 'gross_profit' in df.columns else 0.0
-        base_margin = float(df['margin_percent'].mean()) if 'margin_percent' in df.columns else 0.0
+        base_profit = df['gross_profit'].mean() if 'gross_profit' in df.columns else 0
+        base_margin = df['margin_percent'].mean() if 'margin_percent' in df.columns else 0
         
         row = 3
         for ind, values in indicators:
@@ -2043,7 +2292,7 @@ class UltimateExcelExporter:
                     cell.alignment = cls._align(h="center")
             elif ind == "Средняя маржа, %":
                 for ci in range(2, 14):
-                    val = (base_margin / 100) * (1 + 0.01 * (ci-1))
+                    val = base_margin / 100 * (1 + 0.01 * (ci-1))
                     cell = ws.cell(row=row, column=ci, value=val)
                     cell.number_format = "0.0%"
                     cell.fill = cls._fill(cls.C["gray"] if ci % 2 == 0 else cls.C["white"])
@@ -2051,6 +2300,7 @@ class UltimateExcelExporter:
                     cell.alignment = cls._align(h="center")
             else:
                 growth_row = 3
+                profit_row = row
                 for ci in range(2, 14):
                     growth = ws.cell(row=growth_row, column=ci).value or 1.0
                     margin_factor = 1 + 0.01 * (ci-1)
@@ -2138,7 +2388,9 @@ class UniversalDataNormalizer:
         for col in cls.NUMERIC_COLS:
             if col in norm_df.columns:
                 norm_df[col] = pd.to_numeric(
-                    norm_df[col].astype(str).str.replace(r'[\s,;%₽]', '', regex=True),
+                    norm_df[col].astype(str).str.replace(
+                        r'[\s,;%₽]', '', regex=True
+                    ),
                     errors='coerce'
                 ).fillna(0.0).abs()
         norm_df['artikul'] = norm_df['artikul'].astype(str).str.strip()
@@ -2146,17 +2398,31 @@ class UniversalDataNormalizer:
         return norm_df.drop_duplicates(subset=['artikul'], keep='first')
     
     @classmethod
-    def load_file(cls, file_buffer: io.BytesIO, file_name: str) -> pd.DataFrame:
+    def load_file(
+        cls,
+        file_buffer: io.BytesIO,
+        file_name: str
+    ) -> pd.DataFrame:
         try:
             if file_name.endswith('.csv'):
-                return pd.read_csv(file_buffer, sep=None, engine='python', encoding='utf-8', encoding_errors='replace')
+                return pd.read_csv(
+                    file_buffer,
+                    sep=None,
+                    engine='python',
+                    encoding='utf-8'
+                )
             elif file_name.endswith(('.xls', '.xlsx')):
                 return pd.read_excel(file_buffer)
             else:
                 raise ValueError("Неподдерживаемый формат файла")
         except UnicodeDecodeError:
             file_buffer.seek(0)
-            return pd.read_csv(file_buffer, sep=None, engine='python', encoding='cp1251', encoding_errors='replace')
+            return pd.read_csv(
+                file_buffer,
+                sep=None,
+                engine='python',
+                encoding='cp1251'
+            )
 
 # ============================================================================
 # ИНТЕГРАЦИЯ С ЯНДЕКС.ДИРЕКТ (заготовка)
@@ -2166,11 +2432,18 @@ class YandexDirectIntegration:
         self.api_token = api_token
         self.base_url = "https://api.direct.yandex.com/v5"
     
-    def get_campaign_stats(self, date_from: str, date_to: str) -> pd.DataFrame:
+    def get_campaign_stats(
+        self,
+        date_from: str,
+        date_to: str
+    ) -> pd.DataFrame:
         logger.warning("Метод get_campaign_stats не реализован")
         return pd.DataFrame()
     
-    def get_drr_by_category(self, category: str) -> float:
+    def get_drr_by_category(
+        self,
+        category: str
+    ) -> float:
         logger.warning("Метод get_drr_by_category не реализован")
         return 0.0
 
@@ -2193,7 +2466,12 @@ class GoogleSheetsExporter:
         except Exception as e:
             logger.error(f"Ошибка инициализации Google Sheets: {e}")
     
-    def export(self, df: pd.DataFrame, spreadsheet_id: str, sheet_name: str = "Unit Economics") -> None:
+    def export(
+        self,
+        df: pd.DataFrame,
+        spreadsheet_id: str,
+        sheet_name: str = "Unit Economics"
+    ) -> None:
         if self.service is None:
             logger.error("Сервис Google Sheets не доступен")
             return
@@ -2261,7 +2539,8 @@ class DataPipeline:
                 calc_df = ParallelProcessor.process_in_parallel(
                     validated_df,
                     calc_func,
-                    chunk_size=self.chunk_size
+                    chunk_size=self.chunk_size,
+                    use_processes=False
                 )
             else:
                 calc_df = calc_func(validated_df)
@@ -2368,7 +2647,9 @@ def render_upload_section() -> Tuple[Optional[pd.DataFrame], HybridTariffManager
                         st.warning(err)
                 main_df = validated_df
                 st.session_state.main_df = validated_df
-                st.success(f"Загружено {len(validated_df)} уникальных SKU")
+                st.success(
+                    f"Загружено {len(validated_df)} уникальных SKU"
+                )
             except Exception as e:
                 st.error(f"Ошибка чтения файла: {e}")
     with col2:
@@ -2386,7 +2667,9 @@ def render_upload_section() -> Tuple[Optional[pd.DataFrame], HybridTariffManager
                 )
                 t_raw.columns = [str(c).strip().lower() for c in t_raw.columns]
                 tariff_manager.load_tariffs_from_file(t_raw)
-                st.success(f"Загружено {len(tariff_manager.tariffs)} тарифов")
+                st.success(
+                    f"Загружено {len(tariff_manager.tariffs)} тарифов"
+                )
             except Exception as e:
                 st.error(f"Ошибка тарифов: {e}")
     return main_df, tariff_manager
@@ -2395,24 +2678,42 @@ def render_results(df_calc: pd.DataFrame) -> None:
     st.subheader("3. Результаты расчёта")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Всего SKU", len(df_calc))
-    c2.metric("Средняя маржа, %", f"{df_calc['margin_percent'].mean():.1f}%")
-    c3.metric("Убыточных SKU", len(df_calc[df_calc['gross_profit'] < 0]))
-    c4.metric("Высокомаржинальных", len(df_calc[df_calc['profitability_status'] == 'Высокомаржинальный']))
+    c2.metric(
+        "Средняя маржа, %",
+        f"{df_calc['margin_percent'].mean():.1f}%"
+    )
+    c3.metric(
+        "Убыточных SKU",
+        len(df_calc[df_calc['gross_profit'] < 0])
+    )
+    c4.metric(
+        "Высокомаржинальных",
+        len(df_calc[df_calc['profitability_status'] == 'Высокомаржинальный'])
+    )
     status_filter = st.multiselect(
         "Фильтр по статусу",
         options=df_calc['profitability_status'].unique(),
         default=df_calc['profitability_status'].unique()
     )
-    filtered_df = df_calc[df_calc['profitability_status'].isin(status_filter)]
+    filtered_df = df_calc[
+        df_calc['profitability_status'].isin(status_filter)
+    ]
     display_cols = [
         'artikul', 'category', 'selling_price', 'cogs',
         'gross_profit', 'margin_percent', 'roi_percent',
-        'profitability_status', 'source', 'scheme'
+        'profitability_status'
     ]
-    st.dataframe(filtered_df[display_cols], use_container_width=True, height=400)
+    st.dataframe(
+        filtered_df[display_cols],
+        use_container_width=True,
+        height=400
+    )
     return filtered_df
 
-def render_export_section(filtered_df: pd.DataFrame, pipeline: DataPipeline) -> None:
+def render_export_section(
+    filtered_df: pd.DataFrame,
+    pipeline: DataPipeline
+) -> None:
     st.subheader("4. Экспорт")
     include_advanced = st.checkbox("Включить расширенные листы (анализ чувствительности, прогноз)", value=True)
     excel_data = UltimateExcelExporter.export_max_info(
@@ -2430,7 +2731,9 @@ def render_export_section(filtered_df: pd.DataFrame, pipeline: DataPipeline) -> 
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.warning("Не удалось сформировать Excel. Проверьте установку openpyxl.")
+        st.warning(
+            "Не удалось сформировать Excel. Проверьте установку openpyxl."
+        )
 
 def render_google_sheets_export(df: pd.DataFrame) -> None:
     st.subheader("5. Экспорт в Google Sheets")
@@ -2446,30 +2749,25 @@ def render_google_sheets_export(df: pd.DataFrame) -> None:
         )
         sheet_name = st.text_input("Название листа", value="Unit Economics")
         if st.button("📤 Экспортировать в Google Sheets") and sheets_url and credentials_file:
-            tmp_path = None
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as tmp:
+                tmp.write(credentials_file.getvalue())
+                tmp_path = tmp.name
             try:
                 match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheets_url)
                 if not match:
                     st.error("Не удалось распознать ID таблицы. Проверьте ссылку.")
                     return
                 spreadsheet_id = match.group(1)
-                
-                # Безопасное создание временного файла с гарантированной очисткой
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.json', mode='w', encoding='utf-8') as tmp:
-                    tmp.write(credentials_file.getvalue().decode('utf-8'))
-                    tmp_path = tmp.name
-                
                 exporter = GoogleSheetsExporter(tmp_path)
                 exporter.export(df, spreadsheet_id, sheet_name)
                 st.success(f"✅ Данные успешно экспортированы в таблицу: {sheets_url}")
             except Exception as e:
                 st.error(f"❌ Ошибка экспорта: {e}")
             finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception as cleanup_err:
-                        logger.error(f"Не удалось удалить временный файл: {cleanup_err}")
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
 
 # ============================================================================
 # ГЛАВНАЯ ФУНКЦИЯ
