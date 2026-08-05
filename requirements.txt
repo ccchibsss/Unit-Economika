@@ -1,55 +1,7 @@
-# === CORE (Без этого приложение не запустится) ===
-streamlit
-pandas
-numpy
-polars
 duckdb
+polars
+fastexcel
+pandas
+streamlit
 openpyxl
 xlsxwriter
-psutil
-chardet
-requests
-
-# === CRITICAL FOR HIGH-VOLUME & EXCEL (Специфические движки) ===
-fastexcel
-xlrd
-
-# === ML, ANALYTICS & VISUALIZATION ===
-scikit-learn
-joblib
-plotly
-matplotlib
-seaborn
-reportlab
-tabulate
-
-# === DATA UTILS & VALIDATION ===
-Pillow
-pytz
-python-dateutil
-holidays
-phonenumbers
-validators
-pycountry
-tzlocal
-pyarrow
-pandera
-Babel
-
-# === ALTERNATIVE ENGINES (Могут вызывать конфликты, ставьте по необходимости) ===
-altair
-bokeh
-ray
-modin
-
-# === AI & API INTEGRATIONS ===
-openai
-anthropic
-tiktoken
-aiohttp
-aiofiles
-httpx
-websockets
-
-# === MISC ===
-retry
