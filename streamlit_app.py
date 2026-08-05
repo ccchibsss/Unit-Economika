@@ -38,7 +38,7 @@ import os
 import sys
 import re
 import tempfile
-import contextlib  # ДОБАВЛЕНО: исправление ошибки отсутствия импорта
+import contextlib  # ДОБАВЛЕНО: исправление ошибки отсутствия импорта для nullcontext
 
 # Дополнительные импорты
 import requests
@@ -1736,4 +1736,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
