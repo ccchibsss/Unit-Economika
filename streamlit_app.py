@@ -181,7 +181,12 @@ CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@700;800&display=swap');
 html, body, [class*="css"] { font-family: Inter, sans-serif; }
-.block-container { max-width: 1420px; padding-top: 1rem; }
+body { background: linear-gradient(180deg,#f8fafc 0%,#eef2ff 46%,#f8fafc 100%); }
+.stApp { background:
+  radial-gradient(circle at 8% 0%, rgba(99,102,241,.13), transparent 26rem),
+  radial-gradient(circle at 92% 8%, rgba(249,115,22,.12), transparent 28rem),
+  linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%); }
+.block-container { max-width: 1480px; padding-top: 1rem; padding-bottom: 3rem; }
 .hero {
   background: linear-gradient(135deg,#020617 0%,#172554 36%,#4338ca 70%,#f97316 130%);
   color: white; border-radius: 24px; padding: 24px 26px; position: relative; overflow: hidden;
@@ -193,7 +198,9 @@ html, body, [class*="css"] { font-family: Inter, sans-serif; }
 .hero p { color:#c7d2fe; margin:.35rem 0 0; position:relative; }
 .badge { display:inline-flex; align-items:center; gap:.35rem; padding:.25rem .65rem; border-radius:999px;
   background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); color:#eef2ff; font-size:.75rem; font-weight:700; }
-.card { background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:18px; box-shadow:0 8px 26px rgba(15,23,42,.05); }
+.card { background:rgba(255,255,255,.92); border:1px solid rgba(226,232,240,.95); border-radius:20px; padding:18px; box-shadow:0 8px 26px rgba(15,23,42,.06); backdrop-filter: blur(8px); }
+.card-accent { position:relative; overflow:hidden; }
+.card-accent:before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:linear-gradient(90deg,#4f46e5,#06b6d4,#f97316); }
 .metric-card { background:white; border:1px solid #e2e8f0; border-radius:18px; padding:16px; position:relative; overflow:hidden; min-height:112px; }
 .metric-card:before { content:""; position:absolute; left:0; right:0; top:0; height:4px; }
 .mc-indigo:before{ background:linear-gradient(90deg,#4f46e5,#8b5cf6); }
@@ -204,6 +211,15 @@ html, body, [class*="css"] { font-family: Inter, sans-serif; }
 .small { color:#64748b; font-size:.78rem; font-weight:600; }
 .section-title { font-family:Manrope,sans-serif; font-weight:800; font-size:1.15rem; margin:.25rem 0 .65rem; color:#0f172a; }
 .muted { color:#64748b; font-size:.84rem; }
+.sample-grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; margin: 10px 0 16px; }
+.sample-card { border:1px solid #e2e8f0; border-radius:18px; padding:14px; background:linear-gradient(180deg,#fff,#f8fafc); box-shadow:0 8px 20px rgba(15,23,42,.05); }
+.sample-card strong { display:block; font-family:Manrope,sans-serif; font-size:.98rem; color:#0f172a; }
+.sample-card span { display:block; margin-top:4px; font-size:.78rem; color:#64748b; line-height:1.35; }
+.pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px; font-size:.74rem; font-weight:800; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; }
+.soft-callout { border:1px solid #c7d2fe; background:linear-gradient(135deg,#eef2ff,#fff7ed); color:#334155; border-radius:18px; padding:14px 16px; }
+.download-zone { border:1px dashed #a5b4fc; border-radius:18px; padding:14px; background:rgba(238,242,255,.55); }
+@media (max-width: 900px) { .sample-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .sample-grid { grid-template-columns: 1fr; } }
 .stButton button { border-radius: 12px !important; font-weight: 700 !important; }
 div[data-testid="stMetricValue"] { font-size: 1.45rem; }
 </style>
@@ -383,6 +399,20 @@ def build_demo_rows(count: int = 24, with_cost: bool = True) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def demo_csv_bytes(count: int = 24, with_cost: bool = True) -> bytes:
+    """Готовый CSV с пробными данными для скачивания пользователем."""
+    df = build_demo_rows(count=count, with_cost=with_cost)
+    if not with_cost and "Себестоимость" in df.columns:
+        df = df.drop(columns=["Себестоимость"])
+    return df.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
+
+
+def demo_preview_df() -> pd.DataFrame:
+    return build_demo_rows(12, with_cost=True)[
+        ["Артикул", "Бренд", "Категория", "Длина", "Ширина", "Высота", "Цена", "Себестоимость", "Вес_кг"]
+    ]
 
 
 def parse_dataframe(df_raw: pd.DataFrame, file_name: str, file_size: int) -> Tuple[pd.DataFrame, Dict[str, Any]]:
@@ -1097,6 +1127,36 @@ def stepper() -> None:
                 st.rerun()
 
 
+def sidebar_status() -> None:
+    with st.sidebar:
+        st.markdown("### 🚗 FBS Unit Lab")
+        st.caption("Монолит Streamlit · локальные расчеты")
+        st.divider()
+        if st.session_state.df_calc is not None:
+            df = st.session_state.df_calc
+            total = totals_row(df)
+            st.metric("SKU в проекте", f"{len(df):,}".replace(",", " "))
+            st.metric("Выручка", money_short(total["revenue"]))
+            st.metric("Маржа", pct(total["avg_margin"]))
+            if st.session_state.last_calc_seconds is not None:
+                st.caption(f"Последний расчет: {st.session_state.last_calc_seconds:.1f} сек")
+        else:
+            st.info("Данные еще не загружены")
+        st.divider()
+        st.markdown("#### ⚙️ Быстрые параметры")
+        st.write(f"Целевая маржа: **{pct(st.session_state.target_margin)}**")
+        st.write(f"Наценка: **{pct(st.session_state.markup_rate)}**")
+        st.write(f"Себестоимость по умолчанию: **{pct(st.session_state.tariff['cost_fallback'])}**")
+        st.divider()
+        saved = sorted(SAVE_DIR.glob("fbs_project_*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        st.markdown("#### 💾 Сохраненные проекты")
+        if saved:
+            for p in saved[:5]:
+                st.caption(p.name)
+        else:
+            st.caption("Пока нет сохранений")
+
+
 def metric_card(title: str, value: str, subtitle: str, tone: str) -> None:
     st.markdown(
         f"""
@@ -1117,6 +1177,7 @@ st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="🚗")
 st.markdown(CSS, unsafe_allow_html=True)
 ensure_state()
 hero()
+sidebar_status()
 st.write("")
 stepper()
 st.divider()
@@ -1260,11 +1321,32 @@ if st.session_state.step == 0:
 # ШАГ 1. ДАННЫЕ
 # -----------------------------------------------------------------------------
 elif st.session_state.step == 1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card card-accent">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">📦 Загрузка каталога</div>', unsafe_allow_html=True)
     st.caption("Минимально: Артикул, Категория, Цена. Рекомендуется: Бренд, Длина, Ширина, Высота. Себестоимость и вес необязательны.")
     uploaded = st.file_uploader("CSV / XLSX / XLS / TXT", type=["csv", "xlsx", "xls", "txt", "tsv"])
     st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+<div class="soft-callout">
+  <b>Пробные данные возвращены и встроены в монолит.</b><br>
+  Можно загрузить пример сразу в приложение или скачать CSV и проверить импорт как с реальным файлом.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+<div class="sample-grid">
+  <div class="sample-card"><strong>🎲 24 SKU</strong><span>Быстрый пример для проверки интерфейса, графиков и Excel.</span></div>
+  <div class="sample-card"><strong>⚡ 50 000 SKU</strong><span>Нагрузочный пример для проверки скорости расчета.</span></div>
+  <div class="sample-card"><strong>🚀 300 000 SKU</strong><span>Большой каталог для проверки экспорта и фильтров.</span></div>
+  <div class="sample-card"><strong>📄 CSV-демо</strong><span>Скачайте файл с себестоимостью или без нее.</span></div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     c1, c2, c3, c4, c5 = st.columns(5)
     template = "Артикул;Бренд;Категория;Длина;Ширина;Высота;Цена;Себестоимость;Вес_кг;Оборачиваемость_дней\nMAN-FLT-000001;Mann-Filter;Фильтры;22;14;14;450;220;0,5;25\nMIC-TR-000002;Michelin;Шины;70;70;26;5400;3650;10,5;15\nVAR-BAT-000003;Varta;Аккумуляторы;35;26;26;6500;;16,5;30\n"
@@ -1290,6 +1372,32 @@ elif st.session_state.step == 1:
     if c5.button("💾 Сохранить", use_container_width=True, disabled=st.session_state.df_calc is None):
         path = save_current_project()
         st.success(f"Сохранено: {path.name}")
+
+    d1, d2, d3 = st.columns(3)
+    d1.download_button(
+        "⬇️ Скачать демо 24 SKU с себестоимостью",
+        data=demo_csv_bytes(24, with_cost=True),
+        file_name="demo_fbs_24_with_cost.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    d2.download_button(
+        "⬇️ Скачать демо 24 SKU без себестоимости",
+        data=demo_csv_bytes(24, with_cost=False),
+        file_name="demo_fbs_24_without_cost.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    d3.download_button(
+        "⬇️ Скачать демо 1000 SKU",
+        data=demo_csv_bytes(1000, with_cost=True),
+        file_name="demo_fbs_1000.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    with st.expander("👀 Предпросмотр пробных данных", expanded=False):
+        st.dataframe(demo_preview_df(), use_container_width=True, hide_index=True)
 
     saved = sorted(SAVE_DIR.glob("fbs_project_*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
     if saved:
