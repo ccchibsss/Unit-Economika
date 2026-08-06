@@ -1657,6 +1657,9 @@ def configure_excel_formats(workbook: Any) -> Dict[str, Any]:
         "amber_light": workbook.add_format({"bg_color": "#FFFBEB", "font_color": "#92400E", "border": 1}),
         "blue": workbook.add_format({"bg_color": "#DBEAFE", "font_color": "#1E40AF", "bold": True, "border": 1}),
         "band": workbook.add_format({"bg_color": "#F8FAFC", "border": 1, "border_color": "#E2E8F0"}),
+        "orange": workbook.add_format({"bg_color": "#FFEDD5", "font_color": "#C2410C", "bold": True, "border": 1}),
+        "yellow_edit": workbook.add_format({"bg_color": "#FEF3C7", "font_color": "#92400E", "bold": True, "border": 2, "border_color": "#F59E0B", "num_format": "0.00"}),
+        "yellow_pct": workbook.add_format({"bg_color": "#FEF3C7", "font_color": "#92400E", "bold": True, "border": 2, "border_color": "#F59E0B", "num_format": "0.0%"}),
     }
 
 
@@ -1827,6 +1830,7 @@ def export_values_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
 
         margin_col = RESULT_COLUMNS.index("Маржа_%")
         profit_col = RESULT_COLUMNS.index("Прибыль")
+        payout_col = RESULT_COLUMNS.index("Выплата_селлеру") if "Выплата_селлеру" in RESULT_COLUMNS else -1
         rec_col = RESULT_COLUMNS.index("Рекомендованная_цена") if "Рекомендованная_цена" in RESULT_COLUMNS else -1
         price_col = RESULT_COLUMNS.index("Цена") if "Цена" in RESULT_COLUMNS else -1
         markup_profit_col = RESULT_COLUMNS.index("Прибыль_с_наценкой") if "Прибыль_с_наценкой" in RESULT_COLUMNS else -1
@@ -1850,15 +1854,51 @@ def export_values_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
             ws.conditional_format(1, markup_margin_col, len(export_df), markup_margin_col, {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]})
         if abc_col >= 0:
             ws.conditional_format(1, abc_col, len(export_df), abc_col, {"type": "cell", "criteria": "equal to", "value": '"A"', "format": formats["green"]})
-            ws.conditional_format(1, abc_col, len(export_df), abc_col, {"type": "cell", "criteria": "equal to", "value": '"C"', "format": formats["amber_light"]})
-            # Текстовая рекомендация (если есть столбец Рекомендация)
+            ws.conditional_format(1, abc_col, len(export_df), abc_col, {"type": "cell", "criteria": "equal to", "value": '"B"', "format": formats["amber_light"]})
+            ws.conditional_format(1, abc_col, len(export_df), abc_col, {"type": "cell", "criteria": "equal to", "value": '"C"', "format": formats["band"]})
+            # Набор значков "3 звезды" для ABC
+            try:
+                ws.conditional_format(1, abc_col, len(export_df), abc_col, {"type": "icon_set", "icon_type": "3_stars", "icon_criteria": [{"criteria": ">=", "type": "percent", "value": 80}, {"criteria": ">=", "type": "percent", "value": 50}]})
+            except Exception:
+                pass
+            # Текстовая рекомендация (если есть столбец Рекомендация) + светофор
             try:
                 rec_text_col = RESULT_COLUMNS.index("Рекомендация") if "Рекомендация" in RESULT_COLUMNS else -1
                 if rec_text_col >= 0:
                     ws.conditional_format(1, rec_text_col, len(export_df), rec_text_col, {"type": "text", "criteria": "containing", "value": "Поднять", "format": formats["red"]})
+                    ws.conditional_format(1, rec_text_col, len(export_df), rec_text_col, {"type": "text", "criteria": "containing", "value": "Критично", "format": formats["amber"]})
                     ws.conditional_format(1, rec_text_col, len(export_df), rec_text_col, {"type": "text", "criteria": "containing", "value": "ОК", "format": formats["green"]})
+                    ws.conditional_format(1, rec_text_col, len(export_df), rec_text_col, {"type": "icon_set", "icon_type": "3_traffic_lights", "icon_criteria": [{"criteria": ">=", "type": "percent", "value": 67}, {"criteria": ">=", "type": "percent", "value": 33}]})
             except Exception:
                 pass
+
+        # ── Гистограммы (dataBar) — длина полосы = величина ──
+        try:
+            if payout_col >= 0:
+                ws.conditional_format(1, payout_col, len(export_df), payout_col, {"type": "data_bar", "bar_color": "#10B981", "min_type": "min", "max_type": "max"})
+            if profit_col >= 0:
+                ws.conditional_format(1, profit_col, len(export_df), profit_col, {"type": "data_bar", "bar_color": "#F59E0B", "min_type": "min", "max_type": "max"})
+            ws.conditional_format(1, RESULT_COLUMNS.index("Логистика_руб"), len(export_df), RESULT_COLUMNS.index("Логистика_руб"), {"type": "data_bar", "bar_color": "#0EA5E9", "min_type": "min", "max_type": "max"})
+            ws.conditional_format(1, RESULT_COLUMNS.index("Хранение_руб"), len(export_df), RESULT_COLUMNS.index("Хранение_руб"), {"type": "data_bar", "bar_color": "#8B5CF6", "min_type": "min", "max_type": "max"})
+        except Exception:
+            pass
+        # ── Цветовые шкалы ──
+        try:
+            ws.conditional_format(1, RESULT_COLUMNS.index("Итого_расходы"), len(export_df), RESULT_COLUMNS.index("Итого_расходы"), {"type": "3_color_scale", "min_color": "#6EE7B7", "mid_color": "#FEF3C7", "max_color": "#FCA5A5", "min_type": "min", "mid_type": "percentile", "mid_value": 50, "max_type": "max"})
+            ws.conditional_format(1, margin_col, len(export_df), margin_col, {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_type": "min", "mid_type": "num", "mid_value": 0.1, "max_type": "max"})
+            ws.conditional_format(1, RESULT_COLUMNS.index("Комиссия_руб"), len(export_df), RESULT_COLUMNS.index("Комиссия_руб"), {"type": "2_color_scale", "min_color": "#FEF3C7", "max_color": "#F59E0B", "min_type": "min", "max_type": "max"})
+            if payout_col >= 0:
+                ws.conditional_format(1, payout_col, len(export_df), payout_col, {"type": "3_color_scale", "min_color": "#FCA5A5", "mid_color": "#FEF3C7", "max_color": "#6EE7B7", "min_type": "min", "mid_type": "percentile", "mid_value": 50, "max_type": "max"})
+        except Exception:
+            pass
+        # ── Зелёная подсветка прибыли ≥ 0 и янтарный уровень маржи+наценки ──
+        try:
+            if profit_col >= 0:
+                ws.conditional_format(1, profit_col, len(export_df), profit_col, {"type": "cell", "criteria": ">=", "value": 0, "format": formats["green_light"]})
+            if markup_margin_col >= 0:
+                ws.conditional_format(1, markup_margin_col, len(export_df), markup_margin_col, {"type": "cell", "criteria": "between", "minimum": 0.05, "maximum": 0.15, "format": formats["amber"]})
+        except Exception:
+            pass
 
         # Compact totals sheet.
         ws_total = workbook.add_worksheet("Итоги")
@@ -1944,8 +1984,8 @@ def export_values_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
         raise
 
 
-def _export_formula_excel_legacy_do_not_use(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
-    """Legacy version kept only for comparison. Do not call."""
+def export_formula_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
+    """Workbook with live formulas. Limited to 50,000 rows by the UI."""
     path = temporary_path(".xlsx")
     try:
         input_columns = [
@@ -1962,12 +2002,53 @@ def _export_formula_excel_legacy_do_not_use(df: pd.DataFrame, settings: Dict[str
             workbook = writer.book
             formats = configure_excel_formats(workbook)
 
+            # Лист "Тариф": заголовок в строках 0-1, данные с строки 2 (B2 = комиссия … B19 = целевая маржа)
             tariffs = tariff_table(settings)
-            tariffs.to_excel(writer, sheet_name="Тариф", index=False)
-            ws_t = writer.sheets["Тариф"]
-            write_dataframe_header(ws_t, tariffs, formats["header"])
+            ws_t = workbook.add_worksheet("Тариф")
             ws_t.set_column("A:A", 40)
-            ws_t.set_column("B:C", 18)
+            ws_t.set_column("B:B", 20)
+            ws_t.set_column("C:C", 42)
+            ws_t.write(0, 0, "ПАРАМЕТРЫ РАСЧЁТА — ЯНДЕКС МАРКЕТ FBS", formats["title"])
+            ws_t.write_row(1, 0, ["ПАРАМЕТР", "ЗНАЧЕНИЕ", "ПОДСКАЗКА"], formats["header"])
+            t_hints = [
+                "% от цены продажи по категории", "₽ — нижняя граница комиссии",
+                "₽ фикс за заказ", "₽ за кг оплачиваемого веса", "₽ за литр в сутки",
+                "% за приём оплаты", "% резерв на возвраты", "₽ за единицу",
+                "₽ код маркировки", "₽ стикеровка", "% гарантийный резерв",
+                "% надбавка опасный", "% надбавка хрупкий", "% от цены, если нет в файле",
+                "кг/л для оценки веса", "none / markup / targetMargin",
+                "★ жёлтая — меняйте, книга пересчитается", "★ жёлтая — меняйте, книга пересчитается",
+            ]
+            for i, (_idx, label, value, _unit) in enumerate(tariffs.itertuples()):
+                r = i + 2
+                is_pct = _unit in ("доля", "доля от цены")
+                fmt_c = formats["percent"] if is_pct else formats["money"]
+                if label in ("Режим ценообразования",):
+                    fmt_c = None
+                is_editable = str(label).startswith("Наценка") or str(label).startswith("Целевая")
+                yellow = formats.get("yellow_pct") if str(label).startswith("Целевая") else formats.get("yellow_edit")
+                base_row_fmt = formats["band"] if i % 2 == 0 else None
+                is_num = isinstance(value, (int, float))
+                if is_editable and yellow:
+                    ws_t.write(r, 0, label, yellow)
+                    if is_num:
+                        ws_t.write_number(r, 1, float(value), yellow)
+                    else:
+                        ws_t.write(r, 1, value, yellow)
+                    ws_t.write(r, 2, t_hints[i] if i < len(t_hints) else "", yellow)
+                else:
+                    ws_t.write(r, 0, label, base_row_fmt)
+                    if is_num and fmt_c:
+                        ws_t.write_number(r, 1, float(value), fmt_c)
+                    else:
+                        ws_t.write(r, 1, value)
+                    ws_t.write(r, 2, t_hints[i] if i < len(t_hints) else "", base_row_fmt)
+            try:
+                ws_t.conditional_format(2, 1, 19, 1, {"type": "data_bar", "bar_color": "#6366F1", "min_type": "min", "max_type": "max"})
+                ws_t.conditional_format(2, 1, 7, 1, {"type": "3_color_scale", "min_color": "#FEE2E2", "mid_color": "#FEF3C7", "max_color": "#DCFCE7", "min_type": "min", "mid_type": "percentile", "mid_value": 50, "max_type": "max"})
+            except Exception:
+                pass
+            ws_t.freeze_panes(2, 0)
 
             input_df.to_excel(writer, sheet_name="Входные_Данные", index=False)
             ws_in = writer.sheets["Входные_Данные"]
@@ -1990,10 +2071,11 @@ def _export_formula_excel_legacy_do_not_use(df: pd.DataFrame, settings: Dict[str
             ws_calc.write_row(1, 0, ["","","","","","★ безубыток+1%","★ живая формула","","","","","","","","","","","","","","","★ услов. формат"], formats["amber_light"])
             for idx, row in enumerate(df.itertuples(index=False), start=2):
                 excel_row = idx + 1
-                source_row = idx
+                source_row = idx + 1
                 # Рекомендованная цена — безубыток +1%
-                rec_formula = f"=ROUND((E{excel_row}+'Тариф'!$B$4+'Входные_Данные'!J{source_row}*'Тариф'!$B$5+'Входные_Данные'!H{source_row}*'Тариф'!$B$6*'Входные_Данные'!S{source_row}+'Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11)/(1-('Тариф'!$B$2+'Тариф'!$B$7+'Тариф'!$B$12+IF('Входные_Данные'!M{source_row},'Тариф'!$B$13,0)+IF('Входные_Данные'!N{source_row},'Тариф'!$B$14,0)))*1.01,2)"
-                price_markup_formula = f"=IF('Тариф'!$B$17=\"markup\",D{excel_row}*(1+'Тариф'!$B$18/100),IF('Тариф'!$B$17=\"targetMargin\",(E{excel_row}+'Тариф'!$B$4+'Входные_Данные'!J{source_row}*'Тариф'!$B$5+'Входные_Данные'!H{source_row}*'Тариф'!$B$6*'Входные_Данные'!S{source_row}+'Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11)/(1-('Тариф'!$B$2+'Тариф'!$B$7+'Тариф'!$B$12+IF('Входные_Данные'!M{source_row},'Тариф'!$B$13,0)+IF('Входные_Данные'!N{source_row},'Тариф'!$B$14,0)+'Тариф'!$B$19),D{excel_row}))"
+                # Безубыток: (Себест + ЛогБаза + Вес×ставка + Объём×хран×дни + Упаковка) / (1 − комиссия − эквайринг − возвраты − резервы) ×1.01
+                rec_formula = f"=ROUND((E{excel_row}+'Тариф'!$B$4+'Входные_Данные'!J{source_row}*'Тариф'!$B$5+'Входные_Данные'!H{source_row}*'Тариф'!$B$6*'Входные_Данные'!S{source_row}+'Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11)/(1-('Тариф'!$B$2+'Тариф'!$B$7+'Тариф'!$B$8+'Тариф'!$B$12+IF('Входные_Данные'!M{source_row},'Тариф'!$B$13,0)+IF('Входные_Данные'!N{source_row},'Тариф'!$B$14,0)))*1.01,2)"
+                price_markup_formula = f"=IF('Тариф'!$B$17=\"markup\",D{excel_row}*(1+'Тариф'!$B$18/100),IF('Тариф'!$B$17=\"targetMargin\",(E{excel_row}+'Тариф'!$B$4+'Входные_Данные'!J{source_row}*'Тариф'!$B$5+'Входные_Данные'!H{source_row}*'Тариф'!$B$6*'Входные_Данные'!S{source_row}+'Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11)/(1-('Тариф'!$B$2+'Тариф'!$B$7+'Тариф'!$B$8+'Тариф'!$B$12+IF('Входные_Данные'!M{source_row},'Тариф'!$B$13,0)+IF('Входные_Данные'!N{source_row},'Тариф'!$B$14,0)+'Тариф'!$B$19),D{excel_row}))"
                 ws_calc.write_formula(idx, 0, f"='Входные_Данные'!A{source_row}", None, row.Артикул)
                 ws_calc.write_formula(idx, 1, f"='Входные_Данные'!B{source_row}", None, row.Бренд)
                 ws_calc.write_formula(idx, 2, f"='Входные_Данные'!C{source_row}", None, row.Категория)
@@ -2007,23 +2089,27 @@ def _export_formula_excel_legacy_do_not_use(df: pd.DataFrame, settings: Dict[str
                 ws_calc.write_formula(idx, 10, f"=G{excel_row}*'Тариф'!$B$7", formats["money"], row.Эквайринг_руб)
                 ws_calc.write_formula(idx, 11, f"=G{excel_row}*'Тариф'!$B$8", formats["money"], row.Возвраты_руб)
                 ws_calc.write_formula(idx, 12, f"='Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11+G{excel_row}*'Тариф'!$B$12+IF('Входные_Данные'!M{source_row},G{excel_row}*'Тариф'!$B$13,0)+IF('Входные_Данные'!N{source_row},G{excel_row}*'Тариф'!$B$14,0)", formats["money"], row.Спец_расходы_FBS)
-                ws_calc.write_formula(idx, 13, f"=SUM(E{excel_row}:M{excel_row})", formats["money"], row.Итого_расходы)
-                ws_calc.write_formula(idx, 14, f"=G{excel_row}-N{excel_row}", formats["money"], float(row.Прибыль_с_наценкой) if "Прибыль_с_наценкой" in df.columns else float(row.Прибыль))
-                # Безопасное получение маржи через DataFrame (надёжнее из-за спецсимволов)
+                # N(13) Итого расходы = Себест + все сборы; O(14) Прибыль = Цена − Итого;
+                # P(15) Маржа = Прибыль/Цена; Q(16) Прибыль+нац = ЦенаНаценки − Итого; R(17) Маржа+нац
+                val_profit = float(df["Прибыль"].iat[idx-2])
+                val_margin = float(df["Маржа_%"].iat[idx-2])
                 try:
-                    val_q = float(df["Маржа_с_наценкой_%"].iat[idx-2])
+                    val_profit_m = float(df["Прибыль_с_наценкой"].iat[idx-2])
+                    val_margin_m = float(df["Маржа_с_наценкой_%"].iat[idx-2])
                 except Exception:
-                    val_q = float(df["Маржа_%"].iat[idx-2])
-                ws_calc.write_formula(idx, 15, f"=IF(G{excel_row}>0,O{excel_row}/G{excel_row},0)", formats["percent"], val_q)
-                ws_calc.write_formula(idx, 16, f"=G{excel_row}-N{excel_row}", formats["money"], float(df["Прибыль_с_наценкой"].iat[idx-2]))
-                ws_calc.write_formula(idx, 17, f"=IF(G{excel_row}>0,Q{excel_row}/G{excel_row},0)", formats["percent"], val_q)
+                    val_profit_m, val_margin_m = val_profit, val_margin
+                # Итого расходы = Себестоимость(E) + Комиссия(H) + Логистика(I) + Хранение(J) + Эквайринг(K) + Возвраты(L) + Спец(M)
+                # ВАЖНО: ИСКЛЮЧАЕТ F (Рекоменд_цена) и G (Цена_с_наценкой)!
+                ws_calc.write_formula(idx, 13, f"=E{excel_row}+H{excel_row}+I{excel_row}+J{excel_row}+K{excel_row}+L{excel_row}+M{excel_row}", formats["money"], row.Итого_расходы)
+                ws_calc.write_formula(idx, 14, f"=D{excel_row}-N{excel_row}", formats["money"], val_profit)
+                ws_calc.write_formula(idx, 15, f"=IF(D{excel_row}>0,O{excel_row}/D{excel_row},0)", formats["percent"], val_margin)
+                ws_calc.write_formula(idx, 16, f"=G{excel_row}-N{excel_row}", formats["money"], val_profit_m)
+                ws_calc.write_formula(idx, 17, f"=IF(G{excel_row}>0,Q{excel_row}/G{excel_row},0)", formats["percent"], val_margin_m)
                 ws_calc.write(idx, 18, str(df["ABC"].iat[idx-2]))
                 ws_calc.write(idx, 19, str(df["XYZ"].iat[idx-2]))
                 ws_calc.write(idx, 20, str(df["ABC"].iat[idx-2])+str(df["XYZ"].iat[idx-2]))
-                # Рекомендация текстовая — тоже безопасно
-                p_val = float(df["Прибыль"].iat[idx-2])
-                m_val = float(df["Маржа_%"].iat[idx-2])
-                rec_text = "↑ Поднять" if p_val < 0 else ("⚠ Критично" if m_val < 0.05 else ("→ Можно +10%" if m_val < 0.15 else "✓ ОК"))
+                # Рекомендация текстовая — O=Прибыль, P=Маржа (после исправления столбцов)
+                rec_text = "↑ Поднять" if val_profit < 0 else ("⚠ Критично" if val_margin < 0.05 else ("→ Можно +10%" if val_margin < 0.15 else "✓ ОК"))
                 ws_calc.write_formula(idx, 21, f"=IF(O{excel_row}<0,\"↑ Поднять до \"&TEXT(F{excel_row},\"#,##0\")&\" ₽\",IF(P{excel_row}<0.05,\"⚠ Критично\",IF(P{excel_row}<0.15,\"→ Можно +10%\",\"✓ ОК\")))", None, rec_text)
 
             ws_calc.freeze_panes(2, 3)
@@ -2031,17 +2117,46 @@ def _export_formula_excel_legacy_do_not_use(df: pd.DataFrame, settings: Dict[str
             ws_calc.set_column("A:A", 18)
             ws_calc.set_column("B:C", 20)
             ws_calc.set_column("D:V", 14)
-            # Conditional formatting — расширенное
-            ws_calc.conditional_format(2, 15, len(df)+1, 15, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
-            ws_calc.conditional_format(2, 15, len(df)+1, 15, {"type": "cell", "criteria": "between", "minimum": 0, "maximum": 0.05, "format": formats["red_light"]})
-            ws_calc.conditional_format(2, 15, len(df)+1, 15, {"type": "cell", "criteria": "between", "minimum": 0.05, "maximum": 0.15, "format": formats["amber"]})
-            ws_calc.conditional_format(2, 15, len(df)+1, 15, {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]})
-            ws_calc.conditional_format(2, 17, len(df)+1, 17, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
-            ws_calc.conditional_format(2, 5, len(df)+1, 5, {"type": "formula", "criteria": "=$F3>$D3", "format": formats["amber"]})
-            ws_calc.conditional_format(2, 5, len(df)+1, 5, {"type": "formula", "criteria": "=$F3>$D3*1.2", "format": formats["red"]})
-            ws_calc.conditional_format(2, 21, len(df)+1, 21, {"type": "text", "criteria": "containing", "value": "Поднять", "format": formats["red"]})
-            ws_calc.conditional_format(2, 21, len(df)+1, 21, {"type": "text", "criteria": "containing", "value": "ОК", "format": formats["green"]})
-            ws_calc.conditional_format(2, 21, len(df)+1, 21, {"type": "text", "criteria": "containing", "value": "Критично", "format": formats["amber"]})
+            last_r = len(df) + 1
+            # Колонки: N(13) Итого, O(14) Прибыль, P(15) Маржа, Q(16) Прибыль+нац, R(17) Маржа+нац,
+            # S(18) ABC, T(19) XYZ, U(20) ABC/XYZ, V(21) Рекомендация, F(5) Рек.цена, D(3) Цена,
+            # H(7) Комиссия, I(8) Логистика, J(9) Хранение
+            # — Маржа P: 4 уровня
+            ws_calc.conditional_format(2, 15, last_r, 15, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
+            ws_calc.conditional_format(2, 15, last_r, 15, {"type": "cell", "criteria": "between", "minimum": 0, "maximum": 0.05, "format": formats["red_light"]})
+            ws_calc.conditional_format(2, 15, last_r, 15, {"type": "cell", "criteria": "between", "minimum": 0.05, "maximum": 0.15, "format": formats["amber"]})
+            ws_calc.conditional_format(2, 15, last_r, 15, {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]})
+            # — Прибыль O: красный/зелёный + гистограмма
+            ws_calc.conditional_format(2, 14, last_r, 14, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
+            ws_calc.conditional_format(2, 14, last_r, 14, {"type": "cell", "criteria": ">=", "value": 0, "format": formats["green_light"]})
+            ws_calc.conditional_format(2, 14, last_r, 14, {"type": "data_bar", "bar_color": "#10B981", "min_type": "min", "max_type": "max"})
+            # — Прибыль+нац Q и Маржа+нац R
+            ws_calc.conditional_format(2, 16, last_r, 16, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
+            ws_calc.conditional_format(2, 16, last_r, 16, {"type": "cell", "criteria": ">=", "value": 0, "format": formats["green_light"]})
+            ws_calc.conditional_format(2, 17, last_r, 17, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
+            ws_calc.conditional_format(2, 17, last_r, 17, {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]})
+            ws_calc.conditional_format(2, 17, last_r, 17, {"type": "cell", "criteria": "between", "minimum": 0.05, "maximum": 0.15, "format": formats["amber"]})
+            # — Рек.цена F > Цены D: оранжевый; >20% выше — красный
+            ws_calc.conditional_format(2, 5, last_r, 5, {"type": "formula", "criteria": "=$F3>$D3", "format": formats["orange"]})
+            ws_calc.conditional_format(2, 5, last_r, 5, {"type": "formula", "criteria": "=$F3>$D3*1.2", "format": formats["red"]})
+            # — Итого N: обратная цветовая шкала (меньше расходов — зелёный)
+            ws_calc.conditional_format(2, 13, last_r, 13, {"type": "3_color_scale", "min_color": "#6EE7B7", "mid_color": "#FEF3C7", "max_color": "#FCA5A5", "min_type": "min", "mid_type": "percentile", "mid_value": 50, "max_type": "max"})
+            # — Комиссия H: двухцветная шкала; Логистика I и Хранение J: гистограммы
+            ws_calc.conditional_format(2, 7, last_r, 7, {"type": "2_color_scale", "min_color": "#FEF3C7", "max_color": "#F59E0B", "min_type": "min", "max_type": "max"})
+            ws_calc.conditional_format(2, 8, last_r, 8, {"type": "data_bar", "bar_color": "#0EA5E9", "min_type": "min", "max_type": "max"})
+            ws_calc.conditional_format(2, 9, last_r, 9, {"type": "data_bar", "bar_color": "#8B5CF6", "min_type": "min", "max_type": "max"})
+            # — ABC S: подсветка + набор значков "3 звезде"
+            ws_calc.conditional_format(2, 18, last_r, 18, {"type": "text", "criteria": "containing", "value": "A", "format": formats["green"]})
+            ws_calc.conditional_format(2, 18, last_r, 18, {"type": "text", "criteria": "containing", "value": "B", "format": formats["amber_light"]})
+            ws_calc.conditional_format(2, 18, last_r, 18, {"type": "text", "criteria": "containing", "value": "C", "format": formats["band"]})
+            ws_calc.conditional_format(2, 18, last_r, 18, {"type": "icon_set", "icon_type": "3_stars", "icon_criteria": [{"criteria": ">=", "type": "percent", "value": 80}, {"criteria": ">=", "type": "percent", "value": 50}]})
+            # — Рекомендация V: текст + "светофор"
+            ws_calc.conditional_format(2, 21, last_r, 21, {"type": "text", "criteria": "containing", "value": "Поднять", "format": formats["red"]})
+            ws_calc.conditional_format(2, 21, last_r, 21, {"type": "text", "criteria": "containing", "value": "Критично", "format": formats["amber"]})
+            ws_calc.conditional_format(2, 21, last_r, 21, {"type": "text", "criteria": "containing", "value": "ОК", "format": formats["green"]})
+            ws_calc.conditional_format(2, 21, last_r, 21, {"type": "icon_set", "icon_type": "3_traffic_lights", "icon_criteria": [{"criteria": ">=", "type": "percent", "value": 67}, {"criteria": ">=", "type": "percent", "value": 33}]})
+            # — Маржа P: цветовая шкала 3 цвета
+            ws_calc.conditional_format(2, 15, last_r, 15, {"type": "3_color_scale", "min_color": "#F8696B", "mid_color": "#FFEB84", "max_color": "#63BE7B", "min_type": "min", "mid_type": "num", "mid_value": 0.1, "max_type": "max"})
 
             write_summary_sheet(writer, "Сводка_Категории", "Категории", category, formats)
             write_summary_sheet(writer, "Сводка_Бренды", "Бренды", brand, formats)
@@ -2050,179 +2165,6 @@ def _export_formula_excel_legacy_do_not_use(df: pd.DataFrame, settings: Dict[str
             write_dataframe_header(writer.sheets["Легенда"], legend, formats["header"])
             writer.sheets["Легенда"].set_column("A:A", 25)
             writer.sheets["Легенда"].set_column("B:C", 55)
-        return read_and_remove(path)
-    except Exception:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        raise
-
-
-# ВАЖНО: переопределяем старую версию формульного экспорта.
-# Ниже — проверенная раскладка столбцов. Она устраняет ошибку, когда формула
-# «Итого_расходы» захватывала не те колонки после добавления рекомендованной цены.
-def export_formula_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
-    """Excel с живыми формулами, корректной раскладкой столбцов и полной подсветкой."""
-    path = temporary_path(".xlsx")
-    workbook = xlsxwriter.Workbook(
-        path,
-        {"constant_memory": True, "strings_to_urls": False, "nan_inf_to_errors": True},
-    )
-    try:
-        formats = configure_excel_formats(workbook)
-
-        # -------------------- ЛИСТ: ТАРИФ --------------------
-        ws_t = workbook.add_worksheet("Тариф")
-        ws_t.write_row(0, 0, ["Параметр", "Значение", "Подсказка"], formats["header_accent"])
-        tariff_df = tariff_table(settings)
-        for r, row in enumerate(tariff_df.itertuples(index=False, name=None), start=1):
-            ws_t.write(r, 0, row[0], formats["band"] if r % 2 == 0 else None)
-            ws_t.write(r, 1, row[1])
-            ws_t.write(r, 2, row[2])
-        ws_t.write(18, 0, "★ Наценка, %", formats["amber"])
-        ws_t.write(18, 1, settings.get("pricing", {}).get("markupPercent", 15), formats["amber"])
-        ws_t.write(19, 0, "★ Целевая маржа", formats["amber"])
-        ws_t.write(19, 1, settings.get("pricing", {}).get("targetMargin", 0.20), formats["percent_bold"])
-        ws_t.set_column("A:A", 42)
-        ws_t.set_column("B:B", 18)
-        ws_t.set_column("C:C", 40)
-        ws_t.freeze_panes(1, 0)
-
-        # -------------------- ЛИСТ: ВХОДНЫЕ --------------------
-        input_cols = [
-            "Артикул", "Бренд", "Категория", "ID_категории", "Длина", "Ширина", "Высота",
-            "Объем_л", "Вес_кг", "Оплач_вес", "Цена", "Себестоимость",
-            "is_hazardous", "is_fragile", "Ставка_комиссии", "Логистика_база",
-            "Ставка_за_кг", "Ставка_хранения", "Оборачиваемость_дней",
-        ]
-        ws_in = workbook.add_worksheet("Входные_Данные")
-        ws_in.write_row(0, 0, input_cols, formats["header_success"])
-        for r, values in enumerate(df[input_cols].itertuples(index=False, name=None), start=1):
-            ws_in.write_row(r, 0, list(values), formats["band"] if r % 2 == 0 else None)
-        ws_in.freeze_panes(1, 3)
-        ws_in.autofilter(0, 0, len(df), len(input_cols) - 1)
-        ws_in.set_column("A:A", 18)
-        ws_in.set_column("B:C", 20)
-        ws_in.set_column("D:S", 14)
-
-        # -------------------- ЛИСТ: РАСЧЁТ --------------------
-        # Раскладка столбцов:
-        # A Артикул | B Бренд | C Категория | D Цена | E Себестоимость |
-        # F Рекоменд_цена | G Цена_с_наценкой |
-        # H Комиссия | I Логистика | J Хранение | K Эквайринг | L Возвраты | M Спец |
-        # N Итого_расходы = SUM(E, H:M)
-        # O Выплата_селлеру = G - SUM(H:M)
-        # P Прибыль = O - E
-        # Q Маржа = P / G
-        # R Прибыль_с_наценкой = P
-        # S Маржа_с_наценкой = Q
-        # T ABC | U XYZ | V ABC/XYZ | W Рекомендация
-        ws = workbook.add_worksheet("Расчет_FBS")
-        calc_headers = [
-            "Артикул", "Бренд", "Категория", "Цена", "Себестоимость",
-            "Рекоменд_цена", "Цена_с_наценкой",
-            "Комиссия", "Логистика", "Хранение", "Эквайринг", "Возвраты", "Спец_расходы",
-            "Итого_расходы", "Выплата_на_рс", "Прибыль", "Маржа_%",
-            "Прибыль_с_наценкой", "Маржа_с_наценкой_%", "ABC", "XYZ", "ABC_XYZ", "Рекомендация",
-        ]
-        ws.write_row(0, 0, calc_headers, formats["header_warm"])
-        ws.write_row(
-            1,
-            0,
-            ["", "", "", "из файла", "из файла/оценка", "безубыток+1%", "сценарий B18/B19", "", "", "", "", "", "", "=SUM(E,H:M)", "=G-SUM(H:M)", "=O-E", "=P/G", "=P", "=Q", "", "", "", "совет"],
-            formats["amber_light"],
-        )
-
-        for idx, row in enumerate(df.itertuples(index=False), start=2):
-            ex = idx + 1
-            src = idx
-            rec_formula = (
-                f"=ROUND((E{ex}+'Тариф'!$B$4+'Входные_Данные'!J{src}*'Тариф'!$B$5+"
-                f"'Входные_Данные'!H{src}*'Входные_Данные'!R{src}*'Входные_Данные'!S{src}+"
-                f"'Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11)/"
-                f"(1-('Входные_Данные'!O{src}+'Тариф'!$B$7+'Тариф'!$B$8+'Тариф'!$B$12+"
-                f"IF('Входные_Данные'!M{src},'Тариф'!$B$13,0)+IF('Входные_Данные'!N{src},'Тариф'!$B$14,0)))*1.01,2)"
-            )
-            price_markup_formula = (
-                f"=IF('Тариф'!$B$17=\"markup\",D{ex}*(1+'Тариф'!$B$18/100),"
-                f"IF('Тариф'!$B$17=\"targetMargin\","
-                f"(E{ex}+'Тариф'!$B$4+'Входные_Данные'!J{src}*'Тариф'!$B$5+"
-                f"'Входные_Данные'!H{src}*'Входные_Данные'!R{src}*'Входные_Данные'!S{src}+"
-                f"'Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11)/"
-                f"(1-('Входные_Данные'!O{src}+'Тариф'!$B$7+'Тариф'!$B$8+'Тариф'!$B$12+"
-                f"IF('Входные_Данные'!M{src},'Тариф'!$B$13,0)+IF('Входные_Данные'!N{src},'Тариф'!$B$14,0)+'Тариф'!$B$19)),D{ex}))"
-            )
-            ws.write_formula(idx, 0, f"='Входные_Данные'!A{src}", None, row.Артикул)
-            ws.write_formula(idx, 1, f"='Входные_Данные'!B{src}", None, row.Бренд)
-            ws.write_formula(idx, 2, f"='Входные_Данные'!C{src}", None, row.Категория)
-            ws.write_formula(idx, 3, f"='Входные_Данные'!K{src}", formats["money"], row.Цена)
-            ws.write_formula(idx, 4, f"='Входные_Данные'!L{src}", formats["money"], row.Себестоимость)
-            ws.write_formula(idx, 5, rec_formula, formats["money_bold"], row.Рекомендованная_цена)
-            ws.write_formula(idx, 6, price_markup_formula, formats["money_bold"], row.Цена_с_наценкой)
-            ws.write_formula(idx, 7, f"=MAX(G{ex}*'Входные_Данные'!O{src},'Тариф'!$B$3)", formats["money"], row.Комиссия_руб)
-            ws.write_formula(idx, 8, f"='Входные_Данные'!P{src}+'Входные_Данные'!J{src}*'Входные_Данные'!Q{src}", formats["money"], row.Логистика_руб)
-            ws.write_formula(idx, 9, f"='Входные_Данные'!H{src}*'Входные_Данные'!R{src}*'Входные_Данные'!S{src}", formats["money"], row.Хранение_руб)
-            ws.write_formula(idx, 10, f"=G{ex}*'Тариф'!$B$7", formats["money"], row.Эквайринг_руб)
-            ws.write_formula(idx, 11, f"=G{ex}*'Тариф'!$B$8", formats["money"], row.Возвраты_руб)
-            ws.write_formula(idx, 12, f"='Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11+G{ex}*'Тариф'!$B$12+IF('Входные_Данные'!M{src},G{ex}*'Тариф'!$B$13,0)+IF('Входные_Данные'!N{src},G{ex}*'Тариф'!$B$14,0)", formats["money"], row.Спец_расходы_FBS)
-            ws.write_formula(idx, 13, f"=SUM(E{ex},H{ex}:M{ex})", formats["money_bold"], row.Итого_расходы)
-            ws.write_formula(idx, 14, f"=G{ex}-SUM(H{ex}:M{ex})", formats["money_bold"], row.Выплата_селлеру)
-            ws.write_formula(idx, 15, f"=O{ex}-E{ex}", formats["money_bold"], row.Прибыль)
-            ws.write_formula(idx, 16, f"=IF(G{ex}>0,P{ex}/G{ex},0)", formats["percent_bold"], float(df["Маржа_%"].iat[idx-2]))
-            ws.write_formula(idx, 17, f"=P{ex}", formats["money"], row.Прибыль_с_наценкой)
-            ws.write_formula(idx, 18, f"=Q{ex}", formats["percent"], float(df["Маржа_с_наценкой_%"].iat[idx-2]))
-            ws.write(idx, 19, df["ABC"].iat[idx-2])
-            ws.write(idx, 20, df["XYZ"].iat[idx-2])
-            ws.write(idx, 21, str(df["ABC"].iat[idx-2]) + str(df["XYZ"].iat[idx-2]))
-            rec_text = df["Рекомендация"].iat[idx-2] if "Рекомендация" in df.columns else ""
-            ws.write_formula(idx, 22, f"=IF(P{ex}<0,\"↑ Поднять до \"&TEXT(F{ex},\"#,##0\")&\" ₽\",IF(Q{ex}<0.05,\"⚠ Критично: маржа <5%\",IF(Q{ex}<0.15,\"→ Можно +10%\",\"✓ ОК\")))", None, rec_text)
-
-        # Оформление листа Расчет_FBS
-        ws.freeze_panes(2, 4)
-        ws.autofilter(0, 0, len(df) + 1, len(calc_headers) - 1)
-        widths = [18, 16, 20, 12, 13, 14, 14, 12, 12, 12, 12, 12, 14, 14, 15, 13, 10, 14, 10, 8, 8, 10, 24]
-        for c, width in enumerate(widths):
-            ws.set_column(c, c, width)
-
-        last_row = len(df) + 2
-        # Маржа Q и S: 4 уровня + шкала
-        ws.conditional_format(2, 16, last_row, 16, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
-        ws.conditional_format(2, 16, last_row, 16, {"type": "cell", "criteria": "between", "minimum": 0, "maximum": 0.05, "format": formats["red_light"]})
-        ws.conditional_format(2, 16, last_row, 16, {"type": "cell", "criteria": "between", "minimum": 0.05, "maximum": 0.15, "format": formats["amber"]})
-        ws.conditional_format(2, 16, last_row, 16, {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]})
-        ws.conditional_format(2, 18, last_row, 18, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
-        ws.conditional_format(2, 18, last_row, 18, {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]})
-        # Прибыль P/R
-        ws.conditional_format(2, 15, last_row, 15, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
-        ws.conditional_format(2, 15, last_row, 15, {"type": "cell", "criteria": ">=", "value": 0, "format": formats["green_light"]})
-        ws.conditional_format(2, 17, last_row, 17, {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]})
-        # Реком. цена F > цена D
-        ws.conditional_format(2, 5, last_row, 5, {"type": "formula", "criteria": "=$F3>$D3", "format": formats["amber"]})
-        ws.conditional_format(2, 5, last_row, 5, {"type": "formula", "criteria": "=$F3>$D3*1.2", "format": formats["red"]})
-        # DataBar: Выплата O, Логистика I, Хранение J
-        ws.conditional_format(2, 14, last_row, 14, {"type": "data_bar", "bar_color": "#10B981", "bar_solid": True})
-        ws.conditional_format(2, 8, last_row, 8, {"type": "data_bar", "bar_color": "#0EA5E9", "bar_solid": True})
-        ws.conditional_format(2, 9, last_row, 9, {"type": "data_bar", "bar_color": "#8B5CF6", "bar_solid": True})
-        # Color scales
-        ws.conditional_format(2, 13, last_row, 13, {"type": "3_color_scale", "min_color": "#DCFCE7", "mid_color": "#FEF3C7", "max_color": "#FEE2E2"})
-        ws.conditional_format(2, 16, last_row, 16, {"type": "3_color_scale", "min_color": "#FEE2E2", "mid_color": "#FEF3C7", "max_color": "#DCFCE7"})
-        # ABC и рекомендации
-        ws.conditional_format(2, 19, last_row, 19, {"type": "text", "criteria": "containing", "value": "A", "format": formats["green"]})
-        ws.conditional_format(2, 19, last_row, 19, {"type": "text", "criteria": "containing", "value": "B", "format": formats["amber_light"]})
-        ws.conditional_format(2, 19, last_row, 19, {"type": "text", "criteria": "containing", "value": "C", "format": formats["band"]})
-        ws.conditional_format(2, 22, last_row, 22, {"type": "text", "criteria": "containing", "value": "Поднять", "format": formats["red"]})
-        ws.conditional_format(2, 22, last_row, 22, {"type": "text", "criteria": "containing", "value": "Критично", "format": formats["amber"]})
-        ws.conditional_format(2, 22, last_row, 22, {"type": "text", "criteria": "containing", "value": "ОК", "format": formats["green_light"]})
-
-        write_summary_sheet(writer, "Сводка_Категории", "Категории", category, formats)
-        write_summary_sheet(writer, "Сводка_Бренды", "Бренды", brand, formats)
-        legend = legend_table()
-        legend.to_excel(writer, sheet_name="Легенда", index=False)
-        write_dataframe_header(writer.sheets["Легенда"], legend, formats["header"])
-        writer.sheets["Легенда"].set_column("A:A", 25)
-        writer.sheets["Легенда"].set_column("B:C", 55)
-
         return read_and_remove(path)
     except Exception:
         try:
@@ -3158,14 +3100,14 @@ else:
 
         export_cols = st.columns(4)
         with export_cols[0]:
-            st.markdown("#### Excel с живыми формулами")
+            st.markdown("#### Excel с формулами")
             st.caption(
-                "Без искусственного лимита: до 1 048 576 строк Excel. "
-                "Формулы сверены: Итого=SUM(E,H:M), Выплата=G-SUM(H:M), Прибыль=O-E."
+                "Живые формулы, входные данные, категории, бренды и легенда. "
+                f"Лимит: {FORMULA_EXCEL_LIMIT:,} строк.".replace(",", " ")
             )
-            formula_disabled = False
-            if len(result) > 300_000:
-                st.warning("Большой файл: формирование может занять несколько минут, не закрывайте вкладку.")
+            formula_disabled = len(result) > FORMULA_EXCEL_LIMIT
+            if formula_disabled:
+                st.warning("Для этого объёма используйте быстрый Excel.")
             if st.button(
                 "Сформировать с формулами",
                 type="primary",
