@@ -75,6 +75,44 @@ st.set_page_config(
 # CONSTANTS AND DEFAULTS
 # =============================================================================
 
+PAYOUT_SCHEDULE_RATES = {
+    "weekly_4w": 0.016,
+    "weekly_2w": 0.023,
+    "weekly_1w": 0.028,
+    "daily": 0.033,
+}
+
+MAX_DENSITY = 12.0   # кг/л — плотнее свинца физически невозможно
+MIN_DENSITY = 0.01   # кг/л — легче пенопласта
+
+# XYZ по абсолютным порогам оборачиваемости (экономический смысл, а не терцили)
+XYZ_X_DAYS = 30      # быстрый оборот
+XYZ_Y_DAYS = 60      # средний; свыше — Z (замороженные деньги)
+
+ABC_XYZ_MEANING = {
+    "AX": "★ Ядро — держать сток, не снижать цену",
+    "AY": "Хиты со средним оборотом — следить за остатками",
+    "AZ": "Дорогие «зависающие» — риск заморозки денег",
+    "BX": "Стабильный середняк — можно поднять цену",
+    "BY": "Обычные товары — плановый контроль",
+    "BZ": "Медленные середняки — сократить закупку",
+    "CX": "Дешёвые ходовые — кандидаты на подъём цены",
+    "CY": "Малозначимые — минимум внимания",
+    "CZ": "⚠ Балласт — вывести или распродать",
+}
+
+def srednya_mila_py(volume_liters: float) -> float:
+    v = math.ceil(max(0, volume_liters))
+    if v <= 0:
+        return 0.0
+    if v <= 1:
+        return 80.0
+    if v <= 30:
+        return 80 + 9 * (v - 1)
+    if v <= 200:
+        return 80 + 9 * 29 + 7 * (v - 30)
+    return min(80 + 9 * 29 + 7 * 170 + 5 * (v - 200), 5500)
+
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "commission_rate": 0.14,
     "min_commission": 45.0,
@@ -96,6 +134,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "category_rates": {},
     "custom_categories": [],
     "pricing": {"mode": "none", "markupPercent": 15, "targetMargin": 0.20},
+    "model": "FBS",
+    "use_fixed_tariff": True,
+    "fbs_speed_discount": 0.0,
+    "payout_schedule": "weekly_2w",
+    "storage_free_days": 90,
     "special_tariffs": {
         "шины": {
             "label": "Шины",
@@ -202,6 +245,10 @@ COLUMN_SYNONYMS: Dict[str, List[str]] = {
         "оборачиваемость_дней", "оборачиваемость", "оборачиваемость, дней",
         "turnover", "оборачиваемость, дн", "срок хранения",
     ],
+    "Продажи_шт": [
+        "продажи_шт", "продажи", "продано", "количество", "кол-во", "qty",
+        "quantity", "sales", "заказы", "заказов", "штук",
+    ],
     "Опасный": [
         "опасный", "опасный груз", "опасность", "hazardous", "опасный_груз",
     ],
@@ -217,15 +264,17 @@ RESULT_COLUMNS = [
     "Высота", "Объем_л", "Вес_кг", "Оплач_вес", "Цена", "Себестоимость",
     "Себестоимость_оценка", "Ставка_комиссии", "Комиссия_руб",
     "Логистика_руб", "Хранение_руб", "Эквайринг_руб", "Возвраты_руб", "Спец_расходы_FBS",
-    "Итого_расходы", "Выплата_селлеру", "Прибыль", "Маржа_%", "Рекомендованная_цена", "Цена_с_наценкой",
-    "Прибыль_с_наценкой", "Маржа_с_наценкой_%", "ABC", "XYZ", "ABC_XYZ", "Выручка_доля",
-    "Оборачиваемость_дней", "Спецтариф_применён", "Причина_спецтарифа", "Рекомендация",
+    "Итого_расходы", "Прибыль", "Маржа_%", "Продажи_шт", "Выручка", "Прибыль_период",
+    "Рекомендованная_цена", "Цена_с_наценкой",
+    "Прибыль_с_наценкой", "Маржа_с_наценкой_%", "ABC", "XYZ", "ABC_XYZ", "ABC_XYZ_смысл",
+    "Выручка_доля", "Оборачиваемость_дней", "Спецтариф_применён", "Причина_спецтарифа",
+    "Рекомендация", "Валидация", "Сумма_сторон", "Плотность",
 ]
 
 MONEY_COLUMNS = [
     "Цена", "Себестоимость", "Комиссия_руб", "Логистика_руб",
     "Хранение_руб", "Эквайринг_руб", "Возвраты_руб", "Спец_расходы_FBS",
-    "Итого_расходы", "Выплата_селлеру", "Прибыль",
+    "Итого_расходы", "Прибыль",
 ]
 
 
@@ -245,129 +294,217 @@ st.markdown(
         --green: #059669;
         --amber: #d97706;
         --red: #e11d48;
+        --card-shadow: 0 4px 16px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.04);
+        --card-shadow-hover: 0 12px 32px rgba(15,23,42,.10), 0 4px 12px rgba(15,23,42,.06);
     }
-    .stApp { background: #f1f5f9; color: var(--ink); }
+    .stApp {
+        background:
+          radial-gradient(1200px 600px at 20% -10%, #e0e7ff 0%, transparent 50%),
+          radial-gradient(1000px 500px at 90% 0%, #fce7f3 0%, transparent 50%),
+          radial-gradient(800px 600px at 50% 110%, #dbeafe 0%, transparent 50%),
+          #f1f5f9;
+        color: var(--ink);
+    }
     .block-container { max-width: 1480px; padding-top: 1.25rem; padding-bottom: 4rem; }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg,#0f172a 0%, #131c33 100%); }
-    [data-testid="stSidebar"] * { color: #e2e8f0; }
-    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.12); }
-    /* Метрики в тёмном сайдбаре: тёмная стеклянная карточка + светлый текст */
-    [data-testid="stSidebar"] [data-testid="stMetric"] {
-        background: rgba(255,255,255,.06);
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 14px;
-        padding: 12px 14px;
-        box-shadow: none;
+    /* ── SIDEBAR — контраст исправлен ── */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%);
+        border-right: 1px solid rgba(255,255,255,.06);
     }
-    [data-testid="stSidebar"] [data-testid="stMetricLabel"],
-    [data-testid="stSidebar"] [data-testid="stMetricLabel"] * {
-        color: #94a3b8 !important;
-        font-weight: 700;
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] [data-testid="stText"] {
+        color: #e2e8f0;
     }
-    [data-testid="stSidebar"] [data-testid="stMetricValue"],
-    [data-testid="stSidebar"] [data-testid="stMetricValue"] * {
-        color: #ffffff !important;
-        font-weight: 800;
+    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.10); }
+    /* Метрики в сайдбаре — белые карточки с тёмным текстом (исправлено) */
+    [data-testid="stSidebar"] div[data-testid="stMetric"] {
+        background: white !important;
+        border: 1px solid rgba(255,255,255,.9) !important;
+        border-radius: 16px !important;
+        padding: 16px 16px !important;
+        box-shadow: 0 8px 24px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.08) !important;
     }
-    [data-testid="stSidebar"] [data-testid="stMetricDelta"] * { color: #34d399 !important; }
-    /* Кнопки в сайдбаре — контрастные, читаемые */
-    [data-testid="stSidebar"] .stButton > button {
-        background: linear-gradient(90deg,#4f46e5,#7c3aed) !important;
-        color: #ffffff !important;
-        border: 0 !important;
-        font-weight: 700;
-        box-shadow: 0 6px 16px rgba(79,70,229,.35);
+    [data-testid="stSidebar"] div[data-testid="stMetricLabel"] label,
+    [data-testid="stSidebar"] div[data-testid="stMetricLabel"] p,
+    [data-testid="stSidebar"] div[data-testid="stMetricLabel"] div {
+        color: #64748b !important;
+        font-weight: 700 !important;
+        font-size: 11px !important;
+        text-transform: uppercase;
+        letter-spacing: .06em;
     }
-    [data-testid="stSidebar"] .stButton > button:hover { filter: brightness(1.08); }
-    [data-testid="stSidebar"] .stButton > button:disabled,
-    [data-testid="stSidebar"] .stButton > button[disabled] {
-        background: rgba(255,255,255,.08) !important;
-        color: #94a3b8 !important;
-        box-shadow: none;
-        opacity: 1 !important;
+    [data-testid="stSidebar"] div[data-testid="stMetricValue"] div,
+    [data-testid="stSidebar"] div[data-testid="stMetricValue"] p {
+        color: #0f172a !important;
+        font-weight: 850 !important;
+        font-size: 22px !important;
+        letter-spacing: -.02em;
     }
-    [data-testid="stSidebar"] .stDownloadButton > button {
-        background: rgba(255,255,255,.10) !important;
-        color: #ffffff !important;
-        border: 1px solid rgba(255,255,255,.20) !important;
-        font-weight: 700;
-    }
-    /* Инфо-блок в сайдбаре */
-    [data-testid="stSidebar"] [data-testid="stAlert"] {
-        background: rgba(255,255,255,.06) !important;
-        border: 1px solid rgba(255,255,255,.14) !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stAlert"] * { color: #e2e8f0 !important; }
-    /* Поля ввода в сайдбаре — тёмный текст на светлом поле */
     [data-testid="stSidebar"] input,
     [data-testid="stSidebar"] textarea,
     [data-testid="stSidebar"] [data-baseweb="select"] * { color: #0f172a !important; }
-    [data-testid="stSidebar"] input::placeholder { color: #64748b !important; }
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background: white !important; border-radius: 10px;
+    }
+    /* Кнопки в сайдбаре — белый фон, тёмный текст (исправлено) */
+    [data-testid="stSidebar"] .stButton > button,
+    [data-testid="stSidebar"] .stDownloadButton > button {
+        background: white !important;
+        color: #0f172a !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 12px !important;
+        font-weight: 700 !important;
+        min-height: 42px;
+        box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    [data-testid="stSidebar"] .stButton > button:hover,
+    [data-testid="stSidebar"] .stDownloadButton > button:hover {
+        background: #f8fafc !important;
+        color: #0f172a !important;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(0,0,0,.12);
+        border-color: #cbd5e1 !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:active { transform: translateY(0); }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+        background: linear-gradient(90deg, #6366f1, #7c3aed) !important;
+        color: white !important;
+        border: 0 !important;
+        box-shadow: 0 4px 16px rgba(99,102,241,.35);
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(90deg, #4f46e5, #6d28d9) !important;
+        color: white !important;
+        box-shadow: 0 8px 24px rgba(99,102,241,.45);
+    }
+    [data-testid="stSidebar"] .stButton > button p,
+    [data-testid="stSidebar"] .stDownloadButton > button p {
+        color: inherit !important; font-weight: 700;
+    }
+    [data-testid="stSidebar"] .stButton > button[kind="primary"] p { color: white !important; }
+    /* ── HERO — супер-современный ── */
     .hero {
         position: relative; overflow: hidden; border-radius: 24px;
-        padding: 30px 34px; color: white; margin-bottom: 18px;
-        background: linear-gradient(115deg, #0f172a 0%, #312e81 58%, #4c1d95 100%);
-        box-shadow: 0 18px 50px rgba(30,41,59,.16);
+        padding: 32px 36px; color: white; margin-bottom: 20px;
+        background:
+          radial-gradient(600px 400px at 15% -20%, rgba(99,102,241,.35), transparent 60%),
+          radial-gradient(700px 500px at 85% 0%, rgba(168,85,247,.30), transparent 60%),
+          linear-gradient(115deg, #0f172a 0%, #1e1b4b 30%, #312e81 60%, #4c1d95 100%);
+        box-shadow: 0 20px 60px rgba(30,41,59,.22), 0 4px 16px rgba(0,0,0,.08);
+        border: 1px solid rgba(255,255,255,.08);
     }
     .hero:after {
-        content: ""; position: absolute; width: 340px; height: 340px;
-        right: -110px; top: -180px; border-radius: 999px;
-        border: 55px solid rgba(255,255,255,.06);
+        content: ""; position: absolute; width: 420px; height: 420px;
+        right: -120px; top: -200px; border-radius: 999px;
+        border: 60px solid rgba(255,255,255,.05);
+        pointer-events: none;
     }
-    .hero-kicker { font-size: 12px; font-weight: 800; letter-spacing: .14em; color: #fbbf24; }
-    .hero h1 { margin: 4px 0 4px; font-size: clamp(26px, 4vw, 42px); line-height: 1.08; }
-    .hero p { margin: 0; color: #cbd5e1; font-size: 14px; }
+    .hero:before {
+        content: ""; position: absolute; inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,.04), transparent);
+        transform: translateX(-100%);
+        animation: shimmer 3.5s infinite;
+    }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+    .hero-kicker { font-size: 11px; font-weight: 800; letter-spacing: .16em; color: #fbbf24; text-transform: uppercase; display:flex; align-items:center; gap:8px; }
+    .hero-kicker:before { content:""; width:28px; height:2px; background:#fbbf24; border-radius:999px; display:inline-block; }
+    .hero h1 { margin: 8px 0 6px; font-size: clamp(26px, 4vw, 40px); line-height: 1.05; font-weight: 850; letter-spacing:-.03em; }
+    .hero p { margin: 0; color: #e0e7ff; font-size: 14.5px; line-height:1.5; max-width: 720px; }
     .hero-badge {
-        display: inline-block; margin-top: 15px; padding: 6px 11px;
-        border: 1px solid rgba(255,255,255,.18); border-radius: 999px;
-        background: rgba(255,255,255,.08); font-size: 11px; font-weight: 700;
+        display: inline-flex; align-items:center; gap:6px; margin-top: 16px; padding: 7px 13px;
+        border: 1px solid rgba(255,255,255,.15); border-radius: 999px;
+        background: rgba(255,255,255,.10); backdrop-filter: blur(8px);
+        font-size: 11px; font-weight: 700; letter-spacing:.02em;
+        box-shadow: 0 2px 12px rgba(0,0,0,.12);
     }
-    .section-title { margin: 4px 0 2px; font-size: 23px; font-weight: 800; letter-spacing: -.02em; }
-    .section-sub { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+    .section-title { margin: 6px 0 4px; font-size: 24px; font-weight: 850; letter-spacing:-.025em; color: #0f172a; }
+    .section-sub { margin: 0 0 18px; color: var(--muted); font-size: 13.5px; line-height:1.5; }
     .info-box, .warn-box, .success-box, .danger-box {
-        border-radius: 14px; padding: 13px 15px; margin: 8px 0 14px;
-        font-size: 13px; line-height: 1.5; border: 1px solid;
+        border-radius: 16px; padding: 14px 16px; margin: 10px 0 16px;
+        font-size: 13px; line-height: 1.55; border: 1px solid;
+        display:flex; gap:10px; align-items:flex-start;
+        box-shadow: var(--card-shadow);
     }
-    .info-box { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
-    .warn-box { background: #fffbeb; color: #92400e; border-color: #fde68a; }
-    .success-box { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
-    .danger-box { background: #fff1f2; color: #9f1239; border-color: #fecdd3; }
+    .info-box:before, .warn-box:before, .success-box:before, .danger-box:before {
+        font-size:16px; line-height:1; margin-top:1px;
+    }
+    .info-box { background: linear-gradient(135deg, #eff6ff, #dbeafe); color: #1e40af; border-color: #bfdbfe; }
+    .info-box:before { content:"💡"; }
+    .warn-box { background: linear-gradient(135deg, #fffbeb, #fef3c7); color: #92400e; border-color: #fde68a; }
+    .warn-box:before { content:"⚠️"; }
+    .success-box { background: linear-gradient(135deg, #ecfdf5, #d1fae5); color: #065f46; border-color: #a7f3d0; }
+    .success-box:before { content:"✅"; }
+    .danger-box { background: linear-gradient(135deg, #fff1f2, #ffe4e6); color: #9f1239; border-color: #fecdd3; }
+    .danger-box:before { content:"🚨"; }
     .metric-card {
-        min-height: 132px; background: white; border: 1px solid var(--line);
-        border-radius: 18px; padding: 17px 18px; position: relative; overflow: hidden;
+        min-height: 138px; background: white; border: 1px solid var(--line);
+        border-radius: 20px; padding: 18px 20px; position: relative; overflow: hidden;
+        box-shadow: var(--card-shadow);
+        transition: all .25s cubic-bezier(.2,.8,.2,1);
+    }
+    .metric-card:hover { transform: translateY(-3px); box-shadow: var(--card-shadow-hover); border-color: #cbd5e1; }
+    .metric-card:before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent); }
+    .metric-card:after {
+        content:""; position:absolute; right:-20px; top:-20px; width:80px; height:80px;
+        background: var(--accent); opacity:.06; border-radius:50%; pointer-events:none;
+    }
+    .metric-label { font-size: 10.5px; color: var(--muted); font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+    .metric-value { margin-top: 10px; font-size: clamp(22px, 2.6vw, 32px); font-weight: 850; letter-spacing: -.04em; color: #0f172a; line-height:1; }
+    .metric-note { margin-top: 6px; color: var(--muted); font-size: 11.5px; font-weight:500; }
+    .chip {
+        display: inline-flex; align-items:center; gap:5px; padding: 5px 10px; border-radius: 999px;
+        margin: 3px; font-size: 11px; font-weight: 700; letter-spacing:.01em;
+        background: linear-gradient(135deg, #eef2ff, #e0e7ff); color: #4338ca; border: 1px solid #c7d2fe;
+        box-shadow: 0 1px 4px rgba(99,102,241,.12);
+        transition:.15s;
+    }
+    .chip:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(99,102,241,.18); }
+    .soft-panel {
+        background: white; border: 1px solid var(--line); border-radius: 20px;
+        padding: 20px; box-shadow: var(--card-shadow);
+        transition:.2s;
+    }
+    .soft-panel:hover { box-shadow: var(--card-shadow-hover); }
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, white, #f8fafc) !important;
+        border: 1px solid var(--line) !important; border-radius: 16px !important;
+        padding: 16px 18px !important; box-shadow: var(--card-shadow) !important;
+        transition:.2s;
+    }
+    div[data-testid="stMetric"]:hover { transform: translateY(-2px); box-shadow: var(--card-shadow-hover) !important; }
+    div[data-testid="stMetricLabel"] label { color: var(--muted) !important; font-weight:700 !important; font-size:11px !important; text-transform:uppercase; letter-spacing:.06em; }
+    div[data-testid="stMetricValue"] div { color: #0f172a !important; font-weight:800 !important; }
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 12px !important; font-weight: 700 !important; min-height: 42px;
+        border: 1px solid #e2e8f0 !important; transition: all .2s cubic-bezier(.2,.8,.2,1) !important;
         box-shadow: 0 2px 8px rgba(15,23,42,.04);
     }
-    .metric-card:before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent); }
-    .metric-label { font-size: 11px; color: var(--muted); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-    .metric-value { margin-top: 8px; font-size: clamp(20px, 2.4vw, 30px); font-weight: 850; letter-spacing: -.04em; }
-    .metric-note { margin-top: 4px; color: var(--muted); font-size: 11px; }
-    .chip {
-        display: inline-block; padding: 4px 9px; border-radius: 999px;
-        margin: 2px; font-size: 11px; font-weight: 700;
-        background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe;
+    .stButton > button:hover, .stDownloadButton > button:hover {
+        transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,.10) !important; border-color: #cbd5e1 !important;
     }
-    .soft-panel {
-        background: white; border: 1px solid var(--line); border-radius: 18px;
-        padding: 18px; box-shadow: 0 2px 8px rgba(15,23,42,.035);
-    }
-    div[data-testid="stMetric"] {
-        background: white; border: 1px solid var(--line); border-radius: 16px;
-        padding: 14px 16px; box-shadow: 0 2px 8px rgba(15,23,42,.035);
-    }
-    div[data-testid="stMetricLabel"] { color: var(--muted); }
-    .stButton > button, .stDownloadButton > button {
-        border-radius: 11px; font-weight: 750; min-height: 40px;
-        border: 1px solid #cbd5e1; transition: .18s ease;
-    }
+    .stButton > button:active { transform: translateY(0); }
     .stButton > button[kind="primary"] {
-        border: 0; color: white;
-        background: linear-gradient(90deg, var(--indigo), var(--violet));
+        border: 0 !important; color: white !important;
+        background: linear-gradient(90deg, var(--indigo), var(--violet)) !important;
+        box-shadow: 0 4px 16px rgba(99,102,241,.30) !important;
     }
-    .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); }
-    div[data-baseweb="tab-list"] { gap: 6px; }
-    div[data-baseweb="tab"] { border-radius: 10px; padding: 8px 14px; }
-    [data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(90deg, #4338ca, #6d28d9) !important;
+        box-shadow: 0 8px 24px rgba(99,102,241,.40) !important;
+    }
+    div[data-baseweb="tab-list"] { gap: 6px; background: #f1f5f9; padding:6px; border-radius:14px; }
+    div[data-baseweb="tab"] { border-radius: 10px !important; padding: 8px 16px !important; font-weight:600; border:0 !important; }
+    div[data-baseweb="tab"][aria-selected="true"] { background: white !important; color: var(--indigo) !important; box-shadow: 0 2px 8px rgba(15,23,42,.08) !important; }
+    [data-testid="stDataFrame"] { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--card-shadow); }
     .small-muted { font-size: 11px; color: var(--muted); }
+    /* Улучшенные заголовки таблиц */
+    [data-testid="stDataFrame"] thead tr th { background:#f8fafc !important; font-weight:700 !important; color:#334155 !important; }
     @media (max-width: 700px) {
         .block-container { padding-left: .8rem; padding-right: .8rem; }
         .hero { padding: 23px 20px; border-radius: 18px; }
@@ -710,7 +847,7 @@ def prepare_input_frame(frame: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, An
 
     numeric_optional = [
         "Вес_кг", "Длина", "Ширина", "Высота", "Объем_л",
-        "Оборачиваемость_дней",
+        "Оборачиваемость_дней", "Продажи_шт",
     ]
     for column in numeric_optional:
         if column in mapping:
@@ -752,11 +889,11 @@ def build_template_csv() -> bytes:
         [
             "Артикул", "Бренд", "Категория", "ID_категории", "Длина",
             "Ширина", "Высота", "Цена", "Себестоимость", "Вес_кг",
-            "Оборачиваемость_дней",
+            "Оборачиваемость_дней", "Продажи_шт",
         ],
-        ["MAN-FLT-000001", "Mann-Filter", "Фильтры", "", 22, 14, 14, 450, 220, "0,5", 25],
-        ["MIC-TR-000002", "Michelin", "Шины", "", 70, 70, 26, 5400, 3650, "10,5", 15],
-        ["VAR-BAT-000003", "Varta", "Аккумуляторы", "", 35, 26, 26, 6500, "", "16,5", 30],
+        ["MAN-FLT-000001", "Mann-Filter", "Фильтры", "", 22, 14, 14, 450, 220, "0,5", 25, 1200],
+        ["MIC-TR-000002", "Michelin", "Шины", "", 70, 70, 26, 5400, 3650, "10,5", 15, 180],
+        ["VAR-BAT-000003", "Varta", "Аккумуляторы", "", 35, 26, 26, 6500, "", "16,5", 30, 95],
     ]
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
@@ -812,6 +949,10 @@ def generate_demo_catalog(count: int, include_cost: bool = True) -> pd.DataFrame
             "Оборачиваемость_дней": np.round(
                 turnovers[cat_idx] * rng.uniform(0.7, 1.35, count)
             ),
+            # Продажи: дешёвые ходовые продаются чаще (закон Парето) — для корректного ABC
+            "Продажи_шт": np.maximum(1, np.round(
+                (900_000 / np.maximum(price, 100)) * rng.uniform(0.3, 2.0, count)
+            )),
             "Опасный": pd.Series(pd.NA, index=np.arange(count), dtype="boolean"),
             "Хрупкий": pd.Series(pd.NA, index=np.arange(count), dtype="boolean"),
         }
@@ -881,13 +1022,42 @@ def calculate_unit_economics(
 
     supplied_weight = pd.to_numeric(df["Вес_кг"], errors="coerce").to_numpy()
     estimated_weight = np.maximum(0.1, volume * float(settings["density_kg_per_liter"]))
+    has_weight = np.isfinite(supplied_weight) & (supplied_weight > 0)
+    # ВАЖНО: не делим слепо при >100 кг (двигатель 95 кг легитимен!).
+    # Граммы определяем только если плотность физически невозможна (>12 кг/л)
+    raw_density = np.divide(supplied_weight, np.maximum(volume, 0.001),
+                            out=np.zeros_like(volume), where=has_weight)
+    looks_like_grams = has_weight & (supplied_weight > 100) & (raw_density > MAX_DENSITY)
+    grams_fixed_density = np.divide(supplied_weight / 1000.0, np.maximum(volume, 0.001),
+                                    out=np.zeros_like(volume), where=has_weight)
+    convert_grams = looks_like_grams & (grams_fixed_density >= MIN_DENSITY) & (grams_fixed_density <= MAX_DENSITY)
+    corrected_weight = np.where(convert_grams, supplied_weight / 1000.0, supplied_weight)
     weight = np.where(
-        np.isfinite(supplied_weight) & (supplied_weight > 0),
-        supplied_weight,
+        has_weight,
+        corrected_weight,
         np.where(has_dimensions, estimated_weight, default_weight),
     )
     volumetric_weight = np.where(has_dimensions, length * width * height / 5000.0, 0.0)
     billable_weight = np.maximum(np.maximum(weight, volumetric_weight), 0.1)
+
+    # Валидация габаритов и веса по лимитам FBS
+    sum_sides = length + width + height
+    density = np.divide(weight, np.maximum(volume, 0.001), out=np.zeros_like(volume), where=volume > 0)
+    max_side = np.maximum(np.maximum(length, width), height)
+    validation = np.full(n, "", dtype=object)
+    def add_flag(mask: np.ndarray, text: str) -> None:
+        idxs = np.where(mask)[0]
+        for i in idxs:
+            validation[i] = (validation[i] + " · " + text) if validation[i] else text
+    add_flag(~has_dimensions, "нет габаритов")
+    add_flag(~has_weight & has_dimensions, "вес оценён по объёму")
+    add_flag(~has_weight & ~has_dimensions, "вес из справочника")
+    add_flag(convert_grams, "вес переведён из граммов")
+    add_flag(looks_like_grams & ~convert_grams, "плотность неправдоподобна")
+    add_flag(has_dimensions & (max_side > 220), "превышены габариты СЦ")
+    add_flag(has_dimensions & (sum_sides > 150), "сумма сторон > 150 см (только СЦ)")
+    add_flag(weight > 100, "вес > 100 кг — не примет СЦ")
+    add_flag((weight > 20) & (weight <= 100), "вес > 20 кг — только СЦ, не ПВЗ")
 
     update(32, "Себестоимость и специальные расходы")
 
@@ -907,6 +1077,12 @@ def calculate_unit_economics(
         .clip(lower=1.0)
         .to_numpy()
     )
+    # Продажи за период — критично для экономически верного ABC
+    if "Продажи_шт" in df.columns:
+        qty = pd.to_numeric(df["Продажи_шт"], errors="coerce").fillna(1.0).clip(lower=0.0).to_numpy()
+        qty = np.where(qty <= 0, 1.0, qty)
+    else:
+        qty = np.ones(n)
 
     special_costs = (
         float(settings["packaging"])
@@ -958,7 +1134,12 @@ def calculate_unit_economics(
             special_applied[mask] = True
             special_reason[mask] = str(rule.get("reason", "Спецтариф"))
 
-    # Individual rates from API/CSV have the highest priority.
+    # FBS speed discount: subtract from commission (only for FBS)
+    fbs_discount = float(settings.get("fbs_speed_discount", 0.0)) if settings.get("model", "FBS") == "FBS" else 0.0
+    if fbs_discount:
+        commission_rate = np.maximum(0.01, commission_rate - fbs_discount)
+
+    # Individual rates from API/CSV have the highest priority (already above, but FBS discount already applied — API rates are final)
     if settings.get("use_category_rates", True) and settings.get("category_rates"):
         rates = {
             normalize_header(key): float(value)
@@ -966,7 +1147,7 @@ def calculate_unit_economics(
         }
         exact = cat_lower.map(rates)
         exact_mask = exact.notna().to_numpy()
-        commission_rate[exact_mask] = exact[exact_mask].to_numpy(dtype=float)
+        commission_rate[exact_mask] = np.maximum(0.01, exact[exact_mask].to_numpy(dtype=float) - fbs_discount) if fbs_discount else exact[exact_mask].to_numpy(dtype=float)
 
         # Substring fallback for a small rate dictionary.
         missing_rate = ~exact_mask
@@ -977,47 +1158,86 @@ def calculate_unit_economics(
                 cat_lower.str.contains(key, regex=False, na=False).to_numpy()
                 & missing_rate
             )
-            commission_rate[mask] = value
+            commission_rate[mask] = max(0.01, value - fbs_discount) if fbs_discount else value
             missing_rate[mask] = False
 
-    update(65, "Логистика, хранение и эквайринг")
+    update(65, "Логистика (ср. миля 2026), хранение и эквайринг")
 
-    commission = np.maximum(price * commission_rate, float(settings["min_commission"]))
-    logistics = logistics_base + billable_weight * float(settings["logistics_per_kg"])
-    storage = volume * storage_rate * turnover
-    acquiring = price * float(settings["acquiring_fee"])
-    returns = price * float(settings["return_fee"])
+    # Acquiring rate from payout schedule
+    acquiring_rate = float(PAYOUT_SCHEDULE_RATES.get(settings.get("payout_schedule", "weekly_2w"), float(settings.get("acquiring_fee", 0.023))))
 
-    marketplace_fees = commission + logistics + storage + acquiring + returns + special_costs
-    payout = price - marketplace_fees
-    total_expenses = cost + marketplace_fees
+    # Fixed tariff detection: price ≤300 and volume ≤5 and enabled (new 2026)
+    use_fixed = bool(settings.get("use_fixed_tariff", True))
+    model = settings.get("model", "FBS")
+    fixed_rate_fbs = 0.42 - (fbs_discount if model == "FBS" else 0)
+    fixed_rate_fby = 0.35
+    fixed_rate_val = fixed_rate_fbs if model == "FBS" else fixed_rate_fby
+    fixed_rate_arr = np.full(n, fixed_rate_val, dtype=float)
+    is_fixed = use_fixed & (price > 0) & (price <= 300) & (volume <= 5)
+
+    # Srednya mila (new grid 2026) — объёмная, не зависит от веса
+    vector_srednya = np.vectorize(srednya_mila_py)
+    srednya = vector_srednya(volume)
+
+    # Commission / logistics / storage with fixed branch
+    commission = np.where(is_fixed, 0.0, np.maximum(price * commission_rate, float(settings["min_commission"])))
+    logistics = np.where(is_fixed, price * fixed_rate_arr, srednya)
+    # Storage: FBS = 0 (your warehouse), FBY = volume * rate * max(0, turnover - freeDays)
+    storage_free = int(settings.get("storage_free_days", 90))
+    if model == "FBS":
+        storage = np.zeros(n)
+    else:
+        paid_days = np.maximum(0, turnover - storage_free)
+        storage = volume * storage_rate * paid_days
+
+    acquiring = price * acquiring_rate
+    # Returns: for fixed tariff returns are included, so 0; else reserve
+    returns = np.where(is_fixed, 0.0, price * float(settings["return_fee"]))
+
+    total_expenses = (
+        cost + commission + logistics + storage + acquiring + returns + special_costs
+    )
     profit = price - total_expenses
     margin = np.divide(profit, price, out=np.zeros_like(profit), where=price > 0)
 
-    # Recommended breakeven price (vectorized)
+    # Recommended breakeven price (vectorized) — учитывает фиксированный тариф
     spec_fixed = float(settings["packaging"]) + float(settings["chestny_znak"]) + float(settings["labeling"])
-    variable_rate = (
+    # variable rate for non-fixed: commission + acquiring + warranty + surcharges + return
+    # for fixed: fixedRate + acquiring + warranty + surcharges (returns already in fixed)
+    variable_rate_std = (
         commission_rate
-        + float(settings["acquiring_fee"])
+        + acquiring_rate
+        + float(settings["warranty_reserve"])
+        + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
+        + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
+        + float(settings["return_fee"])
+    )
+    variable_rate_fixed = (
+        fixed_rate_arr
+        + acquiring_rate
         + float(settings["warranty_reserve"])
         + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
         + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
     )
-    # Avoid division by zero
+    variable_rate = np.where(is_fixed, variable_rate_fixed, variable_rate_std)
     denom = 1.0 - variable_rate
     denom = np.where(denom < 0.05, 0.05, denom)
-    recommended = (cost + logistics + storage + spec_fixed) / denom * 1.01
-    # Adjust where commission would be at minimum
-    low_comm_mask = recommended * commission_rate < float(settings["min_commission"])
+    # Для обычного тарифа logistics = srednya (константа), для фиксированного logistics = price*fixed (уже в variable)
+    # Поэтому в формуле: для fixed используем cost+storage+specFixed, для std — cost+logistics+storage+specFixed
+    numer_std = cost + logistics + storage + spec_fixed
+    numer_fixed = cost + storage + spec_fixed
+    numer = np.where(is_fixed, numer_fixed, numer_std)
+    # Для fixed: denom already includes fixedRate, для std: denom includes commission
+    recommended = numer / denom * 1.01
+    # Корректировка минимума комиссии только для не-фиксированных
+    low_comm_mask = (~is_fixed) & (recommended * commission_rate < float(settings["min_commission"]))
     if np.any(low_comm_mask):
-        variable_without_comm = variable_rate - commission_rate
-        denom2 = 1.0 - variable_without_comm - float(settings["acquiring_fee"])  # acquiring already in variable? double count fix
-        # simpler: recompute with acquiring+reserve+surcharges only
         denom2 = 1.0 - (
-            float(settings["acquiring_fee"])
+            acquiring_rate
             + float(settings["warranty_reserve"])
             + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
             + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
+            + float(settings["return_fee"])
         )
         denom2 = np.where(denom2 < 0.05, 0.05, denom2)
         recommended_alt = (cost + logistics + storage + spec_fixed + float(settings["min_commission"])) / denom2 * 1.01
@@ -1025,7 +1245,7 @@ def calculate_unit_economics(
     recommended = np.maximum(recommended, cost + 10)
     recommended = np.where(price > 0, recommended, 0)
 
-    # Price with markup / target margin
+    # Price with markup / target margin — пересчёт по тем же правилам
     pricing = settings.get("pricing", {"mode": "none", "markupPercent": 15, "targetMargin": 0.20})
     mode = pricing.get("mode", "none")
     markup_pct = float(pricing.get("markupPercent", 15))
@@ -1034,34 +1254,45 @@ def calculate_unit_economics(
     if mode == "markup" and markup_pct != 0:
         price_with_markup = price * (1 + markup_pct / 100)
     elif mode == "targetMargin":
-        target_denom = 1.0 - variable_rate - target_margin
-        target_denom = np.where(target_denom < 0.05, 0.05, target_denom)
-        price_with_markup = (cost + logistics + storage + spec_fixed) / target_denom
-        # min commission adjustment
-        low_target = price_with_markup * commission_rate < float(settings["min_commission"])
-        if np.any(low_target):
+        # Для фиксированных: logistics фиксированной доли, storage=0
+        if np.any(is_fixed):
+            # Пересчитаем target цену отдельно для fixed и std
+            # Для fixed: numer = cost+storage+specFixed, denom = 1 - fixedRate - acquiring - warranty - surcharges - targetMargin
+            fixed_var = fixed_rate_arr + acquiring_rate + float(settings["warranty_reserve"]) + np.where(hazard, float(settings["hazard_surcharge"]), 0.0) + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
+            target_fixed = (cost + storage + spec_fixed) / np.maximum(0.05, 1 - fixed_var - target_margin)
+            price_with_markup = np.where(is_fixed, target_fixed, price_with_markup)
+            # min commission не применяется к fixed
+            low_target_std = (~is_fixed) & (price_with_markup * commission_rate < float(settings["min_commission"]))
+        else:
+            low_target_std = price_with_markup * commission_rate < float(settings["min_commission"])
+        if np.any(low_target_std):
             denom_t2 = 1.0 - (
-                float(settings["acquiring_fee"])
+                acquiring_rate
                 + float(settings["warranty_reserve"])
                 + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
                 + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
+                + float(settings["return_fee"])
                 + target_margin
             )
             denom_t2 = np.where(denom_t2 < 0.05, 0.05, denom_t2)
-            price_alt = (cost + logistics + storage + spec_fixed + float(settings["min_commission"])) / denom_t2
-            price_with_markup = np.where(low_target, price_alt, price_with_markup)
+            price_alt = (cost + srednya + storage + spec_fixed + float(settings["min_commission"])) / denom_t2
+            price_with_markup = np.where(low_target_std, price_alt, price_with_markup)
         price_with_markup = np.maximum(price_with_markup, cost + 10)
 
-    commission_markup = np.maximum(price_with_markup * commission_rate, float(settings["min_commission"]))
-    acquiring_markup = price_with_markup * float(settings["acquiring_fee"])
-    returns_markup = price_with_markup * float(settings["return_fee"])
+    # Пересчёт расходов для новой цены с учётом фиксированного тарифа
+    commission_markup = np.where(is_fixed, 0.0, np.maximum(price_with_markup * commission_rate, float(settings["min_commission"])))
+    # Для fixed logistics = price * fixedRate, иначе srednya (пересчитываем на случай если объём изменился? объём константа)
+    logistics_markup = np.where(is_fixed, price_with_markup * fixed_rate_arr, srednya)
+    storage_markup = storage  # storage не зависит от новой цены (для FBS 0, для FBY от объёма)
+    acquiring_markup = price_with_markup * acquiring_rate
+    returns_markup = np.where(is_fixed, 0.0, price_with_markup * float(settings["return_fee"]))
     special_markup = (
         spec_fixed
         + price_with_markup * float(settings["warranty_reserve"])
         + np.where(hazard, price_with_markup * float(settings["hazard_surcharge"]), 0.0)
         + np.where(fragile, price_with_markup * float(settings["fragile_surcharge"]), 0.0)
     )
-    total_markup = cost + commission_markup + logistics + storage + acquiring_markup + returns_markup + special_markup
+    total_markup = cost + commission_markup + logistics_markup + storage_markup + acquiring_markup + returns_markup + special_markup
     profit_markup = price_with_markup - total_markup
     margin_markup = np.divide(profit_markup, price_with_markup, out=np.zeros_like(profit_markup), where=price_with_markup > 0)
 
@@ -1098,9 +1329,15 @@ def calculate_unit_economics(
             "Возвраты_руб": returns,
             "Спец_расходы_FBS": special_costs,
             "Итого_расходы": total_expenses,
-            "Выплата_селлеру": payout,
             "Прибыль": profit,
             "Маржа_%": margin,
+            "Продажи_шт": qty,
+            "Выручка": price * qty,
+            "Прибыль_период": profit * qty,
+            "Валидация": np.where(validation == "", "OK", validation),
+            "Сумма_сторон": sum_sides,
+            "Плотность": density,
+            "Фиксированный_тариф": is_fixed,
             "Рекомендованная_цена": recommended,
             "Цена_с_наценкой": price_with_markup,
             "Прибыль_с_наценкой": profit_markup,
@@ -1111,29 +1348,38 @@ def calculate_unit_economics(
             "Причина_спецтарифа": special_reason,
         }
     )
-    # ABC / XYZ (vectorized after dataframe creation for sorting stability)
+    # Рекомендация по цене
+    result["Рекомендация"] = np.where(
+        result["Прибыль"] < 0,
+        "↑ Поднять до " + result["Рекомендованная_цена"].round(0).astype(str) + " ₽",
+        np.where(result["Маржа_%"] < 0.05, "⚠ Критично: <5%", np.where(result["Маржа_%"] < 0.15, "→ Можно +10%", "✓ ОК")),
+    )
+    # Добавляем пометку про фикс
+    result.loc[result["Фиксированный_тариф"], "Рекомендация"] = result.loc[result["Фиксированный_тариф"], "Рекомендация"] + " · фикс 42/35%"
+    # ABC / XYZ — экономически корректно: ABC по ВЫРУЧКЕ ЗА ПЕРИОД (Цена × Продажи_шт)
     if n > 0:
-        # ABC by revenue (price) descending
-        order = np.argsort(-price, kind="stable")
-        cumsum = np.cumsum(price[order])
+        revenue_period = price * qty
+        order = np.argsort(-revenue_period, kind="stable")
+        cumsum = np.cumsum(revenue_period[order])
         total = cumsum[-1] if cumsum.size else 1
         abc = np.full(n, "C", dtype=object)
-        # thresholds
         cum_share = cumsum / (total if total > 0 else 1)
         abc[cum_share <= 0.80] = "A"
         mask_b = (cum_share > 0.80) & (cum_share <= 0.95)
         abc[mask_b] = "B"
-        # map back to original order
+        # Товары без выручки — всегда C
+        abc[revenue_period[order] <= 0] = "C"
         abc_final = np.empty(n, dtype=object)
         abc_final[order] = abc
-        # XYZ by turnover
-        t_sorted = np.sort(turnover)
-        q1 = t_sorted[int(n * 0.33)] if n >= 3 else 30
-        q2 = t_sorted[int(n * 0.66)] if n >= 3 else 45
-        xyz = np.where(turnover <= q1, "X", np.where(turnover <= q2, "Y", "Z"))
+        cum_final = np.empty(n, dtype=float)
+        cum_final[order] = cum_share
+        # XYZ по АБСОЛЮТНЫМ порогам оборачиваемости (терцили дают ложные 33/33/33)
+        xyz = np.where(turnover <= XYZ_X_DAYS, "X", np.where(turnover <= XYZ_Y_DAYS, "Y", "Z"))
         result["ABC"] = abc_final
+        result["ABC_накопл"] = cum_final
         result["XYZ"] = xyz
         result["ABC_XYZ"] = result["ABC"].astype(str) + result["XYZ"].astype(str)
+        result["ABC_XYZ_смысл"] = result["ABC_XYZ"].map(ABC_XYZ_MEANING).fillna("")
         # Текстовая рекомендация по цене
         result["Рекомендация"] = np.where(
             result["Прибыль"] < 0,
@@ -1142,8 +1388,10 @@ def calculate_unit_economics(
         )
     else:
         result["ABC"] = pd.Series(dtype="string")
+        result["ABC_накопл"] = pd.Series(dtype="float")
         result["XYZ"] = pd.Series(dtype="string")
         result["ABC_XYZ"] = pd.Series(dtype="string")
+        result["ABC_XYZ_смысл"] = pd.Series(dtype="string")
         result["Рекомендация"] = pd.Series(dtype="string")
 
     result.attrs["calculation_seconds"] = time.perf_counter() - started
@@ -1184,9 +1432,11 @@ def run_calculation() -> None:
 # =============================================================================
 
 def calculate_totals(df: pd.DataFrame) -> Dict[str, float]:
-    revenue = float(df["Цена"].sum())
-    expenses = float(df["Итого_расходы"].sum())
-    profit = float(df["Прибыль"].sum())
+    # Экономически верно: выручка и прибыль ЗА ПЕРИОД (× продажи)
+    qty = df["Продажи_шт"] if "Продажи_шт" in df.columns else 1
+    revenue = float((df["Цена"] * qty).sum())
+    expenses = float((df["Итого_расходы"] * qty).sum())
+    profit = float((df["Прибыль"] * qty).sum())
     return {
         "count": len(df),
         "revenue": revenue,
@@ -1210,14 +1460,19 @@ def aggregate_by(df: pd.DataFrame, column: str) -> pd.DataFrame:
     source = df[
         [column, "Артикул", "Цена", "Итого_расходы", "Прибыль", "Спецтариф_применён"]
     ].copy()
+    qty = df["Продажи_шт"] if "Продажи_шт" in df.columns else 1
+    # Агрегируем за период: выручка = цена × продажи
+    source["Выручка_п"] = df["Цена"] * qty
+    source["Расходы_п"] = df["Итого_расходы"] * qty
+    source["Прибыль_п"] = df["Прибыль"] * qty
     source["_loss"] = source["Прибыль"].lt(0).astype("int8")
     grouped = (
         source.groupby(column, observed=True, sort=False)
         .agg(
             SKU=("Артикул", "size"),
-            Выручка=("Цена", "sum"),
-            Расходы=("Итого_расходы", "sum"),
-            Прибыль=("Прибыль", "sum"),
+            Выручка=("Выручка_п", "sum"),
+            Расходы=("Расходы_п", "sum"),
+            Прибыль=("Прибыль_п", "sum"),
             Убыточных_SKU=("_loss", "sum"),
             Спецтариф_SKU=("Спецтариф_применён", "sum"),
         )
@@ -2148,6 +2403,31 @@ if selected_step == steps[0]:
         unsafe_allow_html=True,
     )
     settings = st.session_state.settings
+
+    # ── Достоверная модель FBS 2026 ──
+    st.markdown('<div class="soft-panel" style="border-left:4px solid #6366f1; background: linear-gradient(135deg, #eef2ff, white);">', unsafe_allow_html=True)
+    st.markdown("**✅ Достоверная модель FBS 2026 — проверьте перед расчётом**")
+    st.caption("С 1 апреля 2026: фиксированный тариф для товаров ≤300₽/≤5л (FBS 42% / FBY 35%), новая объёмная сетка средней мили, приём платежей по графику выплат. Все формулы открыты — сверьте с кабинетом партнёра.")
+    acc_c1, acc_c2, acc_c3, acc_c4 = st.columns(4)
+    model = acc_c1.selectbox("Модель", ["FBS","FBY"], index=0 if settings.get("model","FBS")=="FBS" else 1, help="FBS — ваш склад (хранение 0₽), FBY — склад Маркета (платное после льготного периода)")
+    payout = acc_c2.selectbox("График выплат", ["weekly_4w","weekly_2w","weekly_1w","daily"], index=["weekly_4w","weekly_2w","weekly_1w","daily"].index(settings.get("payout_schedule","weekly_2w")), format_func=lambda x: {"weekly_4w":"Еженедельно 4н — 1,6%","weekly_2w":"Еженедельно 2н — 2,3%","weekly_1w":"Еженедельно 1н — 2,8%","daily":"Ежедневно — 3,3%"}[x], help="Найдите в Финансы → Настройки выплат")
+    use_fixed = acc_c3.toggle("Фиксированный ≤300₽/5л", value=settings.get("use_fixed_tariff", True), help="42% FBS / 35% FBY включает размещение+доставку. Выкл — всегда по сетке средней мили.")
+    speed = acc_c4.selectbox("Скидка FBS за скорость", [0.0,0.04,0.07], index=[0.0,0.04,0.07].index(float(settings.get("fbs_speed_discount",0.0))), format_func=lambda x: {0.0:"Стандарт",0.04:"≤36ч −4 п.п.",0.07:"≤28ч −7 п.п. (35%)"}[x], help="Только для FBS. Проверьте в Отчёты → Скорость отгрузки", disabled=(model!="FBS"))
+    free_days = st.slider("Бесплатно хранение FBY, дней", 0, 120, int(settings.get("storage_free_days",90)), 15, help="Для FBS не влияет (0₽). Для FBY — льготный период.", disabled=(model!="FBY"))
+    st.markdown(f'<div class="small-muted">Средняя миля 2026: 80₽ (≤1л) · +9₽/л до 30л · +7₽ до 200л · +5₽ свыше · потолок 5500₽ · объём = Д×Ш×В/1000 ↑</div>', unsafe_allow_html=True)
+    if st.button("Сохранить достоверность", type="primary", use_container_width=True):
+        st.session_state.settings["model"] = model
+        st.session_state.settings["payout_schedule"] = payout
+        st.session_state.settings["use_fixed_tariff"] = use_fixed
+        st.session_state.settings["fbs_speed_discount"] = float(speed)
+        st.session_state.settings["storage_free_days"] = int(free_days)
+        # Перезаписываем acquiring_fee для совместимости
+        st.session_state.settings["acquiring_fee"] = PAYOUT_SCHEDULE_RATES[payout]
+        save_settings(st.session_state.settings)
+        mark_dirty()
+        st.success("Достоверная модель сохранена. Если каталог рассчитан — пересчитайте.")
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
 
     with st.form("tariff_form", border=False):
         base_tab, special_tab, costs_tab, fallback_tab, cat_tab, price_tab = st.tabs(
