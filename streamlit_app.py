@@ -248,12 +248,61 @@ st.markdown(
     }
     .stApp { background: #f1f5f9; color: var(--ink); }
     .block-container { max-width: 1480px; padding-top: 1.25rem; padding-bottom: 4rem; }
-    [data-testid="stSidebar"] { background: #0f172a; }
+    [data-testid="stSidebar"] { background: linear-gradient(180deg,#0f172a 0%, #131c33 100%); }
     [data-testid="stSidebar"] * { color: #e2e8f0; }
+    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.12); }
+    /* Метрики в тёмном сайдбаре: тёмная стеклянная карточка + светлый текст */
+    [data-testid="stSidebar"] [data-testid="stMetric"] {
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 14px;
+        padding: 12px 14px;
+        box-shadow: none;
+    }
+    [data-testid="stSidebar"] [data-testid="stMetricLabel"],
+    [data-testid="stSidebar"] [data-testid="stMetricLabel"] * {
+        color: #94a3b8 !important;
+        font-weight: 700;
+    }
+    [data-testid="stSidebar"] [data-testid="stMetricValue"],
+    [data-testid="stSidebar"] [data-testid="stMetricValue"] * {
+        color: #ffffff !important;
+        font-weight: 800;
+    }
+    [data-testid="stSidebar"] [data-testid="stMetricDelta"] * { color: #34d399 !important; }
+    /* Кнопки в сайдбаре — контрастные, читаемые */
+    [data-testid="stSidebar"] .stButton > button {
+        background: linear-gradient(90deg,#4f46e5,#7c3aed) !important;
+        color: #ffffff !important;
+        border: 0 !important;
+        font-weight: 700;
+        box-shadow: 0 6px 16px rgba(79,70,229,.35);
+    }
+    [data-testid="stSidebar"] .stButton > button:hover { filter: brightness(1.08); }
+    [data-testid="stSidebar"] .stButton > button:disabled,
+    [data-testid="stSidebar"] .stButton > button[disabled] {
+        background: rgba(255,255,255,.08) !important;
+        color: #94a3b8 !important;
+        box-shadow: none;
+        opacity: 1 !important;
+    }
+    [data-testid="stSidebar"] .stDownloadButton > button {
+        background: rgba(255,255,255,.10) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255,255,255,.20) !important;
+        font-weight: 700;
+    }
+    /* Инфо-блок в сайдбаре */
+    [data-testid="stSidebar"] [data-testid="stAlert"] {
+        background: rgba(255,255,255,.06) !important;
+        border: 1px solid rgba(255,255,255,.14) !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stAlert"] * { color: #e2e8f0 !important; }
+    /* Поля ввода в сайдбаре — тёмный текст на светлом поле */
     [data-testid="stSidebar"] input,
     [data-testid="stSidebar"] textarea,
     [data-testid="stSidebar"] [data-baseweb="select"] * { color: #0f172a !important; }
-    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.12); }
+    [data-testid="stSidebar"] input::placeholder { color: #64748b !important; }
     .hero {
         position: relative; overflow: hidden; border-radius: 24px;
         padding: 30px 34px; color: white; margin-bottom: 18px;
