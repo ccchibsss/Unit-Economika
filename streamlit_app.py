@@ -1633,6 +1633,17 @@ def configure_excel_formats(workbook: Any) -> Dict[str, Any]:
                 "text_wrap": True,
             }
         ),
+        "header_success": workbook.add_format(
+            {
+                "bold": True,
+                "bg_color": "#059669",
+                "font_color": "#FFFFFF",
+                "border": 1,
+                "align": "center",
+                "valign": "vcenter",
+                "text_wrap": True,
+            }
+        ),
         "header_warm": workbook.add_format(
             {
                 "bold": True,
