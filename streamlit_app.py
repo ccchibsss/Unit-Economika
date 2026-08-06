@@ -2243,7 +2243,8 @@ def export_formula_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
                 ws_calc.write_formula(idx, 10, f"=G{excel_row}*'Тариф'!$B$7", formats["money"], row.Эквайринг_руб)
                 ws_calc.write_formula(idx, 11, f"=G{excel_row}*'Тариф'!$B$8", formats["money"], row.Возвраты_руб)
                 ws_calc.write_formula(idx, 12, f"='Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11+G{excel_row}*'Тариф'!$B$12+IF('Входные_Данные'!M{source_row},G{excel_row}*'Тариф'!$B$13,0)+IF('Входные_Данные'!N{source_row},G{excel_row}*'Тариф'!$B$14,0)", formats["money"], row.Спец_расходы_FBS)
-                ws_calc.write_formula(idx, 13, f"=SUM(E{excel_row}:M{excel_row})", formats["money"], row.Итого_расходы)
+                # ИСПРАВЛЕНО: Итого = Себестоимость + все расходы (БЕЗ Рекоменд/Цены с наценкой)
+                ws_calc.write_formula(idx, 13, f"=E{excel_row}+H{excel_row}+I{excel_row}+J{excel_row}+K{excel_row}+L{excel_row}+M{excel_row}", formats["money"], row.Итого_расходы)
                 ws_calc.write_formula(idx, 14, f"=G{excel_row}-N{excel_row}", formats["money"], float(row.Прибыль_с_наценкой) if "Прибыль_с_наценкой" in df.columns else float(row.Прибыль))
                 # Безопасное получение маржи через DataFrame (надёжнее из-за спецсимволов)
                 try:
