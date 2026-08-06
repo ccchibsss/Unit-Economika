@@ -1,25 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-Unit Economics FBS for Yandex Market
-Monolithic Streamlit application, version 4.1.0.
+Юнит-экономика FBS Яндекс Маркет — монолит Streamlit.
 
-Run:
+Запуск:
     pip install streamlit pandas numpy plotly requests xlsxwriter openpyxl
     streamlit run streamlit_app.py
 
-The application is designed for catalogs up to 300,000 SKU. CSV is the
-recommended format for large files. All business logic, UI, API integration,
-analytics and exports are intentionally kept in this single file.
+Что умеет:
+    - загрузка каталога: Артикул, Бренд, Категория, Длина, Ширина, Высота, Цена;
+    - себестоимость и вес необязательны;
+    - расчёт до 300 000+ SKU;
+    - ABC/XYZ, цена безубыточности, цена с наценкой, цена под целевую маржу;
+    - новые категории вручную и через CSV;
+    - сохранение и восстановление загруженных данных;
+    - Excel с живыми формулами без ограничения 300k строк: при превышении лимита Excel
+      строки автоматически разбиваются на несколько листов Расчет_1, Расчет_2, ...
 """
 
 from __future__ import annotations
 
-import csv
 import io
 import json
 import logging
 import math
 import os
+import pickle
 import tempfile
 import time
 from datetime import datetime
@@ -33,49 +38,30 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 import xlsxwriter
+from xlsxwriter.utility import xl_col_to_name
 
 
 # =============================================================================
-# APPLICATION CONFIGURATION
+# НАСТРОЙКИ И КОНСТАНТЫ
 # =============================================================================
-
-APP_NAME = "Юнит-экономика FBS"
+APP_NAME = "Юнит-экономика FBS — Яндекс Маркет"
 APP_VERSION = "5.0.0"
-MAX_SKU = 1_048_500
-FORMULA_EXCEL_LIMIT = 1_048_500
-TABLE_PREVIEW_LIMIT = 5_000
-API_URL = "https://api.partner.market.yandex.ru"
-CATEGORY_CSV_TEMPLATE = (
-    "key;label;volume_l;weight_kg;is_hazardous;is_fragile;commission_rate;logistics_base;storage_per_day_per_liter\n"
-    "фильтры;Фильтры;1.5;0.5;false;false;0.14;45;0.25\n"
-    "шины;Шины;25;10;false;false;0.12;90;0.5\n"
-    "аккумулятор;Аккумуляторы;12;15;true;true;0.13;75;0.4\n"
-)
 
-BASE_DIR = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+BASE_DIR = Path(__file__).parent.resolve() if "__file__" in globals() else Path.cwd()
 DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-SETTINGS_FILE = DATA_DIR / "unit_economics_settings.json"
+SAVE_DIR = DATA_DIR / "saved_catalogs"
+DATA_DIR.mkdir(exist_ok=True)
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("UnitEconomicsFBS")
+BIG_DATA_THRESHOLD = 20_000
+EXCEL_MAX_ROWS = 1_048_576
+EXCEL_DATA_ROWS_PER_SHEET = 1_000_000
+DEFAULT_COST_FALLBACK = 0.65
+DEFAULT_DENSITY_KG_PER_L = 0.30
+DEFAULT_TARGET_MARGIN = 0.20
+DEFAULT_MARKUP = 0.15
 
-st.set_page_config(
-    page_title=f"{APP_NAME} | Яндекс Маркет",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-
-# =============================================================================
-# CONSTANTS AND DEFAULTS
-# =============================================================================
-
-DEFAULT_SETTINGS: Dict[str, Any] = {
+DEFAULT_BASE_TARIFF = {
     "commission_rate": 0.14,
     "min_commission": 45.0,
     "logistics_base": 45.0,
@@ -83,2927 +69,1639 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "storage_per_day_per_liter": 0.25,
     "acquiring_fee": 0.02,
     "return_fee": 0.02,
+}
+
+DEFAULT_SPECIAL_COSTS = {
     "packaging": 45.0,
     "chestny_znak": 1.5,
     "labeling": 3.0,
     "warranty_reserve": 0.02,
     "hazard_surcharge": 0.01,
     "fragile_surcharge": 0.005,
-    "cost_fallback_rate": 0.65,
-    "density_kg_per_liter": 0.30,
-    "special_enabled": True,
-    "use_category_rates": True,
-    "category_rates": {},
-    "custom_categories": [],
-    "pricing": {"mode": "none", "markupPercent": 15, "targetMargin": 0.20},
-    "special_tariffs": {
-        "шины": {
-            "label": "Шины",
-            "commission_rate": 0.12,
-            "logistics_base": 90.0,
-            "storage_per_day_per_liter": 0.50,
-            "reason": "Крупногабаритный",
-        },
-        "аккумулятор": {
-            "label": "Аккумуляторы",
-            "commission_rate": 0.13,
-            "logistics_base": 75.0,
-            "storage_per_day_per_liter": 0.40,
-            "reason": "Опасный груз",
-        },
-        "двигател": {
-            "label": "Двигатели",
-            "commission_rate": 0.11,
-            "logistics_base": 120.0,
-            "storage_per_day_per_liter": 0.60,
-            "reason": "Крупногабаритный/тяжёлый",
-        },
-        "кпп": {
-            "label": "КПП",
-            "commission_rate": 0.11,
-            "logistics_base": 110.0,
-            "storage_per_day_per_liter": 0.60,
-            "reason": "Крупногабаритный/тяжёлый",
-        },
+}
+
+DEFAULT_SPECIAL_TARIFFS = {
+    "шины": {
+        "label": "Шины",
+        "commission_rate": 0.12,
+        "logistics_base": 90.0,
+        "storage_per_day_per_liter": 0.50,
+        "reason": "Крупногабаритный",
+    },
+    "аккумулятор": {
+        "label": "Аккумуляторы",
+        "commission_rate": 0.13,
+        "logistics_base": 75.0,
+        "storage_per_day_per_liter": 0.40,
+        "reason": "Опасный груз",
+    },
+    "двигател": {
+        "label": "Двигатели",
+        "commission_rate": 0.11,
+        "logistics_base": 120.0,
+        "storage_per_day_per_liter": 0.60,
+        "reason": "Крупногабаритный/тяжелый",
+    },
+    "кпп": {
+        "label": "КПП",
+        "commission_rate": 0.11,
+        "logistics_base": 110.0,
+        "storage_per_day_per_liter": 0.60,
+        "reason": "Крупногабаритный/тяжелый",
     },
 }
 
-CATEGORY_DEFAULTS: Dict[str, Tuple[float, float, bool, bool]] = {
-    "фильтры": (1.5, 0.5, False, False),
-    "масла": (5.0, 4.0, True, False),
-    "колодки": (0.8, 1.2, False, False),
-    "диски": (3.0, 4.0, False, True),
-    "амортизаторы": (4.0, 3.5, False, True),
-    "аккумуляторы": (12.0, 15.0, True, True),
-    "шины": (25.0, 10.0, False, False),
-    "фары": (6.0, 2.5, False, True),
-    "двигател": (50.0, 80.0, True, True),
-    "кпп": (40.0, 50.0, True, True),
+DEFAULT_CATEGORIES = {
+    "фильтры": {"volume_l": 1.5, "weight_kg": 0.5, "hazardous": False, "fragile": False},
+    "масла": {"volume_l": 5.0, "weight_kg": 4.0, "hazardous": True, "fragile": False},
+    "колодки": {"volume_l": 0.8, "weight_kg": 1.2, "hazardous": False, "fragile": False},
+    "диски": {"volume_l": 3.0, "weight_kg": 4.0, "hazardous": False, "fragile": True},
+    "амортизаторы": {"volume_l": 4.0, "weight_kg": 3.5, "hazardous": False, "fragile": True},
+    "аккумуляторы": {"volume_l": 12.0, "weight_kg": 15.0, "hazardous": True, "fragile": True},
+    "шины": {"volume_l": 25.0, "weight_kg": 10.0, "hazardous": False, "fragile": False},
+    "фары": {"volume_l": 6.0, "weight_kg": 2.5, "hazardous": False, "fragile": True},
+    "двигател": {"volume_l": 50.0, "weight_kg": 80.0, "hazardous": True, "fragile": True},
+    "кпп": {"volume_l": 40.0, "weight_kg": 50.0, "hazardous": True, "fragile": True},
 }
 
-DEMO_CATEGORY_RATES: Dict[str, float] = {
-    "фильтры": 0.14,
-    "масла": 0.15,
-    "колодки": 0.13,
-    "диски": 0.16,
-    "амортизаторы": 0.15,
-    "аккумуляторы": 0.13,
-    "шины": 0.12,
-    "фары": 0.17,
-    "двигатели": 0.11,
-    "кпп": 0.11,
+FALLBACK_CATEGORY = {"volume_l": 2.0, "weight_kg": 1.0, "hazardous": False, "fragile": False}
+
+SYNONYMS = {
+    "Артикул": ["артикул", "sku", "код", "код товара", "offer id", "offerid", "shop-sku", "артикул товара"],
+    "Бренд": ["бренд", "brand", "производитель", "марка", "vendor", "торговая марка", "изготовитель"],
+    "Категория": ["категория", "category", "группа", "тип товара", "раздел", "категория товара"],
+    "Цена": ["цена", "price", "розничная цена", "цена продажи", "цена на маркете", "цена, руб", "цена, ₽"],
+    "Себестоимость": ["себестоимость", "cost", "закупка", "закупочная цена", "закуп", "себестоимость, руб"],
+    "Вес_кг": ["вес_кг", "вес", "weight", "масса", "вес, кг", "вес упаковки"],
+    "Длина": ["длина", "length", "длина упаковки", "длина, см", "длина, мм"],
+    "Ширина": ["ширина", "width", "ширина упаковки", "ширина, см", "ширина, мм"],
+    "Высота": ["высота", "height", "высота упаковки", "высота, см", "высота, мм"],
+    "Объем_л": ["объем_л", "объем", "объём", "volume", "объем, л", "объём, л"],
+    "Оборачиваемость_дней": ["оборачиваемость", "turnover", "срок хранения", "оборачиваемость, дней"],
+    "Опасный": ["опасный", "hazardous", "опасный груз"],
+    "Хрупкий": ["хрупкий", "fragile", "хрупкий груз"],
 }
 
-COLUMN_SYNONYMS: Dict[str, List[str]] = {
-    "Артикул": [
-        "артикул", "sku", "артикул товара", "артикул поставщика", "код",
-        "код товара", "offer id", "offerid", "shop-sku", "shop sku",
-    ],
-    "Бренд": [
-        "бренд", "brand", "производитель", "марка", "торговая марка",
-        "vendor", "изготовитель",
-    ],
-    "Категория": [
-        "категория", "категория товара", "category", "группа", "тип товара",
-        "раздел",
-    ],
-    "ID_категории": [
-        "id категории", "category id", "categoryid", "market category id",
-        "marketcategoryid", "market_category_id",
-    ],
-    "Цена": [
-        "цена", "цена, ₽", "цена руб", "цена, руб", "розничная цена",
-        "price", "цена продажи", "цена на маркете",
-    ],
-    "Себестоимость": [
-        "себестоимость", "себестоимость, ₽", "cost", "закупка",
-        "закупочная цена", "закупочная", "закуп",
-    ],
-    "Вес_кг": [
-        "вес_кг", "вес, кг", "вес", "вес (кг)", "weight", "масса",
-        "вес брутто",
-    ],
-    "Длина": [
-        "длина", "длина, см", "длина, мм", "длина (см)", "length",
-        "длина упаковки",
-    ],
-    "Ширина": [
-        "ширина", "ширина, см", "ширина, мм", "ширина (см)", "width",
-        "ширина упаковки",
-    ],
-    "Высота": [
-        "высота", "высота, см", "высота, мм", "высота (см)", "height",
-        "высота упаковки",
-    ],
-    "Объем_л": [
-        "объем_л", "объем, л", "объем", "объём, л", "объём", "volume",
-    ],
-    "Оборачиваемость_дней": [
-        "оборачиваемость_дней", "оборачиваемость", "оборачиваемость, дней",
-        "turnover", "оборачиваемость, дн", "срок хранения",
-    ],
-    "Опасный": [
-        "опасный", "опасный груз", "опасность", "hazardous", "опасный_груз",
-    ],
-    "Хрупкий": [
-        "хрупкий", "хрупкий груз", "хрупкость", "fragile", "хрупкий_груз",
-    ],
-}
-
-REQUIRED_COLUMNS = ["Артикул", "Категория", "Цена"]
-
-RESULT_COLUMNS = [
-    "Артикул", "Бренд", "Категория", "ID_категории", "Длина", "Ширина",
-    "Высота", "Объем_л", "Вес_кг", "Оплач_вес", "Цена", "Себестоимость",
-    "Себестоимость_оценка", "Ставка_комиссии", "Комиссия_руб",
-    "Логистика_руб", "Хранение_руб", "Эквайринг_руб", "Возвраты_руб", "Спец_расходы_FBS",
-    "Итого_расходы", "Прибыль", "Маржа_%", "Рекомендованная_цена", "Цена_с_наценкой",
-    "Прибыль_с_наценкой", "Маржа_с_наценкой_%", "ABC", "XYZ", "ABC_XYZ", "Выручка_доля",
-    "Оборачиваемость_дней", "Спецтариф_применён", "Причина_спецтарифа",
+DEMO_BRANDS = [
+    "Bosch", "Mann-Filter", "Sachs", "Brembo", "Mahle", "Denso", "Valeo", "TRW",
+    "NGK", "Febi Bilstein", "Lemforder", "Hella", "Continental", "Michelin", "Varta",
 ]
 
-MONEY_COLUMNS = [
-    "Цена", "Себестоимость", "Комиссия_руб", "Логистика_руб",
-    "Хранение_руб", "Эквайринг_руб", "Возвраты_руб", "Спец_расходы_FBS",
-    "Итого_расходы", "Прибыль",
+DEMO_CATS = [
+    ("Фильтры", 280, 900, 22, 14, 14, 0.6, 25),
+    ("Масла", 700, 4200, 28, 16, 28, 4.4, 20),
+    ("Колодки", 1500, 3800, 18, 12, 8, 1.4, 30),
+    ("Диски", 2500, 9500, 62, 62, 22, 9.2, 45),
+    ("Амортизаторы", 3200, 7800, 66, 16, 16, 3.6, 40),
+    ("Аккумуляторы", 5200, 12500, 35, 26, 26, 17.0, 35),
+    ("Шины", 4200, 14500, 70, 70, 26, 10.6, 15),
+    ("Фары", 2800, 18500, 52, 26, 26, 2.6, 50),
+    ("Двигатели", 65000, 180000, 100, 62, 72, 95.0, 90),
+    ("КПП", 48000, 120000, 82, 58, 56, 50.0, 90),
 ]
+
+CALC_EXPORT_COLUMNS = [
+    "Артикул", "Бренд", "Категория", "Длина", "Ширина", "Высота", "Объем_л", "Вес_кг", "Оплач_вес",
+    "Оборачиваемость_дней", "Цена", "Себестоимость", "Себестоимость_оценка", "Ставка_комиссии",
+    "Логистика_база", "Логистика_за_кг", "Ставка_хранения", "Ставка_эквайринга", "Переменная_ставка",
+    "Фикс_расходы_без_цены", "Комиссия_руб", "Логистика_руб", "Хранение_руб", "Эквайринг_руб",
+    "Спец_расходы_FBS", "Итого_расходы", "Прибыль", "Маржа_%", "Безубыток_руб", "Цена_с_наценкой",
+    "Цена_целевая_маржа", "Рекомендованная_цена", "Маржа_при_рекоменд_цене", "ABC", "XYZ", "ABC_XYZ",
+    "Спецтариф_применен", "Причина_спецтарифа", "Опасный", "Хрупкий",
+]
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("unit_economics_fbs")
 
 
 # =============================================================================
-# VISUAL STYLE
+# CSS И ФОРМАТИРОВАНИЕ
 # =============================================================================
-
-st.markdown(
-    """
+CSS = """
 <style>
-    :root {
-        --ink: #0f172a;
-        --muted: #64748b;
-        --line: #e2e8f0;
-        --indigo: #4f46e5;
-        --violet: #7c3aed;
-        --green: #059669;
-        --amber: #d97706;
-        --red: #e11d48;
-    }
-    .stApp { background: #f1f5f9; color: var(--ink); }
-    .block-container { max-width: 1480px; padding-top: 1.25rem; padding-bottom: 4rem; }
-    [data-testid="stSidebar"] { background: #0f172a; }
-    [data-testid="stSidebar"] * { color: #e2e8f0; }
-    [data-testid="stSidebar"] input,
-    [data-testid="stSidebar"] textarea,
-    [data-testid="stSidebar"] [data-baseweb="select"] * { color: #0f172a !important; }
-    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.12); }
-    .hero {
-        position: relative; overflow: hidden; border-radius: 24px;
-        padding: 30px 34px; color: white; margin-bottom: 18px;
-        background: linear-gradient(115deg, #0f172a 0%, #312e81 58%, #4c1d95 100%);
-        box-shadow: 0 18px 50px rgba(30,41,59,.16);
-    }
-    .hero:after {
-        content: ""; position: absolute; width: 340px; height: 340px;
-        right: -110px; top: -180px; border-radius: 999px;
-        border: 55px solid rgba(255,255,255,.06);
-    }
-    .hero-kicker { font-size: 12px; font-weight: 800; letter-spacing: .14em; color: #fbbf24; }
-    .hero h1 { margin: 4px 0 4px; font-size: clamp(26px, 4vw, 42px); line-height: 1.08; }
-    .hero p { margin: 0; color: #cbd5e1; font-size: 14px; }
-    .hero-badge {
-        display: inline-block; margin-top: 15px; padding: 6px 11px;
-        border: 1px solid rgba(255,255,255,.18); border-radius: 999px;
-        background: rgba(255,255,255,.08); font-size: 11px; font-weight: 700;
-    }
-    .section-title { margin: 4px 0 2px; font-size: 23px; font-weight: 800; letter-spacing: -.02em; }
-    .section-sub { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
-    .info-box, .warn-box, .success-box, .danger-box {
-        border-radius: 14px; padding: 13px 15px; margin: 8px 0 14px;
-        font-size: 13px; line-height: 1.5; border: 1px solid;
-    }
-    .info-box { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
-    .warn-box { background: #fffbeb; color: #92400e; border-color: #fde68a; }
-    .success-box { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
-    .danger-box { background: #fff1f2; color: #9f1239; border-color: #fecdd3; }
-    .metric-card {
-        min-height: 132px; background: white; border: 1px solid var(--line);
-        border-radius: 18px; padding: 17px 18px; position: relative; overflow: hidden;
-        box-shadow: 0 2px 8px rgba(15,23,42,.04);
-    }
-    .metric-card:before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent); }
-    .metric-label { font-size: 11px; color: var(--muted); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-    .metric-value { margin-top: 8px; font-size: clamp(20px, 2.4vw, 30px); font-weight: 850; letter-spacing: -.04em; }
-    .metric-note { margin-top: 4px; color: var(--muted); font-size: 11px; }
-    .chip {
-        display: inline-block; padding: 4px 9px; border-radius: 999px;
-        margin: 2px; font-size: 11px; font-weight: 700;
-        background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe;
-    }
-    .soft-panel {
-        background: white; border: 1px solid var(--line); border-radius: 18px;
-        padding: 18px; box-shadow: 0 2px 8px rgba(15,23,42,.035);
-    }
-    div[data-testid="stMetric"] {
-        background: white; border: 1px solid var(--line); border-radius: 16px;
-        padding: 14px 16px; box-shadow: 0 2px 8px rgba(15,23,42,.035);
-    }
-    div[data-testid="stMetricLabel"] { color: var(--muted); }
-    .stButton > button, .stDownloadButton > button {
-        border-radius: 11px; font-weight: 750; min-height: 40px;
-        border: 1px solid #cbd5e1; transition: .18s ease;
-    }
-    .stButton > button[kind="primary"] {
-        border: 0; color: white;
-        background: linear-gradient(90deg, var(--indigo), var(--violet));
-    }
-    .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); }
-    div[data-baseweb="tab-list"] { gap: 6px; }
-    div[data-baseweb="tab"] { border-radius: 10px; padding: 8px 14px; }
-    [data-testid="stDataFrame"] { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
-    .small-muted { font-size: 11px; color: var(--muted); }
-    @media (max-width: 700px) {
-        .block-container { padding-left: .8rem; padding-right: .8rem; }
-        .hero { padding: 23px 20px; border-radius: 18px; }
-    }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@700;800&display=swap');
+html, body, [class*="css"] { font-family: Inter, sans-serif; }
+body { background: linear-gradient(180deg,#f8fafc 0%,#eef2ff 46%,#f8fafc 100%); }
+.stApp { background:
+  radial-gradient(circle at 8% 0%, rgba(99,102,241,.13), transparent 26rem),
+  radial-gradient(circle at 92% 8%, rgba(249,115,22,.12), transparent 28rem),
+  linear-gradient(180deg,#f8fafc 0%,#f1f5f9 100%); }
+.block-container { max-width: 1480px; padding-top: 1rem; padding-bottom: 3rem; }
+.hero {
+  background: linear-gradient(135deg,#020617 0%,#172554 36%,#4338ca 70%,#f97316 130%);
+  color: white; border-radius: 24px; padding: 24px 26px; position: relative; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(30,41,59,.22);
+}
+.hero:before { content:""; position:absolute; inset:-80px -140px auto auto; width:420px; height:260px;
+  background: radial-gradient(circle, rgba(251,191,36,.34), transparent 70%); }
+.hero h1 { font-family: Manrope, sans-serif; font-size: 1.8rem; font-weight: 800; margin:0; position:relative; }
+.hero p { color:#c7d2fe; margin:.35rem 0 0; position:relative; }
+.badge { display:inline-flex; align-items:center; gap:.35rem; padding:.25rem .65rem; border-radius:999px;
+  background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); color:#eef2ff; font-size:.75rem; font-weight:700; }
+.card { background:rgba(255,255,255,.92); border:1px solid rgba(226,232,240,.95); border-radius:20px; padding:18px; box-shadow:0 8px 26px rgba(15,23,42,.06); backdrop-filter: blur(8px); }
+.card-accent { position:relative; overflow:hidden; }
+.card-accent:before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:linear-gradient(90deg,#4f46e5,#06b6d4,#f97316); }
+.metric-card { background:white; border:1px solid #e2e8f0; border-radius:18px; padding:16px; position:relative; overflow:hidden; min-height:112px; }
+.metric-card:before { content:""; position:absolute; left:0; right:0; top:0; height:4px; }
+.mc-indigo:before{ background:linear-gradient(90deg,#4f46e5,#8b5cf6); }
+.mc-emerald:before{ background:linear-gradient(90deg,#059669,#14b8a6); }
+.mc-rose:before{ background:linear-gradient(90deg,#e11d48,#f43f5e); }
+.mc-amber:before{ background:linear-gradient(90deg,#f59e0b,#f97316); }
+.mc-sky:before{ background:linear-gradient(90deg,#0284c7,#06b6d4); }
+.small { color:#64748b; font-size:.78rem; font-weight:600; }
+.section-title { font-family:Manrope,sans-serif; font-weight:800; font-size:1.15rem; margin:.25rem 0 .65rem; color:#0f172a; }
+.muted { color:#64748b; font-size:.84rem; }
+.sample-grid { display:grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap:12px; margin: 10px 0 16px; }
+.sample-card { border:1px solid #e2e8f0; border-radius:18px; padding:14px; background:linear-gradient(180deg,#fff,#f8fafc); box-shadow:0 8px 20px rgba(15,23,42,.05); }
+.sample-card strong { display:block; font-family:Manrope,sans-serif; font-size:.98rem; color:#0f172a; }
+.sample-card span { display:block; margin-top:4px; font-size:.78rem; color:#64748b; line-height:1.35; }
+.pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px; font-size:.74rem; font-weight:800; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; }
+.soft-callout { border:1px solid #c7d2fe; background:linear-gradient(135deg,#eef2ff,#fff7ed); color:#334155; border-radius:18px; padding:14px 16px; }
+.download-zone { border:1px dashed #a5b4fc; border-radius:18px; padding:14px; background:rgba(238,242,255,.55); }
+.guide { border:1px solid rgba(129,140,248,.36); border-radius:22px; padding:16px 18px; margin: 0 0 16px;
+  background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(238,242,255,.88)); box-shadow:0 16px 34px rgba(79,70,229,.08); }
+.guide-title { font-family:Manrope,sans-serif; font-size:1.05rem; font-weight:800; color:#1e1b4b; margin-bottom:8px; }
+.guide-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:10px; }
+.guide-item { border:1px solid #e0e7ff; background:rgba(255,255,255,.78); border-radius:16px; padding:12px; color:#334155; font-size:.84rem; line-height:1.38; }
+.guide-item b { color:#312e81; }
+.step-status { display:flex; gap:10px; flex-wrap:wrap; margin: 10px 0 16px; }
+.step-chip { flex:1; min-width:180px; border:1px solid #e2e8f0; border-radius:18px; padding:12px 14px; background:rgba(255,255,255,.84); }
+.step-chip strong { display:block; color:#0f172a; font-family:Manrope,sans-serif; }
+.step-chip span { color:#64748b; font-size:.78rem; }
+.step-chip.active { border-color:#818cf8; background:linear-gradient(135deg,#eef2ff,#ffffff); box-shadow:0 14px 30px rgba(99,102,241,.13); }
+.step-chip.ready { border-color:#86efac; background:linear-gradient(135deg,#ecfdf5,#ffffff); }
+.visual-separator { height:1px; background:linear-gradient(90deg,transparent,#c7d2fe,transparent); margin:14px 0; }
+@media (max-width: 900px) { .sample-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 900px) { .guide-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .sample-grid { grid-template-columns: 1fr; } }
+.stButton button { border-radius: 12px !important; font-weight: 700 !important; }
+div[data-testid="stMetricValue"] { font-size: 1.45rem; }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+"""
 
 
-# =============================================================================
-# GENERIC HELPERS
-# =============================================================================
-
-def deep_copy_json(value: Any) -> Any:
-    return json.loads(json.dumps(value, ensure_ascii=False))
-
-
-def deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
-    result = deep_copy_json(base)
-    for key, value in patch.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def load_settings() -> Dict[str, Any]:
-    if SETTINGS_FILE.exists():
-        try:
-            with SETTINGS_FILE.open("r", encoding="utf-8") as fh:
-                return deep_merge(DEFAULT_SETTINGS, json.load(fh))
-        except Exception as exc:
-            logger.warning("Cannot load settings: %s", exc)
-    return deep_copy_json(DEFAULT_SETTINGS)
-
-
-def save_settings(settings: Dict[str, Any]) -> None:
-    try:
-        with SETTINGS_FILE.open("w", encoding="utf-8") as fh:
-            json.dump(settings, fh, ensure_ascii=False, indent=2)
-    except Exception as exc:
-        logger.warning("Cannot save settings: %s", exc)
-
-
-def money(value: float, digits: int = 0) -> str:
-    if value is None or not np.isfinite(value):
+def money(v: float, digits: int = 0) -> str:
+    if v is None or (isinstance(v, float) and not np.isfinite(v)):
         return "0 ₽"
-    return f"{value:,.{digits}f}".replace(",", " ").replace(".", ",") + " ₽"
+    return f"{v:,.{digits}f} ₽".replace(",", " ").replace(".", ",")
 
 
-def money_short(value: float) -> str:
-    sign = "-" if value < 0 else ""
-    value = abs(float(value))
-    if value >= 1_000_000_000:
-        return f"{sign}{value / 1_000_000_000:.2f}".replace(".", ",") + " млрд ₽"
-    if value >= 1_000_000:
-        return f"{sign}{value / 1_000_000:.2f}".replace(".", ",") + " млн ₽"
-    if value >= 1_000:
-        return f"{sign}{value / 1_000:.1f}".replace(".", ",") + " тыс ₽"
-    return money((-value if sign else value), 0)
+def money_short(v: float) -> str:
+    v = float(v or 0)
+    av = abs(v)
+    if av >= 1_000_000_000:
+        return f"{v / 1_000_000_000:.2f} млрд ₽".replace(".", ",")
+    if av >= 1_000_000:
+        return f"{v / 1_000_000:.2f} млн ₽".replace(".", ",")
+    if av >= 1_000:
+        return f"{v / 1_000:.1f} тыс ₽".replace(".", ",")
+    return money(v)
 
 
-def percent(value: float, digits: int = 1) -> str:
-    if value is None or not np.isfinite(value):
+def pct(v: float, digits: int = 1) -> str:
+    if v is None or not np.isfinite(float(v)):
         return "0%"
-    return f"{value * 100:.{digits}f}%".replace(".", ",")
+    return f"{float(v) * 100:.{digits}f}%".replace(".", ",")
 
 
-def file_size_label(size: int) -> str:
-    if size >= 1024 ** 3:
-        return f"{size / 1024 ** 3:.2f} ГБ"
-    if size >= 1024 ** 2:
-        return f"{size / 1024 ** 2:.1f} МБ"
-    return f"{size / 1024:.0f} КБ"
+def fmt_num(v: float, digits: int = 0) -> str:
+    return f"{float(v or 0):,.{digits}f}".replace(",", " ").replace(".", ",")
 
 
-def stable_settings_hash(settings: Dict[str, Any]) -> str:
-    return json.dumps(settings, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-
-
-def temporary_path(suffix: str) -> str:
-    fh = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    path = fh.name
-    fh.close()
-    return path
-
-
-def read_and_remove(path: str) -> bytes:
-    try:
-        with open(path, "rb") as fh:
-            return fh.read()
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
-
-def metric_card(label: str, value: str, note: str, accent: str) -> None:
-    st.markdown(
-        f"""
-        <div class="metric-card" style="--accent:{accent}">
-          <div class="metric-label">{label}</div>
-          <div class="metric-value">{value}</div>
-          <div class="metric-note">{note}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def fmt_size(bytes_count: int) -> str:
+    if bytes_count >= 1024 * 1024:
+        return f"{bytes_count / 1024 / 1024:.1f} МБ".replace(".", ",")
+    return f"{bytes_count / 1024:.0f} КБ"
 
 
 # =============================================================================
 # SESSION STATE
 # =============================================================================
-
-SESSION_DEFAULTS = {
-    "settings": load_settings(),
-    "raw_df": None,
-    "result_df": None,
-    "source_name": "",
-    "source_size": 0,
-    "parse_meta": {},
-    "calculated_settings_hash": "",
-    "calculation_seconds": 0.0,
-    "export_bytes": None,
-    "export_name": "",
-    "export_mime": "",
-    "last_api_result": None,
-}
-
-for state_key, state_value in SESSION_DEFAULTS.items():
-    if state_key not in st.session_state:
-        st.session_state[state_key] = state_value
-
-
-def clear_export() -> None:
-    st.session_state.export_bytes = None
-    st.session_state.export_name = ""
-    st.session_state.export_mime = ""
-
-
-def mark_dirty() -> None:
-    clear_export()
-
-
-def calculation_is_current() -> bool:
-    return (
-        st.session_state.result_df is not None
-        and st.session_state.calculated_settings_hash
-        == stable_settings_hash(st.session_state.settings)
-    )
-
-
-# =============================================================================
-# INPUT PARSING AND NORMALIZATION
-# =============================================================================
-
-def normalize_header(value: Any) -> str:
-    return " ".join(str(value).strip().lower().replace("ё", "е").split())
-
-
-def resolve_columns(columns: Iterable[Any]) -> Dict[str, str]:
-    original = [str(c).strip() for c in columns]
-    normalized = [normalize_header(c) for c in original]
-    result: Dict[str, str] = {}
-
-    for canonical, synonyms in COLUMN_SYNONYMS.items():
-        normalized_synonyms = [normalize_header(s) for s in synonyms]
-        found: Optional[str] = None
-
-        for idx, header in enumerate(normalized):
-            if header in normalized_synonyms:
-                found = original[idx]
-                break
-
-        if found is None:
-            for idx, header in enumerate(normalized):
-                if any(synonym in header for synonym in normalized_synonyms):
-                    found = original[idx]
-                    break
-
-        if found is not None:
-            result[canonical] = found
-
-    return result
-
-
-def detect_csv_format(data: bytes) -> Tuple[str, str]:
-    encodings = ["utf-8-sig", "utf-8", "cp1251"]
-    decoded = None
-    encoding = "utf-8-sig"
-
-    sample_bytes = data[:128_000]
-    for candidate in encodings:
-        try:
-            decoded = sample_bytes.decode(candidate)
-            encoding = candidate
-            break
-        except UnicodeDecodeError:
-            continue
-
-    if decoded is None:
-        encoding = "latin-1"
-        decoded = sample_bytes.decode(encoding, errors="replace")
-
-    first_lines = "\n".join(decoded.splitlines()[:20])
-    try:
-        dialect = csv.Sniffer().sniff(first_lines, delimiters=";,\t|")
-        separator = dialect.delimiter
-    except csv.Error:
-        counts = {sep: first_lines.count(sep) for sep in [";", ",", "\t", "|"]}
-        separator = max(counts, key=counts.get)
-
-    return encoding, separator
-
-
-def read_uploaded_file(uploaded: Any) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    started = time.perf_counter()
-    name = uploaded.name.lower()
-    data = uploaded.getvalue()
-
-    if name.endswith((".csv", ".txt", ".tsv")):
-        encoding, separator = detect_csv_format(data)
-        frame = pd.read_csv(
-            io.BytesIO(data),
-            sep=separator,
-            encoding=encoding,
-            low_memory=False,
-            on_bad_lines="warn",
-        )
-        input_type = f"CSV · разделитель {repr(separator)} · {encoding}"
-    elif name.endswith((".xlsx", ".xls")):
-        if len(data) > 80 * 1024 ** 2:
-            raise ValueError(
-                "Excel-файл больше 80 МБ. Сохраните его в CSV: для 300 000 SKU "
-                "CSV работает быстрее и требует меньше памяти."
-            )
-        frame = pd.read_excel(io.BytesIO(data), sheet_name=0)
-        input_type = "Excel · первый лист"
-    else:
-        raise ValueError("Поддерживаются CSV, TXT, TSV, XLSX и XLS.")
-
-    frame.columns = [str(c).strip() for c in frame.columns]
-    frame = frame.dropna(how="all")
-    return frame, {
-        "input_type": input_type,
-        "raw_rows": len(frame),
-        "raw_columns": len(frame.columns),
-        "parse_seconds": time.perf_counter() - started,
+def default_tariff() -> Dict[str, Any]:
+    return {
+        "base": dict(DEFAULT_BASE_TARIFF),
+        "special_enabled": True,
+        "special_tariffs": {k: dict(v) for k, v in DEFAULT_SPECIAL_TARIFFS.items()},
+        "special_costs": dict(DEFAULT_SPECIAL_COSTS),
+        "cost_fallback": DEFAULT_COST_FALLBACK,
+        "density_kg_per_l": DEFAULT_DENSITY_KG_PER_L,
+        "use_category_rates": True,
+        "category_rates": {},
     }
 
 
-def numeric_series(series: pd.Series) -> pd.Series:
-    if pd.api.types.is_numeric_dtype(series):
-        return pd.to_numeric(series, errors="coerce")
-    cleaned = (
-        series.astype("string")
-        .str.replace("\u00a0", "", regex=False)
-        .str.replace(" ", "", regex=False)
-        .str.replace("₽", "", regex=False)
-        .str.replace("%", "", regex=False)
-        .str.replace(",", ".", regex=False)
-    )
-    return pd.to_numeric(cleaned, errors="coerce")
+def ensure_state() -> None:
+    defaults = {
+        "step": 0,
+        "tariff": default_tariff(),
+        "custom_categories": {},
+        "df_raw": None,
+        "df_calc": None,
+        "parse_info": None,
+        "target_margin": DEFAULT_TARGET_MARGIN,
+        "markup_rate": DEFAULT_MARKUP,
+        "last_calc_seconds": None,
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
 
 
-def bool_series(series: pd.Series) -> pd.Series:
-    if pd.api.types.is_bool_dtype(series):
-        return series.astype("boolean")
-    values = series.astype("string").str.strip().str.lower()
-    yes = values.isin(["да", "yes", "true", "1", "есть", "+"])
-    no = values.isin(["нет", "no", "false", "0", "-"])
-    result = pd.Series(pd.NA, index=series.index, dtype="boolean")
-    result.loc[yes] = True
-    result.loc[no] = False
+# =============================================================================
+# УТИЛИТЫ ДАННЫХ
+# =============================================================================
+def to_num(value: Any) -> float:
+    if value is None:
+        return np.nan
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value) if np.isfinite(value) else np.nan
+    text = str(value).strip().replace("\u00a0", "").replace(" ", "").replace("₽", "").replace("%", "")
+    if not text or text == "-":
+        return np.nan
+    if "," in text and "." not in text:
+        text = text.replace(",", ".")
+    else:
+        text = text.replace(",", "")
+    try:
+        return float(text)
+    except ValueError:
+        return np.nan
+
+
+def to_bool(value: Any) -> Optional[bool]:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"да", "yes", "true", "1", "есть", "+", "y"}:
+        return True
+    if text in {"нет", "no", "false", "0", "-", "n"}:
+        return False
+    return None
+
+
+def normalize_header(text: str) -> str:
+    return str(text or "").strip().lower().replace("ё", "е")
+
+
+def resolve_columns(headers: Iterable[str]) -> Dict[str, Optional[str]]:
+    headers = [str(h).strip() for h in headers]
+    normalized = [normalize_header(h) for h in headers]
+    result: Dict[str, Optional[str]] = {}
+    for canon, syns in SYNONYMS.items():
+        syns_norm = [normalize_header(s) for s in syns]
+        found = None
+        for idx, h_norm in enumerate(normalized):
+            if h_norm in syns_norm:
+                found = headers[idx]
+                break
+        if not found:
+            for idx, h_norm in enumerate(normalized):
+                if any(s in h_norm for s in syns_norm):
+                    found = headers[idx]
+                    break
+        result[canon] = found
     return result
 
 
-def dimension_factor(source_header: str) -> float:
-    header = normalize_header(source_header)
-    if "мм" in header or "mm" in header:
+def dim_factor(header: Optional[str]) -> float:
+    h = normalize_header(header or "")
+    if "мм" in h or "mm" in h:
         return 0.1
-    if "метр" in header or header.endswith(" m"):
+    if "метр" in h:
         return 100.0
     return 1.0
 
 
-def prepare_input_frame(frame: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    mapping = resolve_columns(frame.columns)
-    missing = [column for column in REQUIRED_COLUMNS if column not in mapping]
-    if missing:
-        raise ValueError(
-            "Не найдены обязательные колонки: " + ", ".join(missing) + ". "
-            "Минимальный набор: Артикул, Категория, Цена."
-        )
-
-    count = len(frame)
-    result = pd.DataFrame(index=np.arange(count))
-
-    result["Артикул"] = (
-        frame[mapping["Артикул"]].astype("string").fillna("").str.strip().reset_index(drop=True)
-    )
-    empty_articles = result["Артикул"].eq("")
-    if empty_articles.any():
-        generated = "SKU-" + (np.arange(count) + 1).astype(str)
-        result.loc[empty_articles, "Артикул"] = generated[empty_articles.to_numpy()]
-
-    if "Бренд" in mapping:
-        result["Бренд"] = (
-            frame[mapping["Бренд"]].astype("string").fillna("").str.strip().reset_index(drop=True)
-        )
-        result["Бренд"] = result["Бренд"].mask(result["Бренд"].eq(""), "Без бренда")
-    else:
-        result["Бренд"] = "Без бренда"
-
-    result["Категория"] = (
-        frame[mapping["Категория"]].astype("string").fillna("").str.strip().reset_index(drop=True)
-    )
-    result["Категория"] = result["Категория"].mask(
-        result["Категория"].eq(""), "Без категории"
-    )
-
-    if "ID_категории" in mapping:
-        result["ID_категории"] = (
-            numeric_series(frame[mapping["ID_категории"]]).reset_index(drop=True).fillna(0).astype("int64")
-        )
-    else:
-        result["ID_категории"] = 0
-
-    result["Цена"] = numeric_series(frame[mapping["Цена"]]).reset_index(drop=True).fillna(0.0)
-
-    if "Себестоимость" in mapping:
-        result["Себестоимость"] = numeric_series(
-            frame[mapping["Себестоимость"]]
-        ).reset_index(drop=True)
-    else:
-        result["Себестоимость"] = np.nan
-
-    numeric_optional = [
-        "Вес_кг", "Длина", "Ширина", "Высота", "Объем_л",
-        "Оборачиваемость_дней",
-    ]
-    for column in numeric_optional:
-        if column in mapping:
-            values = numeric_series(frame[mapping[column]]).reset_index(drop=True)
-            if column in ["Длина", "Ширина", "Высота"]:
-                values = values * dimension_factor(mapping[column])
-            result[column] = values
-        else:
-            result[column] = np.nan
-
-    for column in ["Опасный", "Хрупкий"]:
-        if column in mapping:
-            result[column] = bool_series(frame[mapping[column]]).reset_index(drop=True)
-        else:
-            result[column] = pd.Series(pd.NA, index=result.index, dtype="boolean")
-
-    # Remove rows that contain neither a useful identifier nor a price/category.
-    valid_mask = ~(
-        result["Артикул"].eq("")
-        & result["Категория"].eq("Без категории")
-        & result["Цена"].eq(0)
-    )
-    result = result.loc[valid_mask].reset_index(drop=True)
-
-    meta = {
-        "mapping": mapping,
-        "missing_optional": [c for c in COLUMN_SYNONYMS if c not in mapping],
-        "has_cost": "Себестоимость" in mapping,
-        "has_brand": "Бренд" in mapping,
-        "has_dimensions": all(c in mapping for c in ["Длина", "Ширина", "Высота"]),
-        "prepared_rows": len(result),
-        "zero_prices": int(result["Цена"].le(0).sum()),
-    }
-    return result, meta
+def all_categories() -> Dict[str, Dict[str, Any]]:
+    merged = {k.lower(): dict(v) for k, v in DEFAULT_CATEGORIES.items()}
+    for k, v in st.session_state.get("custom_categories", {}).items():
+        merged[str(k).lower()] = dict(v)
+    return merged
 
 
-def build_template_csv() -> bytes:
-    rows = [
-        [
-            "Артикул", "Бренд", "Категория", "ID_категории", "Длина",
-            "Ширина", "Высота", "Цена", "Себестоимость", "Вес_кг",
-            "Оборачиваемость_дней",
-        ],
-        ["MAN-FLT-000001", "Mann-Filter", "Фильтры", "", 22, 14, 14, 450, 220, "0,5", 25],
-        ["MIC-TR-000002", "Michelin", "Шины", "", 70, 70, 26, 5400, 3650, "10,5", 15],
-        ["VAR-BAT-000003", "Varta", "Аккумуляторы", "", 35, 26, 26, 6500, "", "16,5", 30],
-    ]
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
-    writer.writerows(rows)
-    return ("\ufeff" + buffer.getvalue()).encode("utf-8")
+def category_defaults(category: str, categories: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    cat = normalize_header(category)
+    for key, vals in categories.items():
+        if key in cat:
+            return vals
+    return FALLBACK_CATEGORY
 
 
-def generate_demo_catalog(count: int, include_cost: bool = True) -> pd.DataFrame:
+def build_demo_rows(count: int = 24, with_cost: bool = True) -> pd.DataFrame:
     rng = np.random.default_rng(20260408 + count)
-    brands = np.array(
-        [
-            "Bosch", "Mann-Filter", "Sachs", "Brembo", "Mahle", "Denso",
-            "Valeo", "TRW", "NGK", "Febi Bilstein", "Lemforder", "Hella",
-            "Continental", "Michelin", "Varta",
-        ],
-        dtype=object,
-    )
-    categories = np.array(
-        [
-            "Фильтры", "Масла", "Колодки", "Диски", "Амортизаторы",
-            "Аккумуляторы", "Шины", "Фары", "Двигатели", "КПП",
-        ],
-        dtype=object,
-    )
-    base_price = np.array([450, 1800, 2400, 6800, 5200, 7600, 6900, 7200, 105000, 74000])
-    lengths = np.array([22, 28, 18, 62, 66, 35, 70, 52, 100, 82])
-    widths = np.array([14, 16, 12, 62, 16, 26, 70, 26, 62, 58])
-    heights = np.array([14, 28, 8, 22, 16, 26, 26, 26, 72, 56])
-    weights = np.array([0.6, 4.4, 1.4, 9.2, 3.6, 17, 10.6, 2.6, 95, 50])
-    turnovers = np.array([25, 20, 30, 45, 40, 35, 15, 50, 90, 90])
-
-    idx = np.arange(count)
-    cat_idx = idx % len(categories)
-    price = np.round(base_price[cat_idx] * rng.uniform(0.72, 1.48, count) / 10) * 10
-    dim_factor = rng.uniform(0.88, 1.15, count)
-    brand = brands[(idx * 7 + idx % 3) % len(brands)]
-
-    frame = pd.DataFrame(
-        {
-            "Артикул": [f"SKU-{i + 1:06d}" for i in range(count)],
-            "Бренд": brand,
-            "Категория": categories[cat_idx],
-            "ID_категории": np.zeros(count, dtype=np.int64),
-            "Цена": price.astype(float),
-            "Себестоимость": (
-                price * rng.uniform(0.54, 0.76, count) if include_cost else np.full(count, np.nan)
-            ),
-            "Вес_кг": weights[cat_idx] * rng.uniform(0.87, 1.14, count),
-            "Длина": np.round(lengths[cat_idx] * dim_factor),
-            "Ширина": np.round(widths[cat_idx] * dim_factor),
-            "Высота": np.round(heights[cat_idx] * dim_factor),
-            "Объем_л": np.full(count, np.nan),
-            "Оборачиваемость_дней": np.round(
-                turnovers[cat_idx] * rng.uniform(0.7, 1.35, count)
-            ),
-            "Опасный": pd.Series(pd.NA, index=np.arange(count), dtype="boolean"),
-            "Хрупкий": pd.Series(pd.NA, index=np.arange(count), dtype="boolean"),
-        }
-    )
-    return frame
-
-
-# =============================================================================
-# VECTORIZED CALCULATION ENGINE
-# =============================================================================
-
-def calculate_unit_economics(
-    source: pd.DataFrame,
-    settings: Dict[str, Any],
-    progress: Optional[Any] = None,
-) -> pd.DataFrame:
-    """Calculate the full model without per-row Python loops."""
-    started = time.perf_counter()
-    df = source.copy()
-    n = len(df)
-
-    def update(value: int, text: str) -> None:
-        if progress is not None:
-            progress.progress(value, text=text)
-
-    update(5, "Подготовка данных")
-
-    cat = df["Категория"].astype("string").fillna("Без категории")
-    cat_lower = cat.str.lower().str.replace("ё", "е", regex=False)
-
-    default_volume = np.full(n, 2.0, dtype=np.float64)
-    default_weight = np.full(n, 1.0, dtype=np.float64)
-    default_hazard = np.zeros(n, dtype=bool)
-    default_fragile = np.zeros(n, dtype=bool)
-
-    for key, values in CATEGORY_DEFAULTS.items():
-        mask = cat_lower.str.contains(key, regex=False, na=False).to_numpy()
-        default_volume[mask] = values[0]
-        default_weight[mask] = values[1]
-        default_hazard[mask] = values[2]
-        default_fragile[mask] = values[3]
-
-    for custom in settings.get("custom_categories", []):
-        key = normalize_header(str(custom.get("key", "")))
-        if not key:
-            continue
-        mask = cat_lower.str.contains(key, regex=False, na=False).to_numpy()
-        default_volume[mask] = float(custom.get("volume_l", 2.0))
-        default_weight[mask] = float(custom.get("weight_kg", 1.0))
-        default_hazard[mask] = bool(custom.get("is_hazardous", False))
-        default_fragile[mask] = bool(custom.get("is_fragile", False))
-
-    update(18, "Габариты, объём и оплачиваемый вес")
-
-    length = pd.to_numeric(df["Длина"], errors="coerce").fillna(0).clip(lower=0).to_numpy()
-    width = pd.to_numeric(df["Ширина"], errors="coerce").fillna(0).clip(lower=0).to_numpy()
-    height = pd.to_numeric(df["Высота"], errors="coerce").fillna(0).clip(lower=0).to_numpy()
-    has_dimensions = (length > 0) & (width > 0) & (height > 0)
-    dimension_volume = length * width * height / 1000.0
-
-    supplied_volume = pd.to_numeric(df["Объем_л"], errors="coerce").to_numpy()
-    volume = np.where(
-        np.isfinite(supplied_volume) & (supplied_volume > 0),
-        supplied_volume,
-        np.where(has_dimensions, dimension_volume, default_volume),
-    )
-
-    supplied_weight = pd.to_numeric(df["Вес_кг"], errors="coerce").to_numpy()
-    estimated_weight = np.maximum(0.1, volume * float(settings["density_kg_per_liter"]))
-    weight = np.where(
-        np.isfinite(supplied_weight) & (supplied_weight > 0),
-        supplied_weight,
-        np.where(has_dimensions, estimated_weight, default_weight),
-    )
-    volumetric_weight = np.where(has_dimensions, length * width * height / 5000.0, 0.0)
-    billable_weight = np.maximum(np.maximum(weight, volumetric_weight), 0.1)
-
-    update(32, "Себестоимость и специальные расходы")
-
-    price = pd.to_numeric(df["Цена"], errors="coerce").fillna(0).clip(lower=0).to_numpy()
-    supplied_cost = pd.to_numeric(df["Себестоимость"], errors="coerce").to_numpy()
-    cost_estimated = ~np.isfinite(supplied_cost) | (supplied_cost <= 0)
-    cost = np.where(cost_estimated, price * float(settings["cost_fallback_rate"]), supplied_cost)
-
-    supplied_hazard = df["Опасный"].astype("boolean")
-    supplied_fragile = df["Хрупкий"].astype("boolean")
-    hazard = supplied_hazard.fillna(pd.Series(default_hazard, index=df.index)).to_numpy(dtype=bool)
-    fragile = supplied_fragile.fillna(pd.Series(default_fragile, index=df.index)).to_numpy(dtype=bool)
-
-    turnover = (
-        pd.to_numeric(df["Оборачиваемость_дней"], errors="coerce")
-        .fillna(30.0)
-        .clip(lower=1.0)
-        .to_numpy()
-    )
-
-    special_costs = (
-        float(settings["packaging"])
-        + float(settings["chestny_znak"])
-        + float(settings["labeling"])
-        + price * float(settings["warranty_reserve"])
-        + np.where(hazard, price * float(settings["hazard_surcharge"]), 0.0)
-        + np.where(fragile, price * float(settings["fragile_surcharge"]), 0.0)
-    )
-
-    update(48, "Комиссии и специальные тарифы")
-
-    commission_rate = np.full(n, float(settings["commission_rate"]), dtype=np.float64)
-    logistics_base = np.full(n, float(settings["logistics_base"]), dtype=np.float64)
-    storage_rate = np.full(
-        n, float(settings["storage_per_day_per_liter"]), dtype=np.float64
-    )
-    special_applied = np.zeros(n, dtype=bool)
-    special_reason = np.full(n, "", dtype=object)
-
-    # Custom category overrides (before special tariffs, so special still wins if enabled)
-    for custom in settings.get("custom_categories", []):
-        key = normalize_header(str(custom.get("key", "")))
-        if not key:
-            continue
-        mask = cat_lower.str.contains(key, regex=False, na=False).to_numpy()
-        if custom.get("commission_rate") is not None:
-            try:
-                commission_rate[mask] = float(custom["commission_rate"])
-            except Exception:
-                pass
-        if custom.get("logistics_base") is not None:
-            try:
-                logistics_base[mask] = float(custom["logistics_base"])
-            except Exception:
-                pass
-        if custom.get("storage_per_day_per_liter") is not None:
-            try:
-                storage_rate[mask] = float(custom["storage_per_day_per_liter"])
-            except Exception:
-                pass
-
-    if settings.get("special_enabled", True):
-        for key, rule in settings.get("special_tariffs", {}).items():
-            mask = cat_lower.str.contains(key, regex=False, na=False).to_numpy()
-            commission_rate[mask] = float(rule["commission_rate"])
-            logistics_base[mask] = float(rule["logistics_base"])
-            storage_rate[mask] = float(rule["storage_per_day_per_liter"])
-            special_applied[mask] = True
-            special_reason[mask] = str(rule.get("reason", "Спецтариф"))
-
-    # Individual rates from API/CSV have the highest priority.
-    if settings.get("use_category_rates", True) and settings.get("category_rates"):
-        rates = {
-            normalize_header(key): float(value)
-            for key, value in settings["category_rates"].items()
-        }
-        exact = cat_lower.map(rates)
-        exact_mask = exact.notna().to_numpy()
-        commission_rate[exact_mask] = exact[exact_mask].to_numpy(dtype=float)
-
-        # Substring fallback for a small rate dictionary.
-        missing_rate = ~exact_mask
-        for key, value in rates.items():
-            if not missing_rate.any():
-                break
-            mask = (
-                cat_lower.str.contains(key, regex=False, na=False).to_numpy()
-                & missing_rate
-            )
-            commission_rate[mask] = value
-            missing_rate[mask] = False
-
-    update(65, "Логистика, хранение и эквайринг")
-
-    commission = np.maximum(price * commission_rate, float(settings["min_commission"]))
-    logistics = logistics_base + billable_weight * float(settings["logistics_per_kg"])
-    storage = volume * storage_rate * turnover
-    acquiring = price * float(settings["acquiring_fee"])
-    returns = price * float(settings["return_fee"])
-
-    total_expenses = (
-        cost + commission + logistics + storage + acquiring + returns + special_costs
-    )
-    profit = price - total_expenses
-    margin = np.divide(profit, price, out=np.zeros_like(profit), where=price > 0)
-
-    # Recommended breakeven price (vectorized)
-    spec_fixed = float(settings["packaging"]) + float(settings["chestny_znak"]) + float(settings["labeling"])
-    variable_rate = (
-        commission_rate
-        + float(settings["acquiring_fee"])
-        + float(settings["warranty_reserve"])
-        + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
-        + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
-    )
-    # Avoid division by zero
-    denom = 1.0 - variable_rate
-    denom = np.where(denom < 0.05, 0.05, denom)
-    recommended = (cost + logistics + storage + spec_fixed) / denom * 1.01
-    # Adjust where commission would be at minimum
-    low_comm_mask = recommended * commission_rate < float(settings["min_commission"])
-    if np.any(low_comm_mask):
-        variable_without_comm = variable_rate - commission_rate
-        denom2 = 1.0 - variable_without_comm - float(settings["acquiring_fee"])  # acquiring already in variable? double count fix
-        # simpler: recompute with acquiring+reserve+surcharges only
-        denom2 = 1.0 - (
-            float(settings["acquiring_fee"])
-            + float(settings["warranty_reserve"])
-            + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
-            + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
+    rows: List[Dict[str, Any]] = []
+    for i in range(count):
+        name, p0, p1, l0, w0, h0, kg0, turnover = DEMO_CATS[i % len(DEMO_CATS)]
+        brand = DEMO_BRANDS[(i * 7 + i % 3) % len(DEMO_BRANDS)]
+        price = int(round(float(rng.uniform(p0, p1)) / 10) * 10)
+        dim_j = float(rng.uniform(0.85, 1.22))
+        cost = int(round(price * float(rng.uniform(0.55, 0.77)))) if with_cost else np.nan
+        rows.append(
+            {
+                "Артикул": f"{brand[:3].upper()}-{name[:3].upper()}-{i + 1:06d}",
+                "Бренд": brand,
+                "Категория": name,
+                "Длина": round(l0 * dim_j, 0),
+                "Ширина": round(w0 * dim_j, 0),
+                "Высота": round(h0 * dim_j, 0),
+                "Цена": price,
+                "Себестоимость": cost,
+                "Вес_кг": round(kg0 * float(rng.uniform(0.8, 1.25)), 2),
+                "Оборачиваемость_дней": int(round(turnover * float(rng.uniform(0.7, 1.45)))),
+            }
         )
-        denom2 = np.where(denom2 < 0.05, 0.05, denom2)
-        recommended_alt = (cost + logistics + storage + spec_fixed + float(settings["min_commission"])) / denom2 * 1.01
-        recommended = np.where(low_comm_mask, recommended_alt, recommended)
-    recommended = np.maximum(recommended, cost + 10)
-    recommended = np.where(price > 0, recommended, 0)
+    return pd.DataFrame(rows)
 
-    # Price with markup / target margin
-    pricing = settings.get("pricing", {"mode": "none", "markupPercent": 15, "targetMargin": 0.20})
-    mode = pricing.get("mode", "none")
-    markup_pct = float(pricing.get("markupPercent", 15))
-    target_margin = float(pricing.get("targetMargin", 0.20))
-    price_with_markup = price.copy()
-    if mode == "markup" and markup_pct != 0:
-        price_with_markup = price * (1 + markup_pct / 100)
-    elif mode == "targetMargin":
-        target_denom = 1.0 - variable_rate - target_margin
-        target_denom = np.where(target_denom < 0.05, 0.05, target_denom)
-        price_with_markup = (cost + logistics + storage + spec_fixed) / target_denom
-        # min commission adjustment
-        low_target = price_with_markup * commission_rate < float(settings["min_commission"])
-        if np.any(low_target):
-            denom_t2 = 1.0 - (
-                float(settings["acquiring_fee"])
-                + float(settings["warranty_reserve"])
-                + np.where(hazard, float(settings["hazard_surcharge"]), 0.0)
-                + np.where(fragile, float(settings["fragile_surcharge"]), 0.0)
-                + target_margin
-            )
-            denom_t2 = np.where(denom_t2 < 0.05, 0.05, denom_t2)
-            price_alt = (cost + logistics + storage + spec_fixed + float(settings["min_commission"])) / denom_t2
-            price_with_markup = np.where(low_target, price_alt, price_with_markup)
-        price_with_markup = np.maximum(price_with_markup, cost + 10)
 
-    commission_markup = np.maximum(price_with_markup * commission_rate, float(settings["min_commission"]))
-    acquiring_markup = price_with_markup * float(settings["acquiring_fee"])
-    returns_markup = price_with_markup * float(settings["return_fee"])
-    special_markup = (
-        spec_fixed
-        + price_with_markup * float(settings["warranty_reserve"])
-        + np.where(hazard, price_with_markup * float(settings["hazard_surcharge"]), 0.0)
-        + np.where(fragile, price_with_markup * float(settings["fragile_surcharge"]), 0.0)
-    )
-    total_markup = cost + commission_markup + logistics + storage + acquiring_markup + returns_markup + special_markup
-    profit_markup = price_with_markup - total_markup
-    margin_markup = np.divide(profit_markup, price_with_markup, out=np.zeros_like(profit_markup), where=price_with_markup > 0)
+def demo_csv_bytes(count: int = 24, with_cost: bool = True) -> bytes:
+    """Готовый CSV с пробными данными для скачивания пользователем."""
+    df = build_demo_rows(count=count, with_cost=with_cost)
+    if not with_cost and "Себестоимость" in df.columns:
+        df = df.drop(columns=["Себестоимость"])
+    return df.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
 
-    total_rev = float(np.sum(price))
-    revenue_share = np.divide(price, total_rev, out=np.zeros_like(price), where=total_rev > 0)
 
-    update(82, "Формирование итоговой таблицы")
+def demo_preview_df() -> pd.DataFrame:
+    return build_demo_rows(12, with_cost=True)[
+        ["Артикул", "Бренд", "Категория", "Длина", "Ширина", "Высота", "Цена", "Себестоимость", "Вес_кг"]
+    ]
 
-    result = pd.DataFrame(
-        {
-            "Артикул": df["Артикул"].astype("string"),
-            "Бренд": df["Бренд"].astype("string"),
-            "Категория": cat,
-            "ID_категории": df["ID_категории"].astype("int64"),
-            "Длина": length,
-            "Ширина": width,
-            "Высота": height,
-            "Объем_л": volume,
-            "Вес_кг": weight,
-            "Оплач_вес": billable_weight,
-            "Цена": price,
-            "Себестоимость": cost,
-            "Себестоимость_оценка": cost_estimated,
-            "is_hazardous": hazard,
-            "is_fragile": fragile,
-            "Ставка_комиссии": commission_rate,
-            "Логистика_база": logistics_base,
-            "Ставка_за_кг": np.full(n, float(settings["logistics_per_kg"])),
-            "Ставка_хранения": storage_rate,
-            "Комиссия_руб": commission,
-            "Логистика_руб": logistics,
-            "Хранение_руб": storage,
-            "Эквайринг_руб": acquiring,
-            "Возвраты_руб": returns,
-            "Спец_расходы_FBS": special_costs,
-            "Итого_расходы": total_expenses,
-            "Прибыль": profit,
-            "Маржа_%": margin,
-            "Рекомендованная_цена": recommended,
-            "Цена_с_наценкой": price_with_markup,
-            "Прибыль_с_наценкой": profit_markup,
-            "Маржа_с_наценкой_%": margin_markup,
-            "Выручка_доля": revenue_share,
-            "Оборачиваемость_дней": turnover,
-            "Спецтариф_применён": special_applied,
-            "Причина_спецтарифа": special_reason,
-        }
-    )
-    # ABC / XYZ (vectorized after dataframe creation for sorting stability)
-    if n > 0:
-        # ABC by revenue (price) descending
-        order = np.argsort(-price, kind="stable")
-        cumsum = np.cumsum(price[order])
-        total = cumsum[-1] if cumsum.size else 1
-        abc = np.full(n, "C", dtype=object)
-        # thresholds
-        cum_share = cumsum / (total if total > 0 else 1)
-        abc[cum_share <= 0.80] = "A"
-        mask_b = (cum_share > 0.80) & (cum_share <= 0.95)
-        abc[mask_b] = "B"
-        # map back to original order
-        abc_final = np.empty(n, dtype=object)
-        abc_final[order] = abc
-        # XYZ by turnover
-        t_sorted = np.sort(turnover)
-        q1 = t_sorted[int(n * 0.33)] if n >= 3 else 30
-        q2 = t_sorted[int(n * 0.66)] if n >= 3 else 45
-        xyz = np.where(turnover <= q1, "X", np.where(turnover <= q2, "Y", "Z"))
-        result["ABC"] = abc_final
-        result["XYZ"] = xyz
-        result["ABC_XYZ"] = result["ABC"].astype(str) + result["XYZ"].astype(str)
+
+def parse_dataframe(df_raw: pd.DataFrame, file_name: str, file_size: int) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    started = time.time()
+    df_raw = df_raw.copy()
+    df_raw.columns = [str(c).strip() for c in df_raw.columns]
+    mapping = resolve_columns(df_raw.columns)
+    missing = [c for c in ["Артикул", "Категория", "Цена"] if not mapping.get(c)]
+    if missing:
+        raise ValueError(f"Не найдены обязательные колонки: {', '.join(missing)}")
+
+    rename = {src: canon for canon, src in mapping.items() if src}
+    df = df_raw.rename(columns=rename)
+    keep = [c for c in SYNONYMS.keys() if c in df.columns]
+    df = df[keep].copy()
+
+    for required in ["Артикул", "Бренд", "Категория", "Цена"]:
+        if required not in df.columns:
+            df[required] = "" if required != "Цена" else 0
+
+    numeric_cols = ["Цена", "Себестоимость", "Вес_кг", "Длина", "Ширина", "Высота", "Объем_л", "Оборачиваемость_дней"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = df[col].map(to_num)
+
+    for col in ["Длина", "Ширина", "Высота"]:
+        if col in df.columns and mapping.get(col):
+            df[col] = df[col] * dim_factor(mapping[col])
+
+    for col in ["Опасный", "Хрупкий"]:
+        if col in df.columns:
+            df[col] = df[col].map(to_bool)
+
+    df["Артикул"] = df["Артикул"].astype(str).str.strip()
+    df["Бренд"] = df["Бренд"].astype(str).str.strip().replace("", "Без бренда")
+    df["Категория"] = df["Категория"].astype(str).str.strip().replace("", "Без категории")
+    df["Цена"] = pd.to_numeric(df["Цена"], errors="coerce").fillna(0.0)
+
+    non_empty = (df["Артикул"] != "") | (df["Категория"] != "Без категории") | (df["Цена"] > 0)
+    skipped = int((~non_empty).sum())
+    df = df[non_empty].reset_index(drop=True)
+    if df.empty:
+        raise ValueError("После очистки не осталось строк с данными")
+
+    blank_art = df["Артикул"] == ""
+    if blank_art.any():
+        df.loc[blank_art, "Артикул"] = [f"SKU-{i + 1}" for i in df.index[blank_art]]
+
+    info = {
+        "file_name": file_name,
+        "file_size": file_size,
+        "matched": {k: v for k, v in mapping.items() if v},
+        "missing": missing,
+        "has_cost": bool(mapping.get("Себестоимость")),
+        "has_dims": bool(mapping.get("Длина") and mapping.get("Ширина") and mapping.get("Высота")),
+        "skipped": skipped,
+        "rows": int(len(df)),
+        "parse_seconds": time.time() - started,
+    }
+    return df, info
+
+
+def read_uploaded_file(uploaded_file) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    raw = uploaded_file.getvalue()
+    name = uploaded_file.name.lower()
+    if name.endswith((".csv", ".txt", ".tsv")):
+        sample = raw[:4096]
+        sep = ";" if sample.count(b";") >= sample.count(b",") else ","
+        df_raw = pd.read_csv(io.BytesIO(raw), sep=sep, dtype=str, keep_default_na=False)
+        if df_raw.shape[1] == 1:
+            alt_sep = "," if sep == ";" else ";"
+            df_raw = pd.read_csv(io.BytesIO(raw), sep=alt_sep, dtype=str, keep_default_na=False)
     else:
-        result["ABC"] = pd.Series(dtype="string")
-        result["XYZ"] = pd.Series(dtype="string")
-        result["ABC_XYZ"] = pd.Series(dtype="string")
-
-    result.attrs["calculation_seconds"] = time.perf_counter() - started
-    update(100, "Готово")
-    return result
-
-
-def run_calculation() -> None:
-    raw = st.session_state.raw_df
-    if raw is None or raw.empty:
-        st.warning("Сначала загрузите каталог.")
-        return
-
-    progress = st.progress(0, text="Подготовка расчёта")
-    started = time.perf_counter()
-    try:
-        result = calculate_unit_economics(raw, st.session_state.settings, progress)
-        st.session_state.result_df = result
-        st.session_state.calculation_seconds = time.perf_counter() - started
-        st.session_state.calculated_settings_hash = stable_settings_hash(
-            st.session_state.settings
-        )
-        clear_export()
-        time.sleep(0.08)
-        progress.empty()
-        st.success(
-            f"Рассчитано {len(result):,} SKU за "
-            f"{st.session_state.calculation_seconds:.2f} с".replace(",", " ")
-        )
-    except Exception as exc:
-        progress.empty()
-        logger.exception("Calculation failed")
-        st.error(f"Ошибка расчёта: {exc}")
+        if len(raw) > 80 * 1024 * 1024:
+            raise ValueError("Excel-файл больше 80 МБ. Для 300k+ SKU сохраните файл как CSV — он читается быстрее.")
+        df_raw = pd.read_excel(io.BytesIO(raw), dtype=str, keep_default_na=False)
+    return parse_dataframe(df_raw, uploaded_file.name, len(raw))
 
 
 # =============================================================================
-# AGGREGATIONS AND ANALYTICS
+# РАСЧЕТ
 # =============================================================================
+def effective_tariff_for_category(category_lower: str, tariff: Dict[str, Any]) -> Dict[str, Any]:
+    base = dict(tariff["base"])
+    base["special_applied"] = False
+    base["reason"] = ""
+    if tariff.get("special_enabled", True):
+        for key, rule in tariff.get("special_tariffs", {}).items():
+            if key in category_lower:
+                base["commission_rate"] = float(rule["commission_rate"])
+                base["logistics_base"] = float(rule["logistics_base"])
+                base["storage_per_day_per_liter"] = float(rule["storage_per_day_per_liter"])
+                base["special_applied"] = True
+                base["reason"] = rule.get("reason", "Спецтариф")
+                break
+    if tariff.get("use_category_rates") and tariff.get("category_rates"):
+        for key, rate in tariff["category_rates"].items():
+            if normalize_header(key) in category_lower:
+                base["commission_rate"] = float(rate)
+                break
+    return base
 
-def calculate_totals(df: pd.DataFrame) -> Dict[str, float]:
+
+def apply_pricing_columns(df: pd.DataFrame, target_margin: float, markup_rate: float) -> pd.DataFrame:
+    out = df.copy()
+    fixed = out["Фикс_расходы_без_цены"].astype(float).values
+    var_rate = out["Переменная_ставка"].astype(float).values
+    price = out["Цена"].astype(float).values
+    denom_breakeven = np.clip(1 - var_rate, 0.03, 0.97)
+    denom_target = np.clip(1 - var_rate - target_margin, 0.03, 0.97)
+    breakeven = fixed / denom_breakeven
+    target_price = fixed / denom_target
+    markup_price = price * (1 + markup_rate)
+    recommended = np.maximum.reduce([breakeven, target_price, markup_price])
+    recommended = np.where(np.isfinite(recommended), recommended, 0)
+    out["Безубыток_руб"] = np.round(breakeven, 2)
+    out["Цена_с_наценкой"] = np.round(markup_price, 2)
+    out["Цена_целевая_маржа"] = np.round(target_price, 2)
+    out["Рекомендованная_цена"] = np.round(recommended, 0)
+    out["Маржа_при_рекоменд_цене"] = np.where(
+        recommended > 0,
+        (recommended - (fixed + recommended * var_rate)) / recommended,
+        0,
+    )
+    return out
+
+
+def calculate_df(
+    df: pd.DataFrame,
+    tariff: Dict[str, Any],
+    categories: Dict[str, Dict[str, Any]],
+    target_margin: float,
+    markup_rate: float,
+) -> pd.DataFrame:
+    started = time.time()
+    n = len(df)
+    out = df.copy()
+    for col in ["Себестоимость", "Вес_кг", "Длина", "Ширина", "Высота", "Объем_л", "Оборачиваемость_дней"]:
+        if col not in out.columns:
+            out[col] = np.nan
+
+    cat = out["Категория"].fillna("Без категории").astype(str)
+    cat_lower = cat.map(normalize_header)
+    unique_cats = cat_lower.unique()
+    tariff_cache = {c: effective_tariff_for_category(c, tariff) for c in unique_cats}
+    default_cache = {c: category_defaults(c, categories) for c in unique_cats}
+
+    commission_rate = cat_lower.map(lambda c: tariff_cache[c]["commission_rate"]).astype(float).values
+    min_commission = cat_lower.map(lambda c: tariff_cache[c]["min_commission"]).astype(float).values
+    logistics_base = cat_lower.map(lambda c: tariff_cache[c]["logistics_base"]).astype(float).values
+    logistics_per_kg = cat_lower.map(lambda c: tariff_cache[c]["logistics_per_kg"]).astype(float).values
+    storage_rate = cat_lower.map(lambda c: tariff_cache[c]["storage_per_day_per_liter"]).astype(float).values
+    acquiring_rate = cat_lower.map(lambda c: tariff_cache[c]["acquiring_fee"]).astype(float).values
+
+    def_volume = cat_lower.map(lambda c: default_cache[c]["volume_l"]).astype(float).values
+    def_weight = cat_lower.map(lambda c: default_cache[c]["weight_kg"]).astype(float).values
+    def_hazard = cat_lower.map(lambda c: default_cache[c]["hazardous"]).astype(bool).values
+    def_fragile = cat_lower.map(lambda c: default_cache[c]["fragile"]).astype(bool).values
+
+    price = pd.to_numeric(out["Цена"], errors="coerce").fillna(0).astype(float).values
+    cost_raw = pd.to_numeric(out["Себестоимость"], errors="coerce")
+    cost_estimated = cost_raw.isna().values | (cost_raw.fillna(0).values <= 0)
+    cost = np.where(cost_estimated, price * float(tariff["cost_fallback"]), cost_raw.fillna(0).values)
+
+    length = pd.to_numeric(out["Длина"], errors="coerce").fillna(0).astype(float).values
+    width = pd.to_numeric(out["Ширина"], errors="coerce").fillna(0).astype(float).values
+    height = pd.to_numeric(out["Высота"], errors="coerce").fillna(0).astype(float).values
+    has_dims = (length > 0) & (width > 0) & (height > 0)
+    volume_raw = pd.to_numeric(out["Объем_л"], errors="coerce").fillna(0).astype(float).values
+    volume_from_dims = np.where(has_dims, length * width * height / 1000.0, 0)
+    volume = np.where(volume_raw > 0, volume_raw, np.where(volume_from_dims > 0, volume_from_dims, def_volume))
+
+    weight_raw = pd.to_numeric(out["Вес_кг"], errors="coerce").fillna(0).astype(float).values
+    weight_raw = np.where(weight_raw > 100, weight_raw / 1000.0, weight_raw)
+    weight_est = volume * float(tariff["density_kg_per_l"])
+    weight = np.where(weight_raw > 0, weight_raw, np.where(has_dims, np.maximum(0.1, weight_est), def_weight))
+    volumetric_weight = np.where(has_dims, length * width * height / 5000.0, 0)
+    billable_weight = np.maximum.reduce([weight, volumetric_weight, np.full(n, 0.1)])
+
+    turnover = pd.to_numeric(out["Оборачиваемость_дней"], errors="coerce").fillna(30).astype(float).values
+    turnover = np.where(turnover > 0, turnover, 30)
+
+    hazard_raw = out["Опасный"].map(to_bool).values if "Опасный" in out.columns else np.array([None] * n)
+    fragile_raw = out["Хрупкий"].map(to_bool).values if "Хрупкий" in out.columns else np.array([None] * n)
+    hazard = np.array([def_hazard[i] if hazard_raw[i] is None else bool(hazard_raw[i]) for i in range(n)], dtype=bool)
+    fragile = np.array([def_fragile[i] if fragile_raw[i] is None else bool(fragile_raw[i]) for i in range(n)], dtype=bool)
+
+    sc = tariff["special_costs"]
+    fixed_special = float(sc["packaging"]) + float(sc["chestny_znak"]) + float(sc["labeling"])
+    variable_special_rate = (
+        float(sc["warranty_reserve"])
+        + np.where(hazard, float(sc["hazard_surcharge"]), 0)
+        + np.where(fragile, float(sc["fragile_surcharge"]), 0)
+    )
+
+    commission = np.maximum(price * commission_rate, min_commission)
+    logistics = logistics_base + billable_weight * logistics_per_kg
+    storage = volume * storage_rate * turnover
+    acquiring = price * acquiring_rate
+    special_costs = fixed_special + price * variable_special_rate
+    total = cost + commission + logistics + storage + acquiring + special_costs
+    profit = price - total
+    margin = np.where(price > 0, profit / price, 0)
+
+    special_applied = cat_lower.map(lambda c: tariff_cache[c]["special_applied"]).astype(bool).values
+    special_reason = cat_lower.map(lambda c: tariff_cache[c]["reason"]).astype(str).values
+
+    fixed_cost_no_price = cost + logistics + storage + fixed_special
+    variable_rate = commission_rate + acquiring_rate + variable_special_rate
+
+    # ABC: вклад SKU в общую выручку. A = первые 80%, B = 80-95%, C = хвост.
+    revenue = np.maximum(price, 0)
+    abc = np.full(n, "C", dtype=object)
+    total_revenue = float(revenue.sum())
+    if total_revenue > 0:
+        order = np.argsort(-revenue)
+        cum_share = np.cumsum(revenue[order]) / total_revenue
+        abc[order] = np.where(cum_share <= 0.80, "A", np.where(cum_share <= 0.95, "B", "C"))
+
+    # XYZ: устойчивость по оборачиваемости и марже.
+    xyz = np.where((turnover <= 30) & (margin >= 0.15), "X", np.where((turnover <= 60) & (margin >= 0), "Y", "Z"))
+
+    out["Артикул"] = out["Артикул"].astype(str)
+    out["Бренд"] = out["Бренд"].astype(str).replace("", "Без бренда")
+    out["Категория"] = cat
+    out["Цена"] = price
+    out["Себестоимость"] = cost
+    out["Себестоимость_оценка"] = cost_estimated
+    out["Длина"] = length
+    out["Ширина"] = width
+    out["Высота"] = height
+    out["Объем_л"] = volume
+    out["Вес_кг"] = weight
+    out["Оплач_вес"] = billable_weight
+    out["Оборачиваемость_дней"] = turnover
+    out["Опасный"] = hazard
+    out["Хрупкий"] = fragile
+    out["Ставка_комиссии"] = commission_rate
+    out["Логистика_база"] = logistics_base
+    out["Логистика_за_кг"] = logistics_per_kg
+    out["Ставка_хранения"] = storage_rate
+    out["Ставка_эквайринга"] = acquiring_rate
+    out["Переменная_ставка"] = variable_rate
+    out["Фикс_расходы_без_цены"] = fixed_cost_no_price
+    out["Комиссия_руб"] = commission
+    out["Логистика_руб"] = logistics
+    out["Хранение_руб"] = storage
+    out["Эквайринг_руб"] = acquiring
+    out["Спец_расходы_FBS"] = special_costs
+    out["Итого_расходы"] = total
+    out["Прибыль"] = profit
+    out["Маржа_%"] = margin
+    out["ABC"] = abc
+    out["XYZ"] = xyz
+    out["ABC_XYZ"] = [f"{a}{x}" for a, x in zip(abc, xyz)]
+    out["Спецтариф_применен"] = special_applied
+    out["Причина_спецтарифа"] = special_reason
+    out = apply_pricing_columns(out, target_margin, markup_rate)
+    st.session_state.last_calc_seconds = time.time() - started
+    return out
+
+
+def totals_row(df: pd.DataFrame) -> Dict[str, float]:
     revenue = float(df["Цена"].sum())
     expenses = float(df["Итого_расходы"].sum())
     profit = float(df["Прибыль"].sum())
     return {
-        "count": len(df),
+        "count": int(len(df)),
         "revenue": revenue,
         "expenses": expenses,
         "profit": profit,
-        "margin": profit / revenue if revenue > 0 else 0.0,
-        "loss_count": int(df["Прибыль"].lt(0).sum()),
-        "special_count": int(df["Спецтариф_применён"].sum()),
-        "estimated_cost_count": int(df["Себестоимость_оценка"].sum()),
+        "avg_margin": profit / revenue if revenue else 0,
+        "loss": int((df["Прибыль"] < 0).sum()),
+        "spec": int(df["Спецтариф_применен"].sum()) if "Спецтариф_применен" in df.columns else 0,
+        "estimated_cost": int(df["Себестоимость_оценка"].sum()) if "Себестоимость_оценка" in df.columns else 0,
         "commission": float(df["Комиссия_руб"].sum()),
         "logistics": float(df["Логистика_руб"].sum()),
         "storage": float(df["Хранение_руб"].sum()),
-        "acquiring": float(df["Эквайринг_руб"].sum()),
-        "returns": float(df["Возвраты_руб"].sum()),
-        "special_costs": float(df["Спец_расходы_FBS"].sum()),
         "cost": float(df["Себестоимость"].sum()),
+        "recommended_revenue": float(df["Рекомендованная_цена"].sum()) if "Рекомендованная_цена" in df.columns else 0,
     }
 
 
-def aggregate_by(df: pd.DataFrame, column: str) -> pd.DataFrame:
-    source = df[
-        [column, "Артикул", "Цена", "Итого_расходы", "Прибыль", "Спецтариф_применён"]
-    ].copy()
-    source["_loss"] = source["Прибыль"].lt(0).astype("int8")
-    grouped = (
-        source.groupby(column, observed=True, sort=False)
-        .agg(
-            SKU=("Артикул", "size"),
-            Выручка=("Цена", "sum"),
-            Расходы=("Итого_расходы", "sum"),
-            Прибыль=("Прибыль", "sum"),
-            Убыточных_SKU=("_loss", "sum"),
-            Спецтариф_SKU=("Спецтариф_применён", "sum"),
-        )
-        .reset_index()
+def summarize(df: pd.DataFrame, by: str) -> pd.DataFrame:
+    grouped = df.groupby(by, dropna=False).agg(
+        SKU=("Артикул", "count"),
+        Выручка=("Цена", "sum"),
+        Расходы=("Итого_расходы", "sum"),
+        Прибыль=("Прибыль", "sum"),
+        Рекоменд_выручка=("Рекомендованная_цена", "sum"),
+        Убыточных=("Прибыль", lambda s: int((s < 0).sum())),
+        Спецтариф=("Спецтариф_применен", "sum"),
+    ).reset_index().rename(columns={by: "Группа"})
+    grouped["Маржа"] = np.where(grouped["Выручка"] > 0, grouped["Прибыль"] / grouped["Выручка"], 0)
+    grouped["Потенциал_выручки"] = grouped["Рекоменд_выручка"] - grouped["Выручка"]
+    return grouped.sort_values("Выручка", ascending=False)
+
+
+def abc_xyz_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    pivot = pd.pivot_table(
+        df,
+        index="ABC",
+        columns="XYZ",
+        values="Цена",
+        aggfunc=["count", "sum"],
+        fill_value=0,
     )
-    grouped["Маржа_%"] = np.divide(
-        grouped["Прибыль"],
-        grouped["Выручка"],
-        out=np.zeros(len(grouped), dtype=float),
-        where=grouped["Выручка"].to_numpy() > 0,
-    )
-    return grouped.sort_values("Выручка", ascending=False, kind="stable")
-
-
-def cost_structure(totals: Dict[str, float]) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "Статья": [
-                "Себестоимость", "Комиссия", "Логистика", "Хранение",
-                "Эквайринг", "Возвраты", "Спец. расходы",
-            ],
-            "Сумма": [
-                totals["cost"], totals["commission"], totals["logistics"],
-                totals["storage"], totals["acquiring"], totals["returns"],
-                totals["special_costs"],
-            ],
-        }
-    )
-
-
-# =============================================================================
-# YANDEX MARKET API
-# =============================================================================
-
-def api_headers(token: str, token_type: str) -> Dict[str, str]:
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
-    if token_type == "Api-Key":
-        headers["Api-Key"] = token.strip()
-    else:
-        headers["Authorization"] = f"Bearer {token.strip()}"
-    return headers
-
-
-def calculate_tariff_via_api(
-    token: str,
-    token_type: str,
-    campaign_id: int,
-    category_id: int,
-    price: float,
-    length: float,
-    width: float,
-    height: float,
-    weight: float,
-) -> Tuple[bool, str, Optional[pd.DataFrame]]:
-    """Current official tariff calculator: POST /v2/tariffs/calculate."""
-    url = f"{API_URL}/v2/tariffs/calculate"
-    payload = {
-        "parameters": {
-            "campaignId": int(campaign_id),
-            "frequency": "DAILY",
-            "currency": "RUR",
-        },
-        "offers": [
-            {
-                "categoryId": int(category_id),
-                "price": float(price),
-                "length": float(length),
-                "width": float(width),
-                "height": float(height),
-                "weight": float(weight),
-                "quantity": 1,
-            }
-        ],
-    }
-    try:
-        response = requests.post(
-            url,
-            headers=api_headers(token, token_type),
-            json=payload,
-            timeout=25,
-        )
-        if response.status_code != 200:
-            return False, f"API вернул {response.status_code}: {response.text[:500]}", None
-
-        body = response.json()
-        offers = body.get("offers", body.get("result", {}).get("offers", []))
-        if not offers:
-            return False, "API не вернул расчёт услуг.", None
-
-        tariffs = offers[0].get("tariffs", [])
-        rows = []
-        for item in tariffs:
+    rows = []
+    for abc in ["A", "B", "C"]:
+        for xyz in ["X", "Y", "Z"]:
+            subset = df[(df["ABC"] == abc) & (df["XYZ"] == xyz)]
             rows.append(
                 {
-                    "Тип услуги": item.get("type", ""),
-                    "Сумма": float(item.get("amount", 0) or 0),
-                    "Валюта": item.get("currency", "RUR"),
-                    "Параметры": json.dumps(
-                        item.get("parameters", []), ensure_ascii=False
-                    ),
+                    "ABC_XYZ": abc + xyz,
+                    "SKU": int(len(subset)),
+                    "Выручка": float(subset["Цена"].sum()),
+                    "Прибыль": float(subset["Прибыль"].sum()),
+                    "Маржа": float(subset["Прибыль"].sum() / subset["Цена"].sum()) if subset["Цена"].sum() else 0,
                 }
             )
-        return True, f"Получено услуг: {len(rows)}", pd.DataFrame(rows)
-    except requests.RequestException as exc:
-        return False, f"Ошибка соединения с API: {exc}", None
-    except Exception as exc:
-        return False, f"Ошибка разбора ответа API: {exc}", None
-
-
-def legacy_category_commissions(
-    token: str, token_type: str, campaign_id: int
-) -> Tuple[bool, str, Dict[str, float]]:
-    """Compatibility with the legacy category commission endpoint."""
-    url = f"{API_URL}/v2/campaigns/{int(campaign_id)}/categories/commissions"
-    try:
-        response = requests.get(
-            url,
-            headers=api_headers(token, token_type),
-            timeout=20,
-        )
-        if response.status_code != 200:
-            return (
-                False,
-                "Старый метод комиссий недоступен. Используйте актуальный калькулятор "
-                "POST /v2/tariffs/calculate ниже.",
-                {},
-            )
-        categories = response.json().get("result", {}).get("categories", [])
-        rates: Dict[str, float] = {}
-        for category in categories:
-            name = str(
-                category.get("categoryName") or category.get("categoryId") or ""
-            ).strip().lower()
-            if name:
-                rates[name] = float(category.get("commissionPercent", 14)) / 100.0
-        return True, f"Загружено ставок: {len(rates)}", rates
-    except Exception as exc:
-        return False, f"Ошибка запроса: {exc}", {}
+    return pd.DataFrame(rows)
 
 
 # =============================================================================
-# EXCEL AND CSV EXPORT
+# EXCEL EXPORT
 # =============================================================================
-
-def tariff_table(settings: Dict[str, Any]) -> pd.DataFrame:
-    pricing = settings.get("pricing", {"mode":"none","markupPercent":15,"targetMargin":0.2})
-    rows = [
-        ("Комиссия", settings["commission_rate"], "доля"),
-        ("Минимальная комиссия", settings["min_commission"], "₽"),
-        ("Логистика: база", settings["logistics_base"], "₽"),
-        ("Логистика: за кг", settings["logistics_per_kg"], "₽/кг"),
-        ("Хранение", settings["storage_per_day_per_liter"], "₽/л/сутки"),
-        ("Эквайринг", settings["acquiring_fee"], "доля"),
-        ("Возвраты", settings["return_fee"], "доля"),
-        ("Упаковка FBS", settings["packaging"], "₽"),
-        ("Честный знак", settings["chestny_znak"], "₽"),
-        ("Маркировка", settings["labeling"], "₽"),
-        ("Гарантийный резерв", settings["warranty_reserve"], "доля"),
-        ("Надбавка: опасный", settings["hazard_surcharge"], "доля"),
-        ("Надбавка: хрупкий", settings["fragile_surcharge"], "доля"),
-        ("Себестоимость по умолчанию", settings["cost_fallback_rate"], "доля от цены"),
-        ("Плотность для оценки веса", settings["density_kg_per_liter"], "кг/л"),
-        ("Режим ценообразования", pricing.get("mode","none"), ""),
-        ("Наценка, %", pricing.get("markupPercent",15), "%"),
-        ("Целевая маржа", pricing.get("targetMargin",0.2), "доля"),
-    ]
-    if settings.get("custom_categories"):
-        for cat in settings["custom_categories"]:
-            rows.append((f"Категория: {cat.get('label', cat.get('key'))}", f"{cat.get('volume_l')}л/{cat.get('weight_kg')}кг", f"{'опасн' if cat.get('is_hazardous') else ''}"))
-    return pd.DataFrame(rows, columns=["Параметр", "Значение", "Единица"])
-
-
-def update_settings_from_tariff_csv(
-    data: bytes, current: Dict[str, Any]
-) -> Tuple[bool, str, Dict[str, Any]]:
-    """Support both the old one-row tariff CSV and the new parameter table."""
-    try:
-        encoding, separator = detect_csv_format(data)
-        table = pd.read_csv(io.BytesIO(data), sep=separator, encoding=encoding)
-        if table.empty:
-            return False, "CSV тарифа пуст.", current
-
-        updated = deep_copy_json(current)
-        technical_keys = {
-            "commission_rate", "min_commission", "logistics_base",
-            "logistics_per_kg", "storage_per_day_per_liter", "acquiring_fee",
-            "return_fee", "packaging", "chestny_znak", "labeling",
-            "warranty_reserve", "hazard_surcharge", "fragile_surcharge",
-            "cost_fallback_rate", "density_kg_per_liter",
-        }
-
-        # Original format: one row with technical names as columns.
-        if technical_keys.intersection(table.columns):
-            row = table.iloc[0]
-            changed = 0
-            for key in technical_keys:
-                if key in table.columns and pd.notna(row[key]):
-                    updated[key] = float(str(row[key]).replace(",", "."))
-                    changed += 1
-            return True, f"Обновлено параметров: {changed}", updated
-
-        # New format produced by the application itself.
-        parameter_column = next(
-            (c for c in table.columns if normalize_header(c) == "параметр"), None
-        )
-        value_column = next(
-            (c for c in table.columns if normalize_header(c) == "значение"), None
-        )
-        if parameter_column is None or value_column is None:
-            return False, "Нужны колонки «Параметр» и «Значение».", current
-
-        label_to_key = {
-            "комиссия": "commission_rate",
-            "минимальная комиссия": "min_commission",
-            "логистика: база": "logistics_base",
-            "логистика: за кг": "logistics_per_kg",
-            "хранение": "storage_per_day_per_liter",
-            "эквайринг": "acquiring_fee",
-            "возвраты": "return_fee",
-            "упаковка fbs": "packaging",
-            "честный знак": "chestny_znak",
-            "маркировка": "labeling",
-            "гарантийный резерв": "warranty_reserve",
-            "надбавка: опасный": "hazard_surcharge",
-            "надбавка: хрупкий": "fragile_surcharge",
-            "себестоимость по умолчанию": "cost_fallback_rate",
-            "плотность для оценки веса": "density_kg_per_liter",
-        }
-        changed = 0
-        for _, row in table.iterrows():
-            label = normalize_header(row[parameter_column])
-            key = label_to_key.get(label)
-            if key and pd.notna(row[value_column]):
-                updated[key] = float(str(row[value_column]).replace(",", "."))
-                changed += 1
-        if not changed:
-            return False, "В CSV не найдены известные параметры тарифа.", current
-        return True, f"Обновлено параметров: {changed}", updated
-    except Exception as exc:
-        return False, f"Ошибка CSV тарифа: {exc}", current
-
-
-def parse_category_csv(data: bytes, existing: List[Dict[str, Any]]) -> Tuple[bool, str, List[Dict[str, Any]]]:
-    try:
-        encoding, separator = detect_csv_format(data)
-        table = pd.read_csv(io.BytesIO(data), sep=separator, encoding=encoding)
-        if table.empty:
-            return False, "CSV категорий пуст.", existing
-        table.columns = [normalize_header(c) for c in table.columns]
-        required = ["key", "label"]
-        for req in required:
-            if req not in table.columns:
-                return False, f"Нет колонки {req} в CSV категорий.", existing
-        updated = deep_copy_json(existing)
-        existing_keys = {normalize_header(str(c.get("key",""))) : i for i,c in enumerate(updated)}
-        added = 0
-        for _, row in table.iterrows():
-            key = str(row.get("key","")).strip()
-            if not key:
-                continue
-            nkey = normalize_header(key)
-            cfg = {
-                "key": key.lower().strip(),
-                "label": str(row.get("label","")).strip() or key,
-                "volume_l": float(str(row.get("volume_l", 2)).replace(",",".")) if pd.notna(row.get("volume_l")) else 2.0,
-                "weight_kg": float(str(row.get("weight_kg", 1)).replace(",",".")) if pd.notna(row.get("weight_kg")) else 1.0,
-                "is_hazardous": str(row.get("is_hazardous","")).lower() in ["true","1","да","yes"],
-                "is_fragile": str(row.get("is_fragile","")).lower() in ["true","1","да","yes"],
-                "commission_rate": None,
-                "logistics_base": None,
-                "storage_per_day_per_liter": None,
-            }
-            if "commission_rate" in table.columns and pd.notna(row.get("commission_rate")):
-                v = float(str(row.get("commission_rate")).replace(",","."))
-                cfg["commission_rate"] = v/100 if v>1 else v
-            if "logistics_base" in table.columns and pd.notna(row.get("logistics_base")):
-                cfg["logistics_base"] = float(str(row.get("logistics_base")).replace(",","."))
-            if "storage_per_day_per_liter" in table.columns and pd.notna(row.get("storage_per_day_per_liter")):
-                cfg["storage_per_day_per_liter"] = float(str(row.get("storage_per_day_per_liter")).replace(",","."))
-            if nkey in existing_keys:
-                updated[existing_keys[nkey]] = cfg
-            else:
-                updated.append(cfg)
-                added += 1
-        return True, f"Категорий добавлено/обновлено: {len(table)} (новых {added})", updated
-    except Exception as exc:
-        return False, f"Ошибка CSV категорий: {exc}", existing
-
-
-def get_saved_datasets() -> List[Dict[str, Any]]:
-    try:
-        path = DATA_DIR / "saved_datasets.json"
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-
-def save_dataset(name: str, raw_df: pd.DataFrame, parse_meta: Dict[str, Any]) -> str:
-    try:
-        datasets = get_saved_datasets()
-        # Store raw data as parquet-like via pickle base64? For simplicity store as csv string
-        # But to avoid huge JSON, save to separate pickle file
-        ds_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + str(len(datasets))
-        pickle_path = DATA_DIR / f"dataset_{ds_id}.pkl"
-        raw_df.to_pickle(pickle_path)
-        entry = {
-            "id": ds_id,
-            "name": name,
-            "createdAt": datetime.now().isoformat(),
-            "rows": len(raw_df),
-            "fileName": parse_meta.get("fileName", name),
-            "pickle": str(pickle_path),
-            "parse_meta": parse_meta,
-        }
-        datasets.append(entry)
-        # keep last 20
-        datasets = datasets[-20:]
-        with (DATA_DIR / "saved_datasets.json").open("w", encoding="utf-8") as f:
-            json.dump(datasets, f, ensure_ascii=False, indent=2)
-        return ds_id
-    except Exception as exc:
-        logger.exception("save dataset failed")
-        return ""
-
-
-def load_dataset(ds_id: str) -> Tuple[Optional[pd.DataFrame], Dict[str, Any], str]:
-    try:
-        datasets = get_saved_datasets()
-        for ds in datasets:
-            if ds["id"] == ds_id:
-                p = Path(ds["pickle"])
-                if p.exists():
-                    df = pd.read_pickle(p)
-                    return df, ds.get("parse_meta", {}), ds.get("name","")
-        return None, {}, ""
-    except Exception:
-        return None, {}, ""
-
-
-def delete_dataset(ds_id: str) -> None:
-    try:
-        datasets = get_saved_datasets()
-        new_list = []
-        for ds in datasets:
-            if ds["id"] == ds_id:
-                try:
-                    Path(ds["pickle"]).unlink(missing_ok=True)
-                except Exception:
-                    pass
-            else:
-                new_list.append(ds)
-        with (DATA_DIR / "saved_datasets.json").open("w", encoding="utf-8") as f:
-            json.dump(new_list, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def legend_table() -> pd.DataFrame:
-    rows = [
-        ("Артикул", "Уникальный идентификатор товара", "Файл пользователя"),
-        ("Бренд", "Производитель / торговая марка", "Файл или 'Без бренда'"),
-        ("Категория", "Группа товара для тарифов и аналитики", "Файл пользователя"),
-        ("Объем_л", "Д×Ш×В / 1000", "Габариты / файл / справочник"),
-        ("Оплач_вес", "MAX(вес; Д×Ш×В / 5000; 0,1)", "Формула"),
-        ("Себестоимость", "Закупочная цена или % от цены", "Файл / настройки"),
-        ("Комиссия_руб", "MAX(Цена × ставка; мин. комиссия)", "Тариф"),
-        ("Логистика_руб", "База + оплач. вес × ставка за кг", "Тариф + габариты"),
-        ("Хранение_руб", "Объём × ставка × дни", "Тариф + оборачиваемость"),
-        ("Эквайринг_руб", "Цена × ставка эквайринга", "Тариф"),
-        ("Возвраты_руб", "Цена × резерв возвратов", "Тариф"),
-        ("Спец_расходы_FBS", "Упаковка, маркировка, резервы", "Настройки"),
-        ("Рекомендованная_цена", "Безубыточная +1% (покрывает все сборы)", "Формула"),
-        ("Цена_с_наценкой", "Цена после наценки / целевой маржи", "Формула (B18/B19 тарифа)"),
-        ("Прибыль_с_наценкой", "Прибыль по новой цене", "Формула"),
-        ("Маржа_с_наценкой_%", "Маржа по новой цене", "Формула"),
-        ("ABC", "A 80%, B 15%, C 5% выручки", "Расчёт"),
-        ("XYZ", "X стабильные, Y средние, Z нестабильные", "По оборачиваемости"),
-        ("ABC_XYZ", "Матрица 9 ячеек", "Расчёт"),
-        ("Итого_расходы", "Себестоимость + все расходы", "Формула"),
-        ("Прибыль", "Цена - итого расходы", "Формула"),
-        ("Маржа_%", "Прибыль / Цена", "Формула"),
-    ]
-    return pd.DataFrame(rows, columns=["Колонка", "Описание", "Источник / логика"])
-
-
-def configure_excel_formats(workbook: Any) -> Dict[str, Any]:
+def add_excel_formats(workbook: xlsxwriter.Workbook) -> Dict[str, Any]:
     return {
-        "title": workbook.add_format(
-            {"bold": True, "font_size": 16, "font_color": "#0F3460"}
-        ),
-        "header": workbook.add_format(
-            {
-                "bold": True,
-                "bg_color": "#0F3460",
-                "font_color": "#FFFFFF",
-                "border": 1,
-                "align": "center",
-                "valign": "vcenter",
-                "text_wrap": True,
-            }
-        ),
+        "title": workbook.add_format({"bold": True, "font_size": 18, "font_color": "#0F172A"}),
+        "subtitle": workbook.add_format({"font_color": "#64748B", "font_size": 10}),
+        "header": workbook.add_format({
+            "bold": True, "bg_color": "#0F3460", "font_color": "#FFFFFF", "border": 1,
+            "align": "center", "valign": "vcenter", "text_wrap": True,
+        }),
+        "header2": workbook.add_format({
+            "bold": True, "bg_color": "#4338CA", "font_color": "#FFFFFF", "border": 1,
+            "align": "center", "valign": "vcenter", "text_wrap": True,
+        }),
         "money": workbook.add_format({"num_format": "#,##0.00", "border": 1}),
+        "money_green": workbook.add_format({"num_format": "#,##0.00", "border": 1, "font_color": "#047857"}),
+        "money_red": workbook.add_format({"num_format": "#,##0.00", "border": 1, "font_color": "#BE123C"}),
         "percent": workbook.add_format({"num_format": "0.00%", "border": 1}),
         "number": workbook.add_format({"num_format": "#,##0.00", "border": 1}),
-        "red": workbook.add_format(
-            {"bg_color": "#FFC7CE", "font_color": "#9C0006"}
-        ),
-        "green": workbook.add_format(
-            {"bg_color": "#C6EFCE", "font_color": "#006100"}
-        ),
+        "integer": workbook.add_format({"num_format": "#,##0", "border": 1}),
+        "text": workbook.add_format({"border": 1}),
+        "input": workbook.add_format({"border": 1, "bg_color": "#EEF2FF"}),
+        "formula": workbook.add_format({"border": 1, "bg_color": "#F8FAFC"}),
+        "good": workbook.add_format({"bg_color": "#DCFCE7", "font_color": "#166534", "border": 1}),
+        "warn": workbook.add_format({"bg_color": "#FEF3C7", "font_color": "#92400E", "border": 1}),
+        "bad": workbook.add_format({"bg_color": "#FFE4E6", "font_color": "#9F1239", "border": 1}),
+        "kpi_blue": workbook.add_format({"bold": True, "font_color": "#1E3A8A", "bg_color": "#DBEAFE", "border": 1}),
+        "kpi_green": workbook.add_format({"bold": True, "font_color": "#065F46", "bg_color": "#D1FAE5", "border": 1}),
+        "kpi_orange": workbook.add_format({"bold": True, "font_color": "#92400E", "bg_color": "#FEF3C7", "border": 1}),
+        "kpi_red": workbook.add_format({"bold": True, "font_color": "#9F1239", "bg_color": "#FFE4E6", "border": 1}),
     }
 
 
-def write_dataframe_header(
-    worksheet: Any, dataframe: pd.DataFrame, header_format: Any
-) -> None:
-    for col, value in enumerate(dataframe.columns):
-        worksheet.write(0, col, value, header_format)
+def write_parameters_sheet(workbook: xlsxwriter.Workbook, tariff: Dict[str, Any], target_margin: float, markup_rate: float) -> None:
+    fmt = add_excel_formats(workbook)
+    ws = workbook.add_worksheet("Параметры")
+    ws.set_column("A:A", 42)
+    ws.set_column("B:B", 18)
+    ws.write("A1", "Параметры расчета FBS", fmt["title"])
+    ws.write("A2", "Меняйте значения в колонке B — формулы на листах Расчет_* пересчитаются", fmt["subtitle"])
+    ws.write_row("A4", ["Параметр", "Значение"], fmt["header"])
+    rows = [
+        ("Базовая комиссия", tariff["base"]["commission_rate"], "percent"),
+        ("Минимальная комиссия, руб", tariff["base"]["min_commission"], "money"),
+        ("Логистика база, руб", tariff["base"]["logistics_base"], "money"),
+        ("Логистика за кг, руб", tariff["base"]["logistics_per_kg"], "money"),
+        ("Хранение за литр/сутки, руб", tariff["base"]["storage_per_day_per_liter"], "money"),
+        ("Эквайринг", tariff["base"]["acquiring_fee"], "percent"),
+        ("Возвраты", tariff["base"]["return_fee"], "percent"),
+        ("Упаковка FBS, руб", tariff["special_costs"]["packaging"], "money"),
+        ("Честный знак, руб", tariff["special_costs"]["chestny_znak"], "money"),
+        ("Маркировка, руб", tariff["special_costs"]["labeling"], "money"),
+        ("Гарантийный резерв", tariff["special_costs"]["warranty_reserve"], "percent"),
+        ("Надбавка опасный груз", tariff["special_costs"]["hazard_surcharge"], "percent"),
+        ("Надбавка хрупкий груз", tariff["special_costs"]["fragile_surcharge"], "percent"),
+        ("Себестоимость по умолчанию", tariff["cost_fallback"], "percent"),
+        ("Плотность для оценки веса, кг/л", tariff["density_kg_per_l"], "number"),
+        ("Целевая маржа", target_margin, "percent"),
+        ("Наценка к текущей цене", markup_rate, "percent"),
+    ]
+    for i, (label, val, fmt_key) in enumerate(rows, start=4):
+        ws.write(i, 0, label, fmt["text"])
+        ws.write(i, 1, val, fmt[fmt_key])
+    ws.freeze_panes(4, 0)
 
 
-def write_summary_sheet(
-    writer: pd.ExcelWriter,
+def excel_formula_calc_row(row_num: int, col: Dict[str, int], formula_col: str) -> str:
+    r = row_num
+    price = f"{xl_col_to_name(col['Цена'])}{r}"
+    cost = f"{xl_col_to_name(col['Себестоимость'])}{r}"
+    comm_rate = f"{xl_col_to_name(col['Ставка_комиссии'])}{r}"
+    min_comm = "Параметры!$B$6"  # actual row in params: row 6 = B6 min commission
+    billable = f"{xl_col_to_name(col['Оплач_вес'])}{r}"
+    log_base = f"{xl_col_to_name(col['Логистика_база'])}{r}"
+    log_kg = f"{xl_col_to_name(col['Логистика_за_кг'])}{r}"
+    volume = f"{xl_col_to_name(col['Объем_л'])}{r}"
+    storage_rate = f"{xl_col_to_name(col['Ставка_хранения'])}{r}"
+    turnover = f"{xl_col_to_name(col['Оборачиваемость_дней'])}{r}"
+    acq_rate = f"{xl_col_to_name(col['Ставка_эквайринга'])}{r}"
+    var_rate = f"{xl_col_to_name(col['Переменная_ставка'])}{r}"
+    fixed = f"{xl_col_to_name(col['Фикс_расходы_без_цены'])}{r}"
+    commission = f"{xl_col_to_name(col['Комиссия_руб'])}{r}"
+    logistics = f"{xl_col_to_name(col['Логистика_руб'])}{r}"
+    storage = f"{xl_col_to_name(col['Хранение_руб'])}{r}"
+    acquiring = f"{xl_col_to_name(col['Эквайринг_руб'])}{r}"
+    special = f"{xl_col_to_name(col['Спец_расходы_FBS'])}{r}"
+    total = f"{xl_col_to_name(col['Итого_расходы'])}{r}"
+    profit = f"{xl_col_to_name(col['Прибыль'])}{r}"
+    breakeven = f"{xl_col_to_name(col['Безубыток_руб'])}{r}"
+    markup = f"{xl_col_to_name(col['Цена_с_наценкой'])}{r}"
+    target = f"{xl_col_to_name(col['Цена_целевая_маржа'])}{r}"
+    recommended = f"{xl_col_to_name(col['Рекомендованная_цена'])}{r}"
+    target_margin = "Параметры!$B$20"
+    markup_rate = "Параметры!$B$21"
+
+    formulas = {
+        "Комиссия_руб": f"=MAX({price}*{comm_rate},{min_comm})",
+        "Логистика_руб": f"={log_base}+{billable}*{log_kg}",
+        "Хранение_руб": f"={volume}*{storage_rate}*{turnover}",
+        "Эквайринг_руб": f"={price}*{acq_rate}",
+        "Спец_расходы_FBS": f"=({fixed}-{cost}-{logistics}-{storage})+{price}*({var_rate}-{comm_rate}-{acq_rate})",
+        "Итого_расходы": f"={cost}+{commission}+{logistics}+{storage}+{acquiring}+{special}",
+        "Прибыль": f"={price}-{total}",
+        "Маржа_%": f"=IF({price}>0,{profit}/{price},0)",
+        "Безубыток_руб": f"=IF(1-{var_rate}>0,{fixed}/(1-{var_rate}),0)",
+        "Цена_с_наценкой": f"={price}*(1+{markup_rate})",
+        "Цена_целевая_маржа": f"=IF(1-{var_rate}-{target_margin}>0,{fixed}/(1-{var_rate}-{target_margin}),0)",
+        "Рекомендованная_цена": f"=ROUND(MAX({breakeven},{markup},{target}),0)",
+        "Маржа_при_рекоменд_цене": f"=IF({recommended}>0,({recommended}-({fixed}+{recommended}*{var_rate}))/{recommended},0)",
+    }
+    return formulas[formula_col]
+
+
+def write_calc_sheet(
+    workbook: xlsxwriter.Workbook,
     sheet_name: str,
-    group_name: str,
-    summary: pd.DataFrame,
-    formats: Dict[str, Any],
+    df_part: pd.DataFrame,
+    fmt: Dict[str, Any],
 ) -> None:
-    summary.to_excel(writer, sheet_name=sheet_name, index=False, startrow=2)
-    ws = writer.sheets[sheet_name]
-    ws.write(0, 0, f"СВОДКА: {group_name.upper()}", formats["title"])
-    for col, value in enumerate(summary.columns):
-        ws.write(2, col, value, formats["header"])
-    ws.freeze_panes(3, 0)
-    ws.autofilter(2, 0, len(summary) + 2, len(summary.columns) - 1)
-    ws.set_column(0, 0, 28)
-    ws.set_column(1, 1, 12)
-    ws.set_column(2, 4, 16, formats["money"])
-    ws.set_column(5, 5, 12, formats["percent"])
-    ws.set_column(6, 7, 15)
+    ws = workbook.add_worksheet(sheet_name)
+    ws.freeze_panes(1, 3)
+    ws.set_zoom(85)
+    ws.write_row(0, 0, CALC_EXPORT_COLUMNS, fmt["header"])
+    col = {name: idx for idx, name in enumerate(CALC_EXPORT_COLUMNS)}
 
-    if not summary.empty:
-        chart_rows = min(15, len(summary))
-        chart = writer.book.add_chart({"type": "column"})
-        chart.add_series(
-            {
-                "name": "Прибыль",
-                "categories": [sheet_name, 3, 0, chart_rows + 2, 0],
-                "values": [sheet_name, 3, 4, chart_rows + 2, 4],
-                "fill": {"color": "#10B981"},
-                "border": {"none": True},
-            }
-        )
-        chart.set_title({"name": f"Прибыль: топ-{chart_rows}"})
-        chart.set_legend({"none": True})
-        chart.set_style(10)
-        ws.insert_chart("J3", chart, {"x_scale": 1.45, "y_scale": 1.25})
+    input_cols = {
+        "Артикул", "Бренд", "Категория", "Длина", "Ширина", "Высота", "Объем_л", "Вес_кг", "Оплач_вес",
+        "Оборачиваемость_дней", "Цена", "Себестоимость", "Себестоимость_оценка", "Ставка_комиссии",
+        "Логистика_база", "Логистика_за_кг", "Ставка_хранения", "Ставка_эквайринга", "Переменная_ставка",
+        "Фикс_расходы_без_цены", "ABC", "XYZ", "ABC_XYZ", "Спецтариф_применен", "Причина_спецтарифа", "Опасный", "Хрупкий",
+    }
+    formula_cols = {
+        "Комиссия_руб", "Логистика_руб", "Хранение_руб", "Эквайринг_руб", "Спец_расходы_FBS", "Итого_расходы",
+        "Прибыль", "Маржа_%", "Безубыток_руб", "Цена_с_наценкой", "Цена_целевая_маржа", "Рекомендованная_цена",
+        "Маржа_при_рекоменд_цене",
+    }
 
-
-def export_summary_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
-    path = temporary_path(".xlsx")
-    try:
-        totals = calculate_totals(df)
-        category = aggregate_by(df, "Категория")
-        brand = aggregate_by(df, "Бренд")
-        with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
-            workbook = writer.book
-            formats = configure_excel_formats(workbook)
-
-            total_df = pd.DataFrame(
-                [
-                    ["Количество SKU", totals["count"]],
-                    ["Выручка", totals["revenue"]],
-                    ["Расходы", totals["expenses"]],
-                    ["Прибыль", totals["profit"]],
-                    ["Маржа", totals["margin"]],
-                    ["Убыточных SKU", totals["loss_count"]],
-                    ["Себестоимость оценена", totals["estimated_cost_count"]],
-                ],
-                columns=["Метрика", "Значение"],
-            )
-            total_df.to_excel(writer, sheet_name="Итоги", index=False, startrow=2)
-            ws = writer.sheets["Итоги"]
-            ws.write(0, 0, "ИТОГИ ПО КАТАЛОГУ", formats["title"])
-            for col, value in enumerate(total_df.columns):
-                ws.write(2, col, value, formats["header"])
-            ws.set_column("A:A", 32)
-            ws.set_column("B:B", 20, formats["money"])
-
-            write_summary_sheet(writer, "Сводка_Категории", "Категории", category, formats)
-            write_summary_sheet(writer, "Сводка_Бренды", "Бренды", brand, formats)
-
-            tariffs = tariff_table(settings)
-            tariffs.to_excel(writer, sheet_name="Тариф", index=False)
-            ws_t = writer.sheets["Тариф"]
-            write_dataframe_header(ws_t, tariffs, formats["header"])
-            ws_t.set_column("A:A", 40)
-            ws_t.set_column("B:C", 18)
-
-            legend = legend_table()
-            legend.to_excel(writer, sheet_name="Легенда", index=False)
-            ws_l = writer.sheets["Легенда"]
-            write_dataframe_header(ws_l, legend, formats["header"])
-            ws_l.set_column("A:A", 25)
-            ws_l.set_column("B:C", 55)
-        return read_and_remove(path)
-    except Exception:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        raise
-
-
-def export_values_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
-    """Full values workbook with bounded memory use for up to 300,000 rows."""
-    path = temporary_path(".xlsx")
-    try:
-        category = aggregate_by(df, "Категория")
-        brand = aggregate_by(df, "Бренд")
-        totals = calculate_totals(df)
-        export_df = df[RESULT_COLUMNS]
-
-        workbook = xlsxwriter.Workbook(
-            path,
-            {
-                "constant_memory": True,
-                "strings_to_urls": False,
-                "nan_inf_to_errors": True,
-            },
-        )
-        formats = configure_excel_formats(workbook)
-
-        # Write the largest sheet in strict row order. Only one row is kept in RAM.
-        ws = workbook.add_worksheet("Расчет_FBS")
-        ws.write_row(0, 0, RESULT_COLUMNS, formats["header"])
-        for row_number, row in enumerate(export_df.itertuples(index=False, name=None), start=1):
-            clean_row = []
-            for value in row:
-                if value is pd.NA or value is None:
-                    clean_row.append("")
-                elif isinstance(value, np.generic):
-                    clean_row.append(value.item())
-                else:
-                    clean_row.append(value)
-            ws.write_row(row_number, 0, clean_row)
-
-        ws.freeze_panes(1, 3)
-        ws.autofilter(0, 0, len(export_df), len(RESULT_COLUMNS) - 1)
-        ws.set_column(0, 0, 18)
-        ws.set_column(1, 2, 20)
-        ws.set_column(3, 9, 12, formats["number"])
-        ws.set_column(10, 10, 14, formats["money"])
-        ws.set_column(11, 11, 14, formats["money"])
-        ws.set_column(12, 12, 18)
-        ws.set_column(13, 13, 14, formats["percent"])
-        ws.set_column(14, 21, 15, formats["money"])
-        ws.set_column(22, 22, 12, formats["percent"])
-        ws.set_column(23, 25, 20)
-
-        margin_col = RESULT_COLUMNS.index("Маржа_%")
-        profit_col = RESULT_COLUMNS.index("Прибыль")
-        ws.conditional_format(
-            1, margin_col, len(export_df), margin_col,
-            {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]},
-        )
-        ws.conditional_format(
-            1, margin_col, len(export_df), margin_col,
-            {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]},
-        )
-        ws.conditional_format(
-            1, profit_col, len(export_df), profit_col,
-            {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]},
-        )
-
-        # Compact totals sheet.
-        ws_total = workbook.add_worksheet("Итоги")
-        ws_total.write(0, 0, "ИТОГИ ПО КАТАЛОГУ", formats["title"])
-        ws_total.write_row(2, 0, ["Метрика", "Значение"], formats["header"])
-        total_rows = [
-            ("Количество SKU", totals["count"]),
-            ("Выручка", totals["revenue"]),
-            ("Расходы", totals["expenses"]),
-            ("Прибыль", totals["profit"]),
-            ("Маржа", totals["margin"]),
-            ("Убыточных SKU", totals["loss_count"]),
-            ("Себестоимость оценена", totals["estimated_cost_count"]),
-        ]
-        for row_number, values in enumerate(total_rows, start=3):
-            ws_total.write(row_number, 0, values[0])
-            if values[0] == "Маржа":
-                ws_total.write_number(row_number, 1, float(values[1]), formats["percent"])
-            elif values[0] in ["Выручка", "Расходы", "Прибыль"]:
-                ws_total.write_number(row_number, 1, float(values[1]), formats["money"])
+    for r_idx, (_, row) in enumerate(df_part.iterrows(), start=1):
+        excel_row = r_idx + 1
+        for c_idx, name in enumerate(CALC_EXPORT_COLUMNS):
+            val = row.get(name, "")
+            if name in formula_cols:
+                ws.write_formula(r_idx, c_idx, excel_formula_calc_row(excel_row, col, name), fmt["formula"], val)
+            elif isinstance(val, (bool, np.bool_)):
+                ws.write_boolean(r_idx, c_idx, bool(val), fmt["input"])
+            elif isinstance(val, (int, float, np.integer, np.floating)) and np.isfinite(val):
+                number_fmt = fmt["percent"] if name.startswith("Ставка") or name in {"Переменная_ставка", "Маржа_%", "Маржа_при_рекоменд_цене"} else fmt["input"]
+                ws.write_number(r_idx, c_idx, float(val), number_fmt)
             else:
-                ws_total.write_number(row_number, 1, float(values[1]), formats["number"])
-        ws_total.set_column("A:A", 34)
-        ws_total.set_column("B:B", 20)
+                ws.write(r_idx, c_idx, str(val), fmt["input"])
 
-        def write_direct_summary(sheet_name: str, title: str, summary: pd.DataFrame) -> None:
-            sheet = workbook.add_worksheet(sheet_name)
-            sheet.write(0, 0, title, formats["title"])
-            sheet.write_row(2, 0, summary.columns.tolist(), formats["header"])
-            for row_number, values in enumerate(
-                summary.itertuples(index=False, name=None), start=3
-            ):
-                sheet.write_row(row_number, 0, list(values))
-            sheet.freeze_panes(3, 0)
-            sheet.autofilter(2, 0, len(summary) + 2, len(summary.columns) - 1)
-            sheet.set_column(0, 0, 28)
-            sheet.set_column(1, 1, 12)
-            sheet.set_column(2, 4, 16, formats["money"])
-            sheet.set_column(5, 5, 12, formats["percent"])
-            sheet.set_column(6, 7, 15)
-            if not summary.empty:
-                chart_rows = min(15, len(summary))
-                chart = workbook.add_chart({"type": "column"})
-                chart.add_series(
-                    {
-                        "name": "Прибыль",
-                        "categories": [sheet_name, 3, 0, chart_rows + 2, 0],
-                        "values": [sheet_name, 3, 4, chart_rows + 2, 4],
-                        "fill": {"color": "#10B981"},
-                        "border": {"none": True},
-                    }
-                )
-                chart.set_title({"name": f"Прибыль: топ-{chart_rows}"})
-                chart.set_legend({"none": True})
-                sheet.insert_chart("J3", chart, {"x_scale": 1.4, "y_scale": 1.2})
-
-        write_direct_summary("Сводка_Категории", "СВОДКА: КАТЕГОРИИ", category)
-        write_direct_summary("Сводка_Бренды", "СВОДКА: БРЕНДЫ", brand)
-
-        tariffs = tariff_table(settings)
-        ws_t = workbook.add_worksheet("Тариф")
-        ws_t.write_row(0, 0, tariffs.columns.tolist(), formats["header"])
-        for row_number, values in enumerate(tariffs.itertuples(index=False, name=None), start=1):
-            ws_t.write_row(row_number, 0, list(values))
-        ws_t.set_column("A:A", 40)
-        ws_t.set_column("B:C", 20)
-
-        legend = legend_table()
-        ws_l = workbook.add_worksheet("Легенда")
-        ws_l.write_row(0, 0, legend.columns.tolist(), formats["header"])
-        for row_number, values in enumerate(legend.itertuples(index=False, name=None), start=1):
-            ws_l.write_row(row_number, 0, list(values))
-        ws_l.set_column("A:A", 25)
-        ws_l.set_column("B:C", 55)
-
-        workbook.close()
-        return read_and_remove(path)
-    except Exception:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        raise
+    widths = {
+        "Артикул": 18, "Бренд": 16, "Категория": 20, "Длина": 10, "Ширина": 10, "Высота": 10,
+        "Объем_л": 10, "Вес_кг": 10, "Оплач_вес": 11, "Оборачиваемость_дней": 16, "Цена": 12,
+        "Себестоимость": 14, "Себестоимость_оценка": 16, "Причина_спецтарифа": 26,
+    }
+    for name, idx in col.items():
+        ws.set_column(idx, idx, widths.get(name, 13))
+    last_row = len(df_part) + 1
+    last_col = len(CALC_EXPORT_COLUMNS) - 1
+    ws.autofilter(0, 0, last_row, last_col)
+    ws.conditional_format(1, col["Маржа_%"], last_row, col["Маржа_%"], {"type": "cell", "criteria": "<", "value": 0, "format": fmt["bad"]})
+    ws.conditional_format(1, col["Маржа_%"], last_row, col["Маржа_%"], {"type": "cell", "criteria": ">=", "value": 0.15, "format": fmt["good"]})
+    ws.conditional_format(1, col["Прибыль"], last_row, col["Прибыль"], {"type": "cell", "criteria": "<", "value": 0, "format": fmt["bad"]})
+    ws.conditional_format(1, col["Рекомендованная_цена"], last_row, col["Рекомендованная_цена"], {"type": "cell", "criteria": ">", "value": 0, "format": fmt["good"]})
 
 
-def export_formula_excel(df: pd.DataFrame, settings: Dict[str, Any]) -> bytes:
-    """Workbook with live formulas. Limited to 50,000 rows by the UI."""
-    path = temporary_path(".xlsx")
+def write_summary_sheet(workbook: xlsxwriter.Workbook, sheet_name: str, summary: pd.DataFrame, group_label: str, fmt: Dict[str, Any]) -> None:
+    ws = workbook.add_worksheet(sheet_name)
+    ws.write("A1", f"Сводка: {group_label}", fmt["title"])
+    ws.write("A2", "Отсортировано по выручке. Цвета помогают быстро найти проблемные группы.", fmt["subtitle"])
+    headers = list(summary.columns)
+    ws.write_row(3, 0, headers, fmt["header"])
+    for r_idx, (_, row) in enumerate(summary.iterrows(), start=4):
+        for c_idx, name in enumerate(headers):
+            val = row[name]
+            if isinstance(val, (int, float, np.integer, np.floating)) and np.isfinite(val):
+                cell_fmt = fmt["percent"] if name == "Маржа" else fmt["money"] if name in {"Выручка", "Расходы", "Прибыль", "Рекоменд_выручка", "Потенциал_выручки"} else fmt["integer"]
+                ws.write_number(r_idx, c_idx, float(val), cell_fmt)
+            else:
+                ws.write(r_idx, c_idx, str(val), fmt["text"])
+    ws.set_column("A:A", 28)
+    ws.set_column("B:B", 12)
+    ws.set_column("C:F", 16)
+    ws.set_column("G:H", 14)
+    ws.freeze_panes(4, 0)
+    ws.autofilter(3, 0, len(summary) + 3, len(headers) - 1)
+    if "Маржа" in headers:
+        c = headers.index("Маржа")
+        ws.conditional_format(4, c, len(summary) + 3, c, {"type": "cell", "criteria": "<", "value": 0, "format": fmt["bad"]})
+        ws.conditional_format(4, c, len(summary) + 3, c, {"type": "cell", "criteria": ">=", "value": 0.15, "format": fmt["good"]})
+
+
+def write_dashboard_sheet(workbook: xlsxwriter.Workbook, df: pd.DataFrame, fmt: Dict[str, Any]) -> None:
+    ws = workbook.add_worksheet("Дашборд")
+    ws.hide_gridlines(2)
+    ws.set_column("A:A", 4)
+    ws.set_column("B:I", 16)
+    total = totals_row(df)
+    ws.write("B2", APP_NAME, fmt["title"])
+    ws.write("B3", f"Дата формирования: {datetime.now():%d.%m.%Y %H:%M}", fmt["subtitle"])
+    kpis = [
+        ("SKU", total["count"], fmt["kpi_blue"]),
+        ("Выручка", total["revenue"], fmt["kpi_blue"]),
+        ("Расходы", total["expenses"], fmt["kpi_orange"]),
+        ("Прибыль", total["profit"], fmt["kpi_green"] if total["profit"] >= 0 else fmt["kpi_red"]),
+        ("Маржа", total["avg_margin"], fmt["kpi_green"] if total["avg_margin"] >= 0.15 else fmt["kpi_orange"]),
+        ("Убыточных SKU", total["loss"], fmt["kpi_red"] if total["loss"] else fmt["kpi_green"]),
+        ("Реком. выручка", total["recommended_revenue"], fmt["kpi_green"]),
+    ]
+    for i, (name, val, kfmt) in enumerate(kpis):
+        row = 5 + (i // 4) * 3
+        col = 1 + (i % 4) * 2
+        ws.merge_range(row, col, row, col + 1, name, kfmt)
+        value_fmt = fmt["percent"] if name == "Маржа" else fmt["money"] if "выруч" in name.lower() or name in {"Расходы", "Прибыль"} else fmt["integer"]
+        ws.merge_range(row + 1, col, row + 1, col + 1, val, value_fmt)
+
+    costs = pd.DataFrame(
+        [
+            ("Себестоимость", total["cost"]),
+            ("Комиссия", total["commission"]),
+            ("Логистика", total["logistics"]),
+            ("Хранение", total["storage"]),
+            ("Эквайринг", float(df["Эквайринг_руб"].sum())),
+            ("Спец. расходы", float(df["Спец_расходы_FBS"].sum())),
+        ],
+        columns=["Расход", "Сумма"],
+    )
+    start = 13
+    ws.write_row(start, 1, costs.columns.tolist(), fmt["header"])
+    for i, row in costs.iterrows():
+        ws.write(start + 1 + i, 1, row["Расход"], fmt["text"])
+        ws.write_number(start + 1 + i, 2, row["Сумма"], fmt["money"])
+    chart = workbook.add_chart({"type": "doughnut"})
+    chart.add_series({"name": "Структура расходов", "categories": ["Дашборд", start + 1, 1, start + len(costs), 1], "values": ["Дашборд", start + 1, 2, start + len(costs), 2]})
+    chart.set_title({"name": "Структура расходов"})
+    chart.set_style(10)
+    ws.insert_chart("E13", chart, {"x_scale": 1.2, "y_scale": 1.2})
+
+
+def write_legend_sheet(workbook: xlsxwriter.Workbook, fmt: Dict[str, Any]) -> None:
+    ws = workbook.add_worksheet("Легенда")
+    ws.set_column("A:A", 30)
+    ws.set_column("B:B", 92)
+    ws.write_row("A1", ["Колонка", "Описание"], fmt["header"])
+    legend = [
+        ("ABC", "A — SKU формируют первые 80% выручки; B — следующие 15%; C — хвост."),
+        ("XYZ", "X — быстрая/стабильная маржа; Y — средний риск; Z — медленно или убыточно."),
+        ("Безубыток_руб", "Цена, при которой прибыль около нуля с учетом комиссии, эквайринга и переменных резервов."),
+        ("Цена_целевая_маржа", "Цена для достижения целевой маржи из листа Параметры."),
+        ("Цена_с_наценкой", "Текущая цена, увеличенная на процент наценки из листа Параметры."),
+        ("Рекомендованная_цена", "MAX(безубыток, цена целевой маржи, цена с наценкой), округлено до рублей."),
+        ("Маржа_при_рекоменд_цене", "Ожидаемая маржа, если поставить рекомендованную цену."),
+        ("Себестоимость_оценка", "TRUE, если себестоимость была рассчитана как % от цены, потому что в файле ее не было."),
+    ]
+    for i, row in enumerate(legend, start=1):
+        ws.write_row(i, 0, row, fmt["text"])
+
+
+def export_excel_formulas(df: pd.DataFrame, tariff: Dict[str, Any], target_margin: float, markup_rate: float) -> bytes:
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
     try:
-        input_columns = [
-            "Артикул", "Бренд", "Категория", "ID_категории", "Длина", "Ширина",
-            "Высота", "Объем_л", "Вес_кг", "Оплач_вес", "Цена", "Себестоимость",
-            "is_hazardous", "is_fragile", "Ставка_комиссии", "Логистика_база",
-            "Ставка_за_кг", "Ставка_хранения", "Оборачиваемость_дней",
-        ]
-        input_df = df[input_columns].copy()
-        category = aggregate_by(df, "Категория")
-        brand = aggregate_by(df, "Бренд")
-
-        with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
-            workbook = writer.book
-            formats = configure_excel_formats(workbook)
-
-            tariffs = tariff_table(settings)
-            tariffs.to_excel(writer, sheet_name="Тариф", index=False)
-            ws_t = writer.sheets["Тариф"]
-            write_dataframe_header(ws_t, tariffs, formats["header"])
-            ws_t.set_column("A:A", 40)
-            ws_t.set_column("B:C", 18)
-
-            input_df.to_excel(writer, sheet_name="Входные_Данные", index=False)
-            ws_in = writer.sheets["Входные_Данные"]
-            write_dataframe_header(ws_in, input_df, formats["header"])
-            ws_in.freeze_panes(1, 3)
-            ws_in.autofilter(0, 0, len(input_df), len(input_df.columns) - 1)
-            ws_in.set_column("A:A", 18)
-            ws_in.set_column("B:C", 20)
-            ws_in.set_column("D:S", 14)
-
-            ws_calc = workbook.add_worksheet("Расчет_FBS")
-            headers = [
-                "Артикул", "Бренд", "Категория", "Цена", "Себестоимость",
-                "Комиссия_руб", "Логистика_руб", "Хранение_руб", "Эквайринг_руб",
-                "Возвраты_руб", "Спец_расходы_FBS", "Итого_расходы", "Прибыль", "Маржа_%",
-                "Спецтариф_применён", "Причина_спецтарифа",
-            ]
-            ws_calc.write_row(0, 0, headers, formats["header"])
-
-            for idx, row in enumerate(df.itertuples(index=False), start=1):
-                excel_row = idx + 1
-                source_row = idx + 1
-                ws_calc.write_formula(idx, 0, f"='Входные_Данные'!A{source_row}", None, row.Артикул)
-                ws_calc.write_formula(idx, 1, f"='Входные_Данные'!B{source_row}", None, row.Бренд)
-                ws_calc.write_formula(idx, 2, f"='Входные_Данные'!C{source_row}", None, row.Категория)
-                ws_calc.write_formula(idx, 3, f"='Входные_Данные'!K{source_row}", formats["money"], row.Цена)
-                ws_calc.write_formula(idx, 4, f"='Входные_Данные'!L{source_row}", formats["money"], row.Себестоимость)
-                ws_calc.write_formula(
-                    idx, 5,
-                    f"=MAX(D{excel_row}*'Входные_Данные'!O{source_row},'Тариф'!$B$3)",
-                    formats["money"], row.Комиссия_руб,
-                )
-                ws_calc.write_formula(
-                    idx, 6,
-                    f"='Входные_Данные'!P{source_row}+'Входные_Данные'!J{source_row}*'Входные_Данные'!Q{source_row}",
-                    formats["money"], row.Логистика_руб,
-                )
-                ws_calc.write_formula(
-                    idx, 7,
-                    f"='Входные_Данные'!H{source_row}*'Входные_Данные'!R{source_row}*'Входные_Данные'!S{source_row}",
-                    formats["money"], row.Хранение_руб,
-                )
-                ws_calc.write_formula(
-                    idx, 8, f"=D{excel_row}*'Тариф'!$B$7", formats["money"], row.Эквайринг_руб
-                )
-                ws_calc.write_formula(
-                    idx, 9, f"=D{excel_row}*'Тариф'!$B$8",
-                    formats["money"], row.Возвраты_руб
-                )
-                ws_calc.write_formula(
-                    idx, 10,
-                    f"='Тариф'!$B$9+'Тариф'!$B$10+'Тариф'!$B$11+"
-                    f"D{excel_row}*'Тариф'!$B$12+"
-                    f"IF('Входные_Данные'!M{source_row},D{excel_row}*'Тариф'!$B$13,0)+"
-                    f"IF('Входные_Данные'!N{source_row},D{excel_row}*'Тариф'!$B$14,0)",
-                    formats["money"], row.Спец_расходы_FBS
-                )
-                ws_calc.write_formula(
-                    idx, 11, f"=SUM(E{excel_row}:K{excel_row})", formats["money"], row.Итого_расходы
-                )
-                ws_calc.write_formula(
-                    idx, 12, f"=D{excel_row}-L{excel_row}", formats["money"], row.Прибыль
-                )
-                ws_calc.write_formula(
-                    idx, 13, f"=IF(D{excel_row}>0,M{excel_row}/D{excel_row},0)",
-                    formats["percent"], float(df["Маржа_%"].iat[idx - 1])
-                )
-                ws_calc.write(idx, 14, bool(row.Спецтариф_применён))
-                ws_calc.write(idx, 15, row.Причина_спецтарифа)
-
-            ws_calc.freeze_panes(1, 3)
-            ws_calc.autofilter(0, 0, len(df), len(headers) - 1)
-            ws_calc.set_column("A:A", 18)
-            ws_calc.set_column("B:C", 20)
-            ws_calc.set_column("D:N", 15)
-            ws_calc.set_column("O:P", 24)
-            ws_calc.conditional_format(
-                1, 13, len(df), 13,
-                {"type": "cell", "criteria": "<", "value": 0, "format": formats["red"]},
-            )
-            ws_calc.conditional_format(
-                1, 13, len(df), 13,
-                {"type": "cell", "criteria": ">=", "value": 0.15, "format": formats["green"]},
-            )
-
-            write_summary_sheet(writer, "Сводка_Категории", "Категории", category, formats)
-            write_summary_sheet(writer, "Сводка_Бренды", "Бренды", brand, formats)
-            legend = legend_table()
-            legend.to_excel(writer, sheet_name="Легенда", index=False)
-            write_dataframe_header(writer.sheets["Легенда"], legend, formats["header"])
-            writer.sheets["Легенда"].set_column("A:A", 25)
-            writer.sheets["Легенда"].set_column("B:C", 55)
-        return read_and_remove(path)
-    except Exception:
+        workbook = xlsxwriter.Workbook(tmp.name, {"constant_memory": True, "nan_inf_to_errors": True})
+        fmt = add_excel_formats(workbook)
+        write_parameters_sheet(workbook, tariff, target_margin, markup_rate)
+        write_dashboard_sheet(workbook, df, fmt)
+        write_summary_sheet(workbook, "Сводка_Категории", summarize(df, "Категория"), "Категории", fmt)
+        write_summary_sheet(workbook, "Сводка_Бренды", summarize(df, "Бренд"), "Бренды", fmt)
+        write_summary_sheet(workbook, "ABC_XYZ", abc_xyz_matrix(df), "ABC/XYZ", fmt)
+        write_legend_sheet(workbook, fmt)
+        chunks = math.ceil(len(df) / EXCEL_DATA_ROWS_PER_SHEET)
+        for i in range(chunks):
+            start = i * EXCEL_DATA_ROWS_PER_SHEET
+            end = min((i + 1) * EXCEL_DATA_ROWS_PER_SHEET, len(df))
+            write_calc_sheet(workbook, f"Расчет_{i + 1}", df.iloc[start:end], fmt)
+        workbook.close()
+        return Path(tmp.name).read_bytes()
+    finally:
         try:
-            os.remove(path)
+            os.unlink(tmp.name)
         except OSError:
             pass
-        raise
+
+
+def export_excel_values(df: pd.DataFrame, tariff: Dict[str, Any]) -> bytes:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        workbook = writer.book
+        fmt = add_excel_formats(workbook)
+        write_parameters_sheet(workbook, tariff, st.session_state.target_margin, st.session_state.markup_rate)
+        write_dashboard_sheet(workbook, df, fmt)
+        values_cols = [c for c in CALC_EXPORT_COLUMNS if c in df.columns]
+        df[values_cols].to_excel(writer, sheet_name="Расчет_значения", index=False)
+        ws = writer.sheets["Расчет_значения"]
+        ws.freeze_panes(1, 3)
+        ws.autofilter(0, 0, len(df), len(values_cols) - 1)
+        for idx, name in enumerate(values_cols):
+            ws.write(0, idx, name, fmt["header"])
+            ws.set_column(idx, idx, 16)
+        write_summary_sheet(workbook, "Сводка_Категории", summarize(df, "Категория"), "Категории", fmt)
+        write_summary_sheet(workbook, "Сводка_Бренды", summarize(df, "Бренд"), "Бренды", fmt)
+        write_summary_sheet(workbook, "ABC_XYZ", abc_xyz_matrix(df), "ABC/XYZ", fmt)
+        write_legend_sheet(workbook, fmt)
+    return output.getvalue()
 
 
 def export_csv(df: pd.DataFrame) -> bytes:
-    path = temporary_path(".csv")
-    try:
-        csv_df = df[RESULT_COLUMNS].copy()
-        for col in ["Маржа_%","Маржа_с_наценкой_%","Выручка_доля"]:
-            if col in csv_df.columns:
-                csv_df[col] = csv_df[col] * 100.0
-        if "Ставка_комиссии" in csv_df.columns:
-            csv_df["Ставка_комиссии"] = csv_df["Ставка_комиссии"] * 100.0
-        csv_df.to_csv(
-            path,
-            index=False,
-            sep=";",
-            encoding="utf-8-sig",
-            decimal=",",
-            float_format="%.2f",
+    output = io.StringIO()
+    df.to_csv(output, sep=";", index=False, encoding="utf-8-sig")
+    return output.getvalue().encode("utf-8-sig")
+
+
+# =============================================================================
+# СОХРАНЕНИЕ / ЗАГРУЗКА
+# =============================================================================
+def save_current_project() -> Path:
+    payload = {
+        "df_raw": st.session_state.df_raw,
+        "df_calc": st.session_state.df_calc,
+        "tariff": st.session_state.tariff,
+        "custom_categories": st.session_state.custom_categories,
+        "parse_info": st.session_state.parse_info,
+        "target_margin": st.session_state.target_margin,
+        "markup_rate": st.session_state.markup_rate,
+        "saved_at": datetime.now().isoformat(),
+    }
+    path = SAVE_DIR / f"fbs_project_{datetime.now():%Y%m%d_%H%M%S}.pkl"
+    with open(path, "wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    return path
+
+
+def load_project(path: Path) -> None:
+    with open(path, "rb") as f:
+        payload = pickle.load(f)
+    for key in ["df_raw", "df_calc", "tariff", "custom_categories", "parse_info", "target_margin", "markup_rate"]:
+        if key in payload:
+            st.session_state[key] = payload[key]
+
+
+def recalculate_current() -> None:
+    if st.session_state.df_raw is None:
+        return
+    with st.spinner("Пересчитываем юнит-экономику..."):
+        st.session_state.df_calc = calculate_df(
+            st.session_state.df_raw,
+            st.session_state.tariff,
+            all_categories(),
+            st.session_state.target_margin,
+            st.session_state.markup_rate,
         )
-        return read_and_remove(path)
-    except Exception:
+
+
+# =============================================================================
+# UI HELPERS
+# =============================================================================
+def hero() -> None:
+    st.markdown(
+        f"""
+<div class="hero">
+  <div style="display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap;position:relative">
+    <div>
+      <h1>🚗 {APP_NAME} <span style="color:#fbbf24">FBS</span></h1>
+      <p>До 300 000+ SKU · Excel с живыми формулами · ABC/XYZ · рекомендованные цены · v{APP_VERSION}</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="badge">⚡ 300k+ SKU</span>
+      <span class="badge">📊 Красочный Excel</span>
+      <span class="badge">💾 Сохранение проектов</span>
+      <span class="badge">🧩 Свои категории</span>
+    </div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def stepper() -> None:
+    steps = [("⚙️", "Тарифы"), ("📦", "Данные"), ("📊", "Дашборд"), ("📥", "Экспорт")]
+    cols = st.columns(4)
+    # Шаг «Данные» должен быть доступен сразу. Тарифы уже заполнены дефолтами,
+    # поэтому пользователь может пропустить ручную настройку и сразу загрузить каталог.
+    max_step = 1 if st.session_state.df_raw is None else 3 if st.session_state.df_calc is not None else 1
+    for idx, (icon, label) in enumerate(steps):
+        with cols[idx]:
+            if st.button(f"{icon} {label}", key=f"step_{idx}", disabled=idx > max_step, type="primary" if st.session_state.step == idx else "secondary", use_container_width=True):
+                st.session_state.step = idx
+                st.rerun()
+
+
+def visual_step_status() -> None:
+    statuses = [
+        ("⚙️ Тарифы", "Типовые ставки уже заполнены", True),
+        ("📦 Данные", "Доступно сразу после запуска", True),
+        ("📊 Дашборд", "Откроется после расчета", st.session_state.df_calc is not None),
+        ("📥 Экспорт", "Excel/CSV после расчета", st.session_state.df_calc is not None),
+    ]
+    html = ['<div class="step-status">']
+    for idx, (title, subtitle, ready) in enumerate(statuses):
+        klass = "active" if st.session_state.step == idx else "ready" if ready else ""
+        html.append(f'<div class="step-chip {klass}"><strong>{title}</strong><span>{subtitle}</span></div>')
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def action_guide(title: str, items: List[Tuple[str, str]]) -> None:
+    html = [f'<div class="guide"><div class="guide-title">{title}</div><div class="guide-grid">']
+    for head, text in items:
+        html.append(f'<div class="guide-item"><b>{head}</b><br>{text}</div>')
+    html.append("</div></div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def sidebar_status() -> None:
+    with st.sidebar:
+        st.markdown("### 🚗 FBS Unit Lab")
+        st.caption("Монолит Streamlit · локальные расчеты")
+        st.divider()
+        if st.session_state.df_calc is not None:
+            df = st.session_state.df_calc
+            total = totals_row(df)
+            st.metric("SKU в проекте", f"{len(df):,}".replace(",", " "))
+            st.metric("Выручка", money_short(total["revenue"]))
+            st.metric("Маржа", pct(total["avg_margin"]))
+            if st.session_state.last_calc_seconds is not None:
+                st.caption(f"Последний расчет: {st.session_state.last_calc_seconds:.1f} сек")
+        else:
+            st.info("Данные еще не загружены")
+        st.divider()
+        st.markdown("#### ⚙️ Быстрые параметры")
+        st.write(f"Целевая маржа: **{pct(st.session_state.target_margin)}**")
+        st.write(f"Наценка: **{pct(st.session_state.markup_rate)}**")
+        st.write(f"Себестоимость по умолчанию: **{pct(st.session_state.tariff['cost_fallback'])}**")
+        st.divider()
+        saved = sorted(SAVE_DIR.glob("fbs_project_*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        st.markdown("#### 💾 Сохраненные проекты")
+        if saved:
+            for p in saved[:5]:
+                st.caption(p.name)
+        else:
+            st.caption("Пока нет сохранений")
+
+
+def metric_card(title: str, value: str, subtitle: str, tone: str) -> None:
+    st.markdown(
+        f"""
+<div class="metric-card {tone}">
+  <div class="small">{title}</div>
+  <div style="font-family:Manrope,sans-serif;font-size:1.55rem;font-weight:800;color:#0f172a;margin-top:6px">{value}</div>
+  <div class="small" style="margin-top:6px">{subtitle}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# =============================================================================
+# APP
+# =============================================================================
+st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="🚗")
+st.markdown(CSS, unsafe_allow_html=True)
+ensure_state()
+hero()
+sidebar_status()
+st.write("")
+stepper()
+visual_step_status()
+st.divider()
+
+tariff = st.session_state.tariff
+
+
+# -----------------------------------------------------------------------------
+# ШАГ 0. ТАРИФЫ И КАТЕГОРИИ
+# -----------------------------------------------------------------------------
+if st.session_state.step == 0:
+    st.info("Новичок? Оставьте настройки по умолчанию, перейдите к шагу «Данные» и загрузите пример на 24 SKU.")
+    action_guide(
+        "Что делать на этом шаге",
+        [
+            ("Можно ничего не менять", "Тарифы уже заполнены типовыми значениями. Если вы только тестируете отчет, сразу переходите к загрузке данных."),
+            ("Точность зависит от тарифов", "Если знаете свои ставки комиссии, логистики и хранения, поправьте их здесь — расчет и Excel пересчитаются."),
+            ("Себестоимость необязательна", "Если в файле нет себестоимости, приложение рассчитает ее как процент от цены. Значение задается ниже."),
+        ],
+    )
+    if st.button("📦 Перейти сразу к загрузке данных", type="primary", use_container_width=True):
+        st.session_state.step = 1
+        st.rerun()
+    st.markdown('<div class="visual-separator"></div>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">⚙️ Базовый тариф Яндекс Маркета</div>', unsafe_allow_html=True)
+        base = tariff["base"]
+        base["commission_rate"] = st.number_input("Комиссия маркетплейса, %", 0.0, 60.0, base["commission_rate"] * 100, 0.5) / 100
+        base["min_commission"] = st.number_input("Минимальная комиссия, руб", 0.0, 3000.0, base["min_commission"], 5.0)
+        base["logistics_base"] = st.number_input("Логистика: база, руб", 0.0, 3000.0, base["logistics_base"], 5.0)
+        base["logistics_per_kg"] = st.number_input("Логистика: за 1 кг, руб", 0.0, 500.0, base["logistics_per_kg"], 0.5)
+        base["storage_per_day_per_liter"] = st.number_input("Хранение за 1 л/сутки, руб", 0.0, 10.0, base["storage_per_day_per_liter"], 0.05, format="%.2f")
+        base["acquiring_fee"] = st.number_input("Эквайринг, %", 0.0, 20.0, base["acquiring_fee"] * 100, 0.1) / 100
+        base["return_fee"] = st.number_input("Возвраты, %", 0.0, 20.0, base["return_fee"] * 100, 0.1) / 100
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔧 Спецтарифы автозапчастей</div>', unsafe_allow_html=True)
+        tariff["special_enabled"] = st.toggle("Применять спецтарифы", value=tariff["special_enabled"])
+        for key, rule in tariff["special_tariffs"].items():
+            with st.expander(f"{rule['label']} · ключ: {key}", expanded=False):
+                c1, c2, c3 = st.columns(3)
+                rule["commission_rate"] = c1.number_input(f"Комиссия, % ({key})", 0.0, 60.0, float(rule["commission_rate"]) * 100, 0.5, key=f"sp_comm_{key}") / 100
+                rule["logistics_base"] = c2.number_input(f"Логистика, руб ({key})", 0.0, 3000.0, float(rule["logistics_base"]), 5.0, key=f"sp_log_{key}")
+                rule["storage_per_day_per_liter"] = c3.number_input(f"Хранение, руб/л ({key})", 0.0, 10.0, float(rule["storage_per_day_per_liter"]), 0.05, key=f"sp_st_{key}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🧩 Себестоимость, вес и доп. расходы</div>', unsafe_allow_html=True)
+    sc = tariff["special_costs"]
+    c1, c2, c3 = st.columns(3)
+    sc["packaging"] = c1.number_input("Упаковка FBS, руб", 0.0, 1000.0, sc["packaging"], 5.0)
+    sc["chestny_znak"] = c2.number_input("Честный знак, руб", 0.0, 100.0, sc["chestny_znak"], 0.5)
+    sc["labeling"] = c3.number_input("Маркировка/стикеровка, руб", 0.0, 100.0, sc["labeling"], 0.5)
+    c1, c2, c3 = st.columns(3)
+    sc["warranty_reserve"] = c1.number_input("Гарантийный резерв, %", 0.0, 30.0, sc["warranty_reserve"] * 100, 0.5) / 100
+    sc["hazard_surcharge"] = c2.number_input("Надбавка опасный груз, %", 0.0, 30.0, sc["hazard_surcharge"] * 100, 0.5) / 100
+    sc["fragile_surcharge"] = c3.number_input("Надбавка хрупкий груз, %", 0.0, 30.0, sc["fragile_surcharge"] * 100, 0.5) / 100
+    c1, c2, c3, c4 = st.columns(4)
+    tariff["cost_fallback"] = c1.slider("Себестоимость по умолчанию, % от цены", 1, 99, int(tariff["cost_fallback"] * 100), 1) / 100
+    tariff["density_kg_per_l"] = c2.number_input("Плотность для оценки веса, кг/л", 0.01, 5.0, float(tariff["density_kg_per_l"]), 0.05)
+    st.session_state.target_margin = c3.slider("Целевая маржа для рекомендации, %", 0, 80, int(st.session_state.target_margin * 100), 1) / 100
+    st.session_state.markup_rate = c4.slider("Наценка к текущей цене, %", 0, 200, int(st.session_state.markup_rate * 100), 5) / 100
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.write("")
+    with st.expander("📚 Свои категории и характеристики", expanded=True):
+        st.caption("CSV-формат: Категория;Объем_л;Вес_кг;Опасный;Хрупкий. Значения Да/Нет допустимы.")
+        uploaded_cat = st.file_uploader("Загрузить CSV справочника категорий", type=["csv"], key="categories_csv")
+        if uploaded_cat is not None:
+            try:
+                raw = uploaded_cat.getvalue()
+                sep = ";" if raw[:4096].count(b";") >= raw[:4096].count(b",") else ","
+                cdf = pd.read_csv(io.BytesIO(raw), sep=sep)
+                added = 0
+                for _, row in cdf.iterrows():
+                    name = str(row.get("Категория", "")).strip().lower()
+                    if not name:
+                        continue
+                    st.session_state.custom_categories[name] = {
+                        "volume_l": float(to_num(row.get("Объем_л", 2)) or 2),
+                        "weight_kg": float(to_num(row.get("Вес_кг", 1)) or 1),
+                        "hazardous": bool(to_bool(row.get("Опасный", False)) or False),
+                        "fragile": bool(to_bool(row.get("Хрупкий", False)) or False),
+                    }
+                    added += 1
+                st.success(f"Загружено категорий: {added}")
+            except Exception as exc:
+                st.error(f"Ошибка загрузки категорий: {exc}")
+        c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
+        new_name = c1.text_input("Новая категория")
+        new_vol = c2.number_input("Объем, л", 0.01, 10000.0, 2.0, 0.1)
+        new_w = c3.number_input("Вес, кг", 0.01, 10000.0, 1.0, 0.1)
+        new_h = c4.toggle("Опасный")
+        new_f = c5.toggle("Хрупкий")
+        if st.button("➕ Добавить категорию") and new_name.strip():
+            st.session_state.custom_categories[new_name.strip().lower()] = {"volume_l": new_vol, "weight_kg": new_w, "hazardous": new_h, "fragile": new_f}
+            st.success(f"Категория добавлена: {new_name}")
+        all_cat_df = pd.DataFrame([
+            {"Категория": k, "Объем_л": v["volume_l"], "Вес_кг": v["weight_kg"], "Опасный": "Да" if v["hazardous"] else "Нет", "Хрупкий": "Да" if v["fragile"] else "Нет"}
+            for k, v in all_categories().items()
+        ])
+        st.download_button("⬇️ Скачать текущий справочник категорий", data=all_cat_df.to_csv(index=False, sep=";").encode("utf-8-sig"), file_name="categories_fbs.csv", mime="text/csv")
+        st.dataframe(all_cat_df.head(80), use_container_width=True, hide_index=True)
+
+    with st.expander("🌐 Индивидуальные ставки категорий из API Яндекс Маркета", expanded=False):
+        c1, c2, c3 = st.columns([2, 1, 1])
+        token = c1.text_input("OAuth-токен", type="password")
+        campaign_id = c2.number_input("Campaign ID", min_value=1, value=123456, step=1)
+        if c3.button("Обновить из API", use_container_width=True):
+            if not token:
+                st.warning("Введите OAuth-токен")
+            else:
+                try:
+                    resp = requests.get(
+                        f"https://api.partner.market.yandex.ru/v2/campaigns/{int(campaign_id)}/categories/commissions",
+                        headers={"Authorization": f"OAuth {token}", "Accept": "application/json"},
+                        timeout=15,
+                    )
+                    if resp.status_code != 200:
+                        st.error(f"API вернул {resp.status_code}: {resp.text[:300]}")
+                    else:
+                        cats = resp.json().get("result", {}).get("categories", [])
+                        rates = {}
+                        for item in cats:
+                            name = normalize_header(item.get("categoryName", ""))
+                            if name:
+                                rates[name] = float(item.get("commissionPercent", 14)) / 100
+                        tariff["category_rates"] = rates
+                        tariff["use_category_rates"] = True
+                        st.success(f"Получены ставки для {len(rates)} категорий")
+                except Exception as exc:
+                    st.error(f"Ошибка запроса API: {exc}")
+        if st.button("🎲 Загрузить демо-ставки"):
+            tariff["category_rates"] = {"шины": 0.12, "аккумуляторы": 0.13, "фильтры": 0.14, "масла": 0.15, "двигатели": 0.11, "кпп": 0.11}
+            tariff["use_category_rates"] = True
+            st.success("Демо-ставки загружены")
+        tariff["use_category_rates"] = st.toggle("Использовать индивидуальные ставки", value=tariff.get("use_category_rates", True))
+        if tariff.get("category_rates"):
+            st.json(tariff["category_rates"])
+
+    if st.session_state.df_raw is not None:
+        if st.button("🔁 Пересчитать загруженные данные с новыми тарифами", type="primary"):
+            recalculate_current()
+            st.success("Расчет обновлен")
+
+
+# -----------------------------------------------------------------------------
+# ШАГ 1. ДАННЫЕ
+# -----------------------------------------------------------------------------
+elif st.session_state.step == 1:
+    action_guide(
+        "Как загрузить данные",
+        [
+            ("1. Загрузите файл", "Поддерживаются CSV, XLSX, XLS, TXT. Колонки распознаются по русским и английским названиям."),
+            ("2. Или используйте демо", "Нажмите 24 SKU, 50 000 SKU или 300 000 SKU — приложение само создаст каталог и рассчитает экономику."),
+            ("3. Проверьте предпросмотр", "После загрузки появятся сопоставленные колонки, предупреждения и первые строки каталога."),
+        ],
+    )
+    st.markdown('<div class="card card-accent">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📦 Загрузка каталога</div>', unsafe_allow_html=True)
+    st.caption("Минимально: Артикул, Категория, Цена. Рекомендуется: Бренд, Длина, Ширина, Высота. Себестоимость и вес необязательны.")
+    uploaded = st.file_uploader("CSV / XLSX / XLS / TXT", type=["csv", "xlsx", "xls", "txt", "tsv"])
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+<div class="soft-callout">
+  <b>Пробные данные возвращены и встроены в монолит.</b><br>
+  Можно загрузить пример сразу в приложение или скачать CSV и проверить импорт как с реальным файлом.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+<div class="sample-grid">
+  <div class="sample-card"><strong>🎲 24 SKU</strong><span>Быстрый пример для проверки интерфейса, графиков и Excel.</span></div>
+  <div class="sample-card"><strong>⚡ 50 000 SKU</strong><span>Нагрузочный пример для проверки скорости расчета.</span></div>
+  <div class="sample-card"><strong>🚀 300 000 SKU</strong><span>Большой каталог для проверки экспорта и фильтров.</span></div>
+  <div class="sample-card"><strong>📄 CSV-демо</strong><span>Скачайте файл с себестоимостью или без нее.</span></div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    template = "Артикул;Бренд;Категория;Длина;Ширина;Высота;Цена;Себестоимость;Вес_кг;Оборачиваемость_дней\nMAN-FLT-000001;Mann-Filter;Фильтры;22;14;14;450;220;0,5;25\nMIC-TR-000002;Michelin;Шины;70;70;26;5400;3650;10,5;15\nVAR-BAT-000003;Varta;Аккумуляторы;35;26;26;6500;;16,5;30\n"
+    c1.download_button("📋 Шаблон CSV", data=("\ufeff" + template).encode("utf-8-sig"), file_name="template_fbs.csv", mime="text/csv", use_container_width=True)
+    if c2.button("🎲 24 SKU", use_container_width=True):
+        df_demo = build_demo_rows(24)
+        st.session_state.df_raw, st.session_state.parse_info = parse_dataframe(df_demo, "demo_24.csv", 0)
+        recalculate_current()
+        st.success("Демо 24 SKU загружено")
+        st.rerun()
+    if c3.button("⚡ 50 000 SKU", use_container_width=True):
+        with st.spinner("Генерируем и считаем 50 000 SKU..."):
+            df_demo = build_demo_rows(50_000)
+            st.session_state.df_raw, st.session_state.parse_info = parse_dataframe(df_demo, "demo_50000.csv", 0)
+            recalculate_current()
+        st.rerun()
+    if c4.button("🚀 300 000 SKU", use_container_width=True):
+        with st.spinner("Генерируем и считаем 300 000 SKU..."):
+            df_demo = build_demo_rows(300_000)
+            st.session_state.df_raw, st.session_state.parse_info = parse_dataframe(df_demo, "demo_300000.csv", 0)
+            recalculate_current()
+        st.rerun()
+    if c5.button("💾 Сохранить", use_container_width=True, disabled=st.session_state.df_calc is None):
+        path = save_current_project()
+        st.success(f"Сохранено: {path.name}")
+
+    d1, d2, d3 = st.columns(3)
+    d1.download_button(
+        "⬇️ Скачать демо 24 SKU с себестоимостью",
+        data=demo_csv_bytes(24, with_cost=True),
+        file_name="demo_fbs_24_with_cost.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    d2.download_button(
+        "⬇️ Скачать демо 24 SKU без себестоимости",
+        data=demo_csv_bytes(24, with_cost=False),
+        file_name="demo_fbs_24_without_cost.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    d3.download_button(
+        "⬇️ Скачать демо 1000 SKU",
+        data=demo_csv_bytes(1000, with_cost=True),
+        file_name="demo_fbs_1000.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    with st.expander("👀 Предпросмотр пробных данных", expanded=False):
+        st.dataframe(demo_preview_df(), use_container_width=True, hide_index=True)
+
+    saved = sorted(SAVE_DIR.glob("fbs_project_*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if saved:
+        with st.expander("📂 Подгрузить сохраненные данные", expanded=False):
+            selected = st.selectbox("Сохраненный проект", [p.name for p in saved[:20]])
+            if st.button("Подгрузить выбранный проект"):
+                load_project(SAVE_DIR / selected)
+                st.success("Проект восстановлен")
+                st.rerun()
+
+    if uploaded is not None:
         try:
-            os.remove(path)
-        except OSError:
-            pass
-        raise
+            started = time.time()
+            with st.spinner("Читаем файл и распознаем колонки..."):
+                st.session_state.df_raw, st.session_state.parse_info = read_uploaded_file(uploaded)
+            with st.spinner("Считаем юнит-экономику..."):
+                recalculate_current()
+            st.success(f"Загружено {len(st.session_state.df_raw):,} SKU за {time.time() - started:.1f} сек".replace(",", " "))
+            st.rerun()
+        except Exception as exc:
+            logger.exception(exc)
+            st.error(f"Ошибка обработки файла: {exc}")
+
+    if st.session_state.parse_info:
+        info = st.session_state.parse_info
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-title">🔎 Предпросмотр: {info["file_name"]}</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Строк", f"{info['rows']:,}".replace(",", " "))
+        c2.metric("Размер", fmt_size(info["file_size"]))
+        c3.metric("Пропущено пустых", info["skipped"])
+        c4.metric("Чтение, сек", f"{info['parse_seconds']:.1f}")
+        if not info["has_cost"]:
+            st.warning("Колонка Себестоимость не найдена: значения будут рассчитаны как % от цены.")
+        if not info["has_dims"]:
+            st.info("Габариты не найдены полностью: объем и вес будут взяты из справочника категорий.")
+        if info.get("matched"):
+            st.caption("Колонки: " + " · ".join(f"{k} ← {v}" for k, v in info["matched"].items()))
+        if st.session_state.df_raw is not None:
+            st.dataframe(st.session_state.df_raw.head(10), use_container_width=True, hide_index=True)
+        if st.button("📊 Перейти к дашборду", type="primary", disabled=st.session_state.df_calc is None):
+            st.session_state.step = 2
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
-# =============================================================================
-# SIDEBAR
-# =============================================================================
+# -----------------------------------------------------------------------------
+# ШАГ 2. ДАШБОРД
+# -----------------------------------------------------------------------------
+elif st.session_state.step == 2:
+    df = st.session_state.df_calc
+    if df is None or df.empty:
+        st.warning("Сначала загрузите данные")
+        st.stop()
 
-with st.sidebar:
-    st.markdown("## Unit Economics")
-    st.caption(f"Яндекс Маркет · FBS · v{APP_VERSION}")
-    st.divider()
+    action_guide(
+        "Как читать дашборд",
+        [
+            ("KPI сверху", "Показывают общий результат каталога: выручку, прибыль, маржу и потенциал от рекомендованных цен."),
+            ("Наценка и целевая маржа", "Меняйте слайдеры — столбцы рекомендованных цен пересчитаются в приложении и будут такими же в Excel."),
+            ("ABC/XYZ", "ABC показывает вклад в выручку, XYZ — устойчивость по марже и оборачиваемости. AZ/BZ/CZ требуют внимания."),
+        ],
+    )
 
-    raw_sidebar = st.session_state.raw_df
-    result_sidebar = st.session_state.result_df
-    if raw_sidebar is None:
-        st.info("Каталог не загружен")
+    # Обновляем ценовые рекомендации при изменении слайдеров без полного пересчета.
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📈 Управление маржой и рекомендованной ценой</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1, 2])
+    new_target = c1.slider("Целевая маржа, %", 0, 80, int(st.session_state.target_margin * 100), 1) / 100
+    new_markup = c2.slider("Наценка к текущей цене, %", 0, 200, int(st.session_state.markup_rate * 100), 5) / 100
+    if new_target != st.session_state.target_margin or new_markup != st.session_state.markup_rate:
+        st.session_state.target_margin = new_target
+        st.session_state.markup_rate = new_markup
+        st.session_state.df_calc = apply_pricing_columns(st.session_state.df_calc, new_target, new_markup)
+        df = st.session_state.df_calc
+    c3.info("Рекомендованная цена = максимум из безубытка, цены под целевую маржу и цены с наценкой. Эти же формулы будут в Excel.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    totals = totals_row(df)
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        metric_card("Выручка", money_short(totals["revenue"]), f"{totals['count']:,} SKU".replace(",", " "), "mc-indigo")
+    with c2:
+        metric_card("Прибыль", money_short(totals["profit"]), "после всех расходов", "mc-emerald" if totals["profit"] >= 0 else "mc-rose")
+    with c3:
+        metric_card("Маржа", pct(totals["avg_margin"]), f"Убыточных: {totals['loss']:,}".replace(",", " "), "mc-emerald" if totals["avg_margin"] >= 0.15 else "mc-amber")
+    with c4:
+        uplift = totals["recommended_revenue"] - totals["revenue"]
+        metric_card("Потенциал цены", money_short(uplift), "если поставить рекомендованные цены", "mc-sky")
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Комиссия", money_short(totals["commission"]))
+    c2.metric("Логистика", money_short(totals["logistics"]))
+    c3.metric("Хранение", money_short(totals["storage"]))
+    c4.metric("Себест. оценена", f"{totals['estimated_cost']:,}".replace(",", " "))
+    c5.metric("Спецтариф", f"{totals['spec']:,}".replace(",", " "))
+
+    mode = st.radio("Разрез аналитики", ["Категория", "Бренд", "ABC/XYZ"], horizontal=True)
+    if mode in {"Категория", "Бренд"}:
+        summary = summarize(df, mode)
+        top = summary.head(15)
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = px.bar(top, x="Группа", y="Маржа", color="Маржа", color_continuous_scale="RdYlGn", title=f"Маржа: {mode}", range_color=[-0.2, 0.35])
+            fig.update_layout(height=360, xaxis_tickangle=-25, coloraxis_showscale=False)
+            fig.update_yaxes(tickformat=".0%")
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            fig = px.bar(top, x="Группа", y="Прибыль", color="Прибыль", color_continuous_scale="RdYlGn", title=f"Прибыль: {mode}")
+            fig.update_layout(height=360, xaxis_tickangle=-25, coloraxis_showscale=False)
+            st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(
+            summary.head(50).style.format({
+                "Выручка": "{:,.0f} ₽", "Расходы": "{:,.0f} ₽", "Прибыль": "{:,.0f} ₽",
+                "Рекоменд_выручка": "{:,.0f} ₽", "Потенциал_выручки": "{:,.0f} ₽", "Маржа": "{:.1%}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
-        st.metric("Строк в каталоге", f"{len(raw_sidebar):,}".replace(",", " "))
-        st.caption(st.session_state.source_name or "Источник данных")
+        matrix = abc_xyz_matrix(df)
+        fig = px.treemap(matrix, path=["ABC_XYZ"], values="Выручка", color="Маржа", color_continuous_scale="RdYlGn", title="ABC/XYZ матрица по выручке")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(matrix.style.format({"Выручка": "{:,.0f} ₽", "Прибыль": "{:,.0f} ₽", "Маржа": "{:.1%}"}), use_container_width=True, hide_index=True)
 
-    if result_sidebar is not None:
-        totals_sidebar = calculate_totals(result_sidebar)
-        st.metric("Прибыль", money_short(totals_sidebar["profit"]))
-        st.metric("Маржа", percent(totals_sidebar["margin"]))
-        if not calculation_is_current():
-            st.warning("Тарифы изменены. Нужен пересчёт.")
+    costs = pd.DataFrame(
+        [
+            ("Себестоимость", totals["cost"]),
+            ("Комиссия", totals["commission"]),
+            ("Логистика", totals["logistics"]),
+            ("Хранение", totals["storage"]),
+            ("Эквайринг", float(df["Эквайринг_руб"].sum())),
+            ("Спец. расходы", float(df["Спец_расходы_FBS"].sum())),
+        ],
+        columns=["Расход", "Сумма"],
+    )
+    fig = px.pie(costs, names="Расход", values="Сумма", hole=0.58, title="Структура расходов")
+    st.plotly_chart(fig, use_container_width=True)
 
-    st.divider()
-    st.markdown("**Быстрые действия**")
-    if st.button("Пересчитать каталог", use_container_width=True, disabled=raw_sidebar is None):
-        run_calculation()
-    if st.button("Очистить данные", use_container_width=True, disabled=raw_sidebar is None):
-        st.session_state.raw_df = None
-        st.session_state.result_df = None
-        st.session_state.source_name = ""
-        st.session_state.parse_meta = {}
-        st.session_state.calculated_settings_hash = ""
-        clear_export()
+    st.markdown('<div class="section-title">🧮 Расчет по SKU</div>', unsafe_allow_html=True)
+    f1, f2, f3, f4 = st.columns([2, 1, 1, 1])
+    query = f1.text_input("Поиск: артикул / бренд / категория")
+    brand_filter = f2.selectbox("Бренд", ["Все"] + df["Бренд"].value_counts().head(200).index.tolist())
+    cat_filter = f3.selectbox("Категория", ["Все"] + df["Категория"].value_counts().head(200).index.tolist())
+    only_loss = f4.toggle("Только убыточные")
+    view = df
+    if query:
+        q = query.lower()
+        view = view[view["Артикул"].str.lower().str.contains(q, na=False) | view["Бренд"].str.lower().str.contains(q, na=False) | view["Категория"].str.lower().str.contains(q, na=False)]
+    if brand_filter != "Все":
+        view = view[view["Бренд"] == brand_filter]
+    if cat_filter != "Все":
+        view = view[view["Категория"] == cat_filter]
+    if only_loss:
+        view = view[view["Прибыль"] < 0]
+    sort_col = st.selectbox("Сортировка", ["Прибыль", "Маржа_%", "Рекомендованная_цена", "Цена", "ABC", "XYZ", "Бренд", "Категория"])
+    ascending = st.toggle("По возрастанию", value=False)
+    view = view.sort_values(sort_col, ascending=ascending)
+    show_cols = [c for c in ["Артикул", "Бренд", "Категория", "Цена", "Себестоимость", "Итого_расходы", "Прибыль", "Маржа_%", "Безубыток_руб", "Рекомендованная_цена", "Маржа_при_рекоменд_цене", "ABC", "XYZ", "ABC_XYZ"] if c in view.columns]
+    st.caption(f"Показано {min(len(view), 5000):,} из {len(view):,} строк. Полный объем доступен в Excel/CSV.".replace(",", " "))
+    st.dataframe(view[show_cols].head(5000), use_container_width=True, hide_index=True, height=560)
+
+    col1, col2 = st.columns(2)
+    if col1.button("💾 Сохранить проект", type="secondary", use_container_width=True):
+        path = save_current_project()
+        st.success(f"Сохранено: {path.name}")
+    if col2.button("📥 Перейти к экспорту", type="primary", use_container_width=True):
+        st.session_state.step = 3
         st.rerun()
 
-    st.divider()
-    st.caption("Все расчёты и файлы остаются на вашем сервере Streamlit.")
 
-
-# =============================================================================
-# HEADER AND NAVIGATION
-# =============================================================================
-
-st.markdown(
-    f"""
-    <section class="hero">
-      <div class="hero-kicker">YANDEX MARKET · FBS · PREMIUM ANALYTICS</div>
-      <h1>{APP_NAME} <span style="background:linear-gradient(90deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent">· PRO</span></h1>
-      <p>Без лимитов по строкам · Живые формулы · ABC/XYZ · Рекомендованная цена · Умная наценка</p>
-      <span class="hero-badge">До 1 048 576 SKU · Красочные Excel · Кастомные категории</span>
-    </section>
-    """,
-    unsafe_allow_html=True,
-)
-
-steps = ["1. Тарифы", "2. Данные", "3. Дашборд", "4. Экспорт"]
-if "navigation" not in st.session_state:
-    st.session_state.navigation = steps[0]
-
-selected_step = st.radio(
-    "Этап работы",
-    steps,
-    horizontal=True,
-    key="navigation",
-    label_visibility="collapsed",
-)
-
-
-# =============================================================================
-# STEP 1: TARIFFS
-# =============================================================================
-
-if selected_step == steps[0]:
-    st.markdown('<div class="section-title">Тарифы и расходы</div>', unsafe_allow_html=True)
+# -----------------------------------------------------------------------------
+# ШАГ 3. ЭКСПОРТ
+# -----------------------------------------------------------------------------
+else:
+    df = st.session_state.df_calc
+    if df is None or df.empty:
+        st.warning("Сначала загрузите данные")
+        st.stop()
+    action_guide(
+        "Какой экспорт выбрать",
+        [
+            ("Excel с формулами", "Максимально аналитический файл: параметры можно менять прямо в Excel, строки пересчитываются формулами."),
+            ("Excel со значениями", "Быстрее формируется для больших каталогов. Подходит, если нужно отправить готовый отчет без пересчета."),
+            ("CSV", "Лучший формат для BI, Power Query, баз данных и архивного хранения всех 300 000+ строк."),
+        ],
+    )
+    totals = totals_row(df)
     st.markdown(
-        '<div class="section-sub">Настройки уже заполнены типовыми значениями. '
-        'Новичку достаточно проверить себестоимость по умолчанию и перейти к загрузке.</div>',
+        f"""
+<div class="card" style="background:linear-gradient(135deg,#059669,#0d9488);color:white;border:none">
+  <h3 style="margin:0;color:white">📥 Отчет готов</h3>
+  <p style="margin:6px 0 0;color:#d1fae5">{len(df):,} SKU · Выручка {money_short(totals['revenue'])} · Прибыль {money_short(totals['profit'])} · Маржа {pct(totals['avg_margin'])}</p>
+</div>
+""".replace(",", " "),
         unsafe_allow_html=True,
     )
-    settings = st.session_state.settings
-
-    with st.form("tariff_form", border=False):
-        base_tab, special_tab, costs_tab, fallback_tab, cat_tab, price_tab = st.tabs(
-            ["Базовый тариф", "Спецтарифы", "Расходы FBS", "Если данных нет", "Категории", "Цены"]
-        )
-
-        with base_tab:
-            c1, c2, c3, c4 = st.columns(4)
-            commission = c1.number_input(
-                "Комиссия, %", 0.0, 60.0, settings["commission_rate"] * 100, 0.5,
-                help="Процент Маркета с цены продажи.",
-            )
-            min_commission = c2.number_input(
-                "Минимальная комиссия, ₽", 0.0, 10_000.0,
-                settings["min_commission"], 5.0,
-            )
-            logistics_base = c3.number_input(
-                "Логистика: база, ₽", 0.0, 100_000.0,
-                settings["logistics_base"], 5.0,
-            )
-            logistics_per_kg = c4.number_input(
-                "Логистика: за кг, ₽", 0.0, 10_000.0,
-                settings["logistics_per_kg"], 0.5,
-            )
-
-            c1, c2, c3 = st.columns(3)
-            storage_rate = c1.number_input(
-                "Хранение, ₽/л/сутки", 0.0, 1_000.0,
-                settings["storage_per_day_per_liter"], 0.05,
-            )
-            acquiring = c2.number_input(
-                "Эквайринг, %", 0.0, 20.0, settings["acquiring_fee"] * 100, 0.1,
-            )
-            return_fee = c3.number_input(
-                "Резерв возвратов, %", 0.0, 30.0, settings["return_fee"] * 100, 0.1,
-            )
-
-        with special_tab:
-            special_enabled = st.toggle(
-                "Применять спецтарифы автозапчастей",
-                value=settings.get("special_enabled", True),
-            )
-            special_rows = []
-            for key, rule in settings["special_tariffs"].items():
-                special_rows.append(
-                    {
-                        "Ключ категории": key,
-                        "Название": rule["label"],
-                        "Комиссия, %": rule["commission_rate"] * 100,
-                        "Логистика, ₽": rule["logistics_base"],
-                        "Хранение, ₽/л": rule["storage_per_day_per_liter"],
-                        "Причина": rule.get("reason", "Спецтариф"),
-                    }
-                )
-            special_editor = st.data_editor(
-                pd.DataFrame(special_rows),
+    st.write("")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📊 Excel с живыми формулами</div>', unsafe_allow_html=True)
+        sheets = math.ceil(len(df) / EXCEL_DATA_ROWS_PER_SHEET)
+        st.caption(f"Формулы в каждой строке. Если строк больше {EXCEL_DATA_ROWS_PER_SHEET:,}, файл разбивается на листы Расчет_1..N.".replace(",", " "))
+        if st.button("Скачать Excel с формулами", type="primary", use_container_width=True):
+            with st.spinner("Формируем большой Excel с живыми формулами. Для 300k SKU это может занять несколько минут..."):
+                data = export_excel_formulas(df, st.session_state.tariff, st.session_state.target_margin, st.session_state.markup_rate)
+            st.download_button(
+                "⬇️ Скачать .xlsx",
+                data=data,
+                file_name=f"unit_economy_fbs_formulas_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                hide_index=True,
-                num_rows="fixed",
-                disabled=["Ключ категории", "Название", "Причина"],
-                column_config={
-                    "Комиссия, %": st.column_config.NumberColumn(min_value=0.0, max_value=60.0, step=0.5),
-                    "Логистика, ₽": st.column_config.NumberColumn(min_value=0.0, step=5.0),
-                    "Хранение, ₽/л": st.column_config.NumberColumn(min_value=0.0, step=0.05),
-                },
             )
-
-        with costs_tab:
-            c1, c2, c3 = st.columns(3)
-            packaging = c1.number_input("Упаковка FBS, ₽", 0.0, 100_000.0, settings["packaging"], 5.0)
-            chestny_znak = c2.number_input("Честный знак, ₽", 0.0, 10_000.0, settings["chestny_znak"], 0.5)
-            labeling = c3.number_input("Маркировка, ₽", 0.0, 10_000.0, settings["labeling"], 0.5)
-            c1, c2, c3 = st.columns(3)
-            warranty = c1.number_input("Гарантийный резерв, %", 0.0, 30.0, settings["warranty_reserve"] * 100, 0.5)
-            hazard = c2.number_input("Надбавка: опасный груз, %", 0.0, 30.0, settings["hazard_surcharge"] * 100, 0.5)
-            fragile = c3.number_input("Надбавка: хрупкий груз, %", 0.0, 30.0, settings["fragile_surcharge"] * 100, 0.5)
-
-        with fallback_tab:
-            st.markdown(
-                '<div class="warn-box"><b>Если себестоимости нет:</b> она рассчитывается '
-                'как процент от цены. Если веса нет, он оценивается по объёму и плотности.</div>',
-                unsafe_allow_html=True,
-            )
-            c1, c2 = st.columns(2)
-            cost_fallback = c1.number_input(
-                "Себестоимость, % от цены", 0.0, 99.0,
-                settings["cost_fallback_rate"] * 100, 1.0,
-            )
-            density = c2.number_input(
-                "Плотность для оценки веса, кг/л", 0.01, 20.0,
-                settings["density_kg_per_liter"], 0.05,
-            )
-
-        with cat_tab:
-            st.caption("Добавьте свои категории: ключ для поиска в названии, габариты, признаки, свои ставки.")
-            custom_df = pd.DataFrame(settings.get("custom_categories", []))
-            if custom_df.empty:
-                custom_df = pd.DataFrame(columns=["key","label","volume_l","weight_kg","is_hazardous","is_fragile","commission_rate","logistics_base","storage_per_day_per_liter"])
-            edited_custom = st.data_editor(
-                custom_df,
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">⚡ Excel со значениями</div>', unsafe_allow_html=True)
+        st.caption("Самый быстрый вариант: все расчеты уже посчитаны, плюс дашборд, сводки, ABC/XYZ и легенда.")
+        if st.button("Скачать Excel со значениями", use_container_width=True):
+            with st.spinner("Формируем Excel со значениями..."):
+                data = export_excel_values(df, st.session_state.tariff)
+            st.download_button(
+                "⬇️ Скачать .xlsx",
+                data=data,
+                file_name=f"unit_economy_fbs_values_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                column_config={
-                    "key": st.column_config.TextColumn("Ключ"),
-                    "label": st.column_config.TextColumn("Название"),
-                    "volume_l": st.column_config.NumberColumn("Объём, л", min_value=0.1, step=0.5),
-                    "weight_kg": st.column_config.NumberColumn("Вес, кг", min_value=0.1, step=0.5),
-                    "is_hazardous": st.column_config.CheckboxColumn("Опасный"),
-                    "is_fragile": st.column_config.CheckboxColumn("Хрупкий"),
-                    "commission_rate": st.column_config.NumberColumn("Комиссия", min_value=0.0, max_value=1.0, step=0.01, help="0.14 = 14%"),
-                    "logistics_base": st.column_config.NumberColumn("Логистика база"),
-                    "storage_per_day_per_liter": st.column_config.NumberColumn("Хранение"),
-                },
             )
-        with price_tab:
-            pricing = settings.get("pricing", {"mode":"none","markupPercent":15,"targetMargin":0.20})
-            mode = st.radio("Режим ценообразования", ["none","markup","targetMargin"], index=["none","markup","targetMargin"].index(pricing.get("mode","none")), format_func=lambda x: {"none":"Без изменений","markup":"Наценка %","targetMargin":"Целевая маржа"}[x], horizontal=True)
-            markup = st.slider("Наценка, %", -50, 200, int(pricing.get("markupPercent",15)), 5)
-            target = st.slider("Целевая маржа, %", 0, 60, int(float(pricing.get("targetMargin",0.20))*100), 1)
-
-        submitted = st.form_submit_button(
-            "Сохранить тарифы", type="primary", use_container_width=True
-        )
-
-    if submitted:
-        updated = deep_copy_json(settings)
-        updated.update(
-            {
-                "commission_rate": commission / 100,
-                "min_commission": min_commission,
-                "logistics_base": logistics_base,
-                "logistics_per_kg": logistics_per_kg,
-                "storage_per_day_per_liter": storage_rate,
-                "acquiring_fee": acquiring / 100,
-                "return_fee": return_fee / 100,
-                "packaging": packaging,
-                "chestny_znak": chestny_znak,
-                "labeling": labeling,
-                "warranty_reserve": warranty / 100,
-                "hazard_surcharge": hazard / 100,
-                "fragile_surcharge": fragile / 100,
-                "cost_fallback_rate": cost_fallback / 100,
-                "density_kg_per_liter": density,
-                "special_enabled": special_enabled,
-            }
-        )
-        for _, edited_row in special_editor.iterrows():
-            key = str(edited_row["Ключ категории"])
-            updated["special_tariffs"][key]["commission_rate"] = float(
-                edited_row["Комиссия, %"]
-            ) / 100
-            updated["special_tariffs"][key]["logistics_base"] = float(
-                edited_row["Логистика, ₽"]
-            )
-            updated["special_tariffs"][key]["storage_per_day_per_liter"] = float(
-                edited_row["Хранение, ₽/л"]
-            )
-        # Save custom categories
-        custom_list = []
-        for _, row in edited_custom.iterrows():
-            if not str(row.get("key","")).strip():
-                continue
-            custom_list.append({
-                "key": str(row.get("key","")).strip().lower(),
-                "label": str(row.get("label","")).strip() or str(row.get("key","")).strip(),
-                "volume_l": float(row.get("volume_l",2) or 2),
-                "weight_kg": float(row.get("weight_kg",1) or 1),
-                "is_hazardous": bool(row.get("is_hazardous", False)),
-                "is_fragile": bool(row.get("is_fragile", False)),
-                "commission_rate": float(row.get("commission_rate")) if pd.notna(row.get("commission_rate")) and str(row.get("commission_rate")).strip() != "" else None,
-                "logistics_base": float(row.get("logistics_base")) if pd.notna(row.get("logistics_base")) and str(row.get("logistics_base")).strip() != "" else None,
-                "storage_per_day_per_liter": float(row.get("storage_per_day_per_liter")) if pd.notna(row.get("storage_per_day_per_liter")) and str(row.get("storage_per_day_per_liter")).strip() != "" else None,
-            })
-        updated["custom_categories"] = custom_list
-        updated["pricing"] = {"mode": mode, "markupPercent": int(markup), "targetMargin": float(target)/100}
-        st.session_state.settings = updated
-        save_settings(updated)
-        mark_dirty()
-        st.success("Тарифы, категории и сценарии цен сохранены. Выполните пересчёт.")
-
-    st.divider()
-    st.markdown("### API Яндекс Маркета")
-    st.caption(
-        "Рекомендуется Api-Key. OAuth оставлен для совместимости. Актуальный метод: "
-        "POST /v2/tariffs/calculate."
-    )
-    api_left, api_right = st.columns([1.05, 1])
-    with api_left:
-        token_type = st.selectbox("Тип токена", ["Api-Key", "OAuth (устаревший)"])
-        token = st.text_input("Токен", type="password", placeholder="Токен не сохраняется")
-        campaign_id = st.number_input("Campaign ID", min_value=1, value=123456, step=1)
-
-        with st.expander("Параметры тестового товара", expanded=False):
-            category_id = st.number_input("ID категории Маркета", min_value=1, value=90401, step=1)
-            test_price = st.number_input("Цена, ₽", min_value=1.0, value=5000.0, step=100.0)
-            a1, a2, a3, a4 = st.columns(4)
-            test_length = a1.number_input("Длина", min_value=0.1, value=30.0)
-            test_width = a2.number_input("Ширина", min_value=0.1, value=20.0)
-            test_height = a3.number_input("Высота", min_value=0.1, value=15.0)
-            test_weight = a4.number_input("Вес", min_value=0.01, value=2.0)
-
-        if st.button("Рассчитать услуги через API", type="primary", use_container_width=True):
-            if not token:
-                st.warning("Введите токен.")
-            else:
-                ok, message, api_df = calculate_tariff_via_api(
-                    token,
-                    "Api-Key" if token_type == "Api-Key" else "OAuth",
-                    int(campaign_id),
-                    int(category_id),
-                    test_price,
-                    test_length,
-                    test_width,
-                    test_height,
-                    test_weight,
-                )
-                st.session_state.last_api_result = api_df
-                (st.success if ok else st.error)(message)
-
-    with api_right:
-        if st.session_state.last_api_result is not None:
-            st.dataframe(
-                st.session_state.last_api_result,
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.markdown(
-                '<div class="info-box"><b>Для чего нужен API-калькулятор?</b><br>'
-                'Он возвращает ориентировочную стоимость услуг для товара с конкретной '
-                'категорией, ценой, габаритами и весом. Для каталога 300 000 SKU используйте '
-                'локальный векторизованный расчёт: у API есть лимит запросов.</div>',
-                unsafe_allow_html=True,
-            )
-
-        c1, c2, c3 = st.columns(3)
-        if c1.button("Демо-ставки категорий", use_container_width=True):
-            st.session_state.settings["category_rates"] = deep_copy_json(DEMO_CATEGORY_RATES)
-            st.session_state.settings["use_category_rates"] = True
-            save_settings(st.session_state.settings)
-            mark_dirty()
-            st.success("Демо-ставки загружены.")
-        if c2.button("Очистить ставки", use_container_width=True):
-            st.session_state.settings["category_rates"] = {}
-            save_settings(st.session_state.settings)
-            mark_dirty()
-            st.success("Индивидуальные ставки удалены.")
-        if c3.button("Ставки из API (legacy)", use_container_width=True):
-            if not token:
-                st.warning("Введите токен.")
-            else:
-                ok, message, rates = legacy_category_commissions(
-                    token,
-                    "Api-Key" if token_type == "Api-Key" else "OAuth",
-                    int(campaign_id),
-                )
-                if ok:
-                    st.session_state.settings["category_rates"] = rates
-                    st.session_state.settings["use_category_rates"] = True
-                    save_settings(st.session_state.settings)
-                    mark_dirty()
-                    st.success(message)
-                else:
-                    st.warning(message)
-
-    tariff_csv = tariff_table(st.session_state.settings).to_csv(
-        index=False, sep=";", encoding="utf-8-sig", decimal=","
-    ).encode("utf-8-sig")
-    st.download_button(
-        "Скачать текущий тариф CSV",
-        tariff_csv,
-        file_name="current_tariff.csv",
-        mime="text/csv",
-    )
-    tariff_upload = st.file_uploader(
-        "Загрузить тариф из CSV",
-        type=["csv"],
-        key="tariff_csv_upload",
-        help="Поддерживается CSV из этого приложения и старый формат с техническими колонками.",
-    )
-    if st.button(
-        "Применить тариф из CSV",
-        use_container_width=True,
-        disabled=tariff_upload is None,
-    ) and tariff_upload is not None:
-        ok, message, updated = update_settings_from_tariff_csv(
-            tariff_upload.getvalue(), st.session_state.settings
-        )
-        if ok:
-            st.session_state.settings = updated
-            save_settings(updated)
-            mark_dirty()
-            st.success(message)
-            st.session_state.navigation = steps[1]
-            st.rerun()
-        else:
-            st.error(message)
-
-    st.divider()
-    st.markdown("### Категории через CSV")
-    cat_col1, cat_col2 = st.columns([1,1])
-    with cat_col1:
-        st.download_button("Шаблон категорий CSV", CATEGORY_CSV_TEMPLATE.encode("utf-8-sig"), file_name="categories_template.csv", mime="text/csv")
-    cat_upload = st.file_uploader("Загрузить категории CSV", type=["csv"], key="cat_csv_upload")
-    if st.button("Применить категории из CSV", use_container_width=True, disabled=cat_upload is None) and cat_upload is not None:
-        ok, msg, updated_cats = parse_category_csv(cat_upload.getvalue(), st.session_state.settings.get("custom_categories", []))
-        if ok:
-            st.session_state.settings["custom_categories"] = updated_cats
-            save_settings(st.session_state.settings)
-            mark_dirty()
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
-
-
-# =============================================================================
-# STEP 2: DATA
-# =============================================================================
-
-elif selected_step == steps[1]:
-    st.markdown('<div class="section-title">Загрузка каталога</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="section-sub">Минимум: Артикул, Категория, Цена. Бренд, габариты, '
-        'себестоимость и вес необязательны.</div>',
-        unsafe_allow_html=True,
-    )
-
-    left, right = st.columns([1.4, 0.8])
-    with left:
-        uploaded = st.file_uploader(
-            "CSV или Excel",
-            type=["csv", "txt", "tsv", "xlsx", "xls"],
-            help="Для 100 000+ SKU рекомендуется CSV.",
-        )
-        if uploaded is not None:
-            st.caption(f"{uploaded.name} · {file_size_label(uploaded.size)}")
-        load_clicked = st.button(
-            "Загрузить и проверить",
-            type="primary",
-            use_container_width=True,
-            disabled=uploaded is None,
-        )
-        if load_clicked and uploaded is not None:
-            try:
-                with st.status("Читаем файл и сопоставляем колонки", expanded=True) as status:
-                    raw_file, parse_meta = read_uploaded_file(uploaded)
-                    st.write(
-                        f"Прочитано {len(raw_file):,} строк и {len(raw_file.columns)} колонок".replace(",", " ")
-                    )
-                    prepared, preparation_meta = prepare_input_frame(raw_file)
-                    parse_meta.update(preparation_meta)
-                    st.write("Колонки сопоставлены, числовые значения нормализованы")
-                    status.update(label="Файл готов к расчёту", state="complete")
-
-                st.session_state.raw_df = prepared
-                st.session_state.result_df = None
-                st.session_state.source_name = uploaded.name
-                st.session_state.source_size = uploaded.size
-                st.session_state.parse_meta = parse_meta
-                st.session_state.calculated_settings_hash = ""
-                clear_export()
-                st.success(f"Загружено {len(prepared):,} SKU".replace(",", " "))
-            except Exception as exc:
-                logger.exception("File parsing failed")
-                st.error(f"Не удалось обработать файл: {exc}")
-
-    with right:
-        st.markdown('<div class="soft-panel">', unsafe_allow_html=True)
-        st.markdown("**Обязательные колонки**")
-        st.markdown(
-            '<span class="chip">Артикул</span><span class="chip">Категория</span>'
-            '<span class="chip">Цена</span>',
-            unsafe_allow_html=True,
-        )
-        st.markdown("**Рекомендуемые колонки**")
-        st.markdown(
-            '<span class="chip">Бренд</span><span class="chip">Длина</span>'
-            '<span class="chip">Ширина</span><span class="chip">Высота</span>'
-            '<span class="chip">Себестоимость</span><span class="chip">Вес_кг</span>',
-            unsafe_allow_html=True,
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📄 CSV со всеми SKU</div>', unsafe_allow_html=True)
+        st.caption("Для BI, Power Query и архивного хранения. Разделитель ';', UTF-8 BOM.")
         st.download_button(
-            "Скачать шаблон CSV",
-            build_template_csv(),
-            file_name="template_fbs.csv",
+            "Скачать CSV",
+            data=export_csv(df),
+            file_name=f"unit_economy_fbs_{datetime.now():%Y%m%d_%H%M%S}.csv",
             mime="text/csv",
             use_container_width=True,
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.divider()
-    st.markdown("### Демо-каталог и нагрузочный тест — полный генератор (не урезан)")
-    demo_cols = st.columns(5)
-    demo_options = [
-        (24, "Пример: 24 SKU"),
-        (10_000, "Тест: 10 000 SKU"),
-        (50_000, "Тест: 50 000 SKU"),
-        (300_000, "Нагрузка: 300 000 SKU"),
-        (500_000, "Нагрузка: 500 000 SKU"),
-    ]
-    for column, (count, label) in zip(demo_cols, demo_options):
-        if column.button(label, use_container_width=True):
-            with st.spinner(f"Генерируем {count:,} SKU...".replace(",", " ")):
-                demo = generate_demo_catalog(count, include_cost=True)
-                st.session_state.raw_df = demo
-                st.session_state.result_df = None
-                st.session_state.source_name = f"demo_{count}_sku.csv"
-                st.session_state.source_size = int(demo.memory_usage(deep=True).sum())
-                st.session_state.parse_meta = {
-                    "input_type": "Демо-каталог",
-                    "prepared_rows": count,
-                    "has_cost": True,
-                    "has_brand": True,
-                    "has_dimensions": True,
-                    "mapping": {c: c for c in demo.columns},
-                    "parse_seconds": 0.0,
-                    "zero_prices": 0,
-                }
-                st.session_state.calculated_settings_hash = ""
-                clear_export()
-            st.success(f"Сгенерировано {count:,} SKU".replace(",", " "))
-
-    raw = st.session_state.raw_df
-    if raw is not None:
-        meta = st.session_state.parse_meta
-        st.divider()
-        st.markdown("### Проверка данных")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("SKU", f"{len(raw):,}".replace(",", " "))
-        m2.metric("Брендов", f"{raw['Бренд'].nunique():,}".replace(",", " "))
-        m3.metric("Категорий", f"{raw['Категория'].nunique():,}".replace(",", " "))
-        m4.metric("Нулевых цен", f"{int(raw['Цена'].le(0).sum()):,}".replace(",", " "))
-
-        mapping = meta.get("mapping", {})
-        if mapping:
-            chips = "".join(
-                f'<span class="chip">{canonical} ← {source}</span>'
-                for canonical, source in mapping.items()
-            )
-            st.markdown(chips, unsafe_allow_html=True)
-
-        if not meta.get("has_cost", False):
-            st.markdown(
-                f'<div class="warn-box"><b>Себестоимость не найдена.</b> Она будет '
-                f'оценена как {percent(st.session_state.settings["cost_fallback_rate"], 0)} '
-                'от цены. Такие строки помечаются флагом «Себестоимость_оценка».</div>',
-                unsafe_allow_html=True,
-            )
-        if not meta.get("has_brand", False):
-            st.markdown(
-                '<div class="info-box">Бренд не найден: используется значение «Без бренда». '
-                'Добавьте колонку Бренд для отдельного аналитического разреза.</div>',
-                unsafe_allow_html=True,
-            )
-        if not meta.get("has_dimensions", False):
-            st.markdown(
-                '<div class="info-box">Полный набор габаритов не найден. Объём и вес будут '
-                'дополнены из справочника категорий.</div>',
-                unsafe_allow_html=True,
-            )
-
-        preview_columns = [
-            "Артикул", "Бренд", "Категория", "Длина", "Ширина", "Высота",
-            "Цена", "Себестоимость", "Вес_кг",
-        ]
-        st.dataframe(
-            raw[preview_columns].head(100),
-            use_container_width=True,
-            hide_index=True,
-            height=330,
-        )
-        st.caption("Показаны первые 100 строк. Полный каталог используется в расчёте.")
-
-        if st.button("Рассчитать юнит-экономику", type="primary", use_container_width=True):
-            run_calculation()
-
-        st.divider()
-        st.markdown("### 💾 Сохранённые каталоги")
-        st.caption("Сохраните загруженные данные в браузере сервера и подгружайте снова — даже после перезапуска.")
-        col_s1, col_s2 = st.columns([2,1])
-        save_name = col_s1.text_input("Название для сохранения", placeholder="Напр. Мой каталог 300k", key="save_name_input")
-        if col_s2.button("💾 Сохранить текущий", use_container_width=True):
-            if raw is not None and len(raw)>0:
-                save_dataset(save_name or f"Каталог {len(raw)} SKU", raw, st.session_state.parse_meta | {"fileName": st.session_state.source_name})
-                st.success("Сохранено!")
-            else:
-                st.warning("Нет данных для сохранения")
-        datasets = get_saved_datasets()
-        if datasets:
-            st.markdown(f"Сохранено наборов: {len(datasets)}")
-            for ds in datasets[-10:][::-1]:
-                c1,c2,c3 = st.columns([3,1,1])
-                c1.markdown(f"**{ds['name']}** — {ds['rows']} SKU · {ds['createdAt'][:19]}")
-                if c2.button("Загрузить", key=f"load_{ds['id']}", use_container_width=True):
-                    df_loaded, meta_loaded, name_loaded = load_dataset(ds['id'])
-                    if df_loaded is not None:
-                        st.session_state.raw_df = df_loaded
-                        st.session_state.parse_meta = meta_loaded
-                        st.session_state.source_name = ds.get("fileName","")
-                        st.session_state.result_df = None
-                        st.session_state.calculated_settings_hash = ""
-                        clear_export()
-                        st.success(f"Загружено {len(df_loaded)} SKU")
-                        st.rerun()
-                if c3.button("🗑️", key=f"del_{ds['id']}"):
-                    delete_dataset(ds['id'])
-                    st.rerun()
-        else:
-            st.caption("Пока нет сохранённых наборов.")
+    st.info("Excel с формулами больше не ограничен 300 000 строками: ограничение только техническое — максимум строк листа Excel. При превышении файл автоматически делится на несколько листов.")
 
 
-# =============================================================================
-# STEP 3: DASHBOARD
-# =============================================================================
-
-elif selected_step == steps[2]:
-    st.markdown('<div class="section-title">Дашборд юнит-экономики</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="section-sub">Маржа, прибыль, расходы, бренды, категории и убыточные SKU.</div>',
-        unsafe_allow_html=True,
-    )
-    result = st.session_state.result_df
-
-    if result is None:
-        st.markdown(
-            '<div class="info-box"><b>Нет рассчитанных данных.</b> Перейдите на шаг «Данные», '
-            'загрузите каталог и нажмите «Рассчитать юнит-экономику».</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        if not calculation_is_current():
-            st.markdown(
-                '<div class="warn-box"><b>Тарифы изменены после расчёта.</b> Цифры ниже '
-                'относятся к предыдущим настройкам.</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button("Пересчитать по новым тарифам", type="primary"):
-                run_calculation()
-                st.rerun()
-
-        totals = calculate_totals(result)
-        metric_cols = st.columns(4)
-        with metric_cols[0]:
-            metric_card(
-                "Выручка",
-                money_short(totals["revenue"]),
-                f"{totals['count']:,} SKU".replace(",", " "),
-                "#4f46e5",
-            )
-        with metric_cols[1]:
-            metric_card(
-                "Расходы",
-                money_short(totals["expenses"]),
-                f"{percent(totals['expenses'] / totals['revenue'] if totals['revenue'] else 0, 0)} от выручки",
-                "#7c3aed",
-            )
-        with metric_cols[2]:
-            metric_card(
-                "Чистая прибыль",
-                money_short(totals["profit"]),
-                "После комиссий, логистики и хранения",
-                "#059669" if totals["profit"] >= 0 else "#e11d48",
-            )
-        with metric_cols[3]:
-            metric_card(
-                "Маржа по обороту",
-                percent(totals["margin"]),
-                f"Убыточных SKU: {totals['loss_count']:,}".replace(",", " "),
-                "#059669" if totals["margin"] >= 0.15 else "#d97706",
-            )
-
-        st.write("")
-        stat_cols = st.columns(6)
-        avg_rec = float(result["Рекомендованная_цена"].mean()) if len(result) else 0
-        stat_cols[0].metric(
-            "Эффективная комиссия",
-            percent(totals["commission"] / totals["revenue"] if totals["revenue"] else 0),
-        )
-        stat_cols[1].metric(
-            "Средняя логистика", money(totals["logistics"] / max(totals["count"], 1))
-        )
-        stat_cols[2].metric(
-            "Среднее хранение", money(totals["storage"] / max(totals["count"], 1))
-        )
-        stat_cols[3].metric("Ср. реком. цена", money(avg_rec))
-        stat_cols[4].metric(
-            "Спецтариф", f"{totals['special_count']:,} SKU".replace(",", " ")
-        )
-        stat_cols[5].metric(
-            "К поднятию цены", f"{int((result['Прибыль']<0).sum()):,}".replace(",", " ")
-        )
-
-        with st.expander("💹 Сценарий цен — наценка или целевая маржа (пересчитывает всё)", expanded=False):
-            cur_pricing = st.session_state.settings.get("pricing", {"mode":"none","markupPercent":15,"targetMargin":0.2})
-            c1,c2,c3 = st.columns([1,1,1])
-            mode_p = c1.radio("Режим", ["none","markup","targetMargin"], index=["none","markup","targetMargin"].index(cur_pricing.get("mode","none")), format_func=lambda x: {"none":"Без изменений","markup":"Наценка %","targetMargin":"Целевая маржа"}[x])
-            markup_v = c2.slider("Наценка %", -50, 200, int(cur_pricing.get("markupPercent",15)), 5)
-            target_v = c3.slider("Целевая маржа %", 0, 60, int(float(cur_pricing.get("targetMargin",0.2))*100), 1)
-            if st.button("Применить сценарий цен", type="primary"):
-                st.session_state.settings["pricing"] = {"mode": mode_p, "markupPercent": markup_v, "targetMargin": target_v/100}
-                save_settings(st.session_state.settings)
-                mark_dirty()
-                st.success("Сценарий сохранён — пересчитайте каталог")
-                if st.button("Пересчитать сейчас"):
-                    run_calculation()
-                    st.rerun()
-
-        # ABC / XYZ
-        try:
-            abc_counts = result["ABC"].value_counts()
-            xyz_counts = result["XYZ"].value_counts()
-            st.markdown("### 🔤 ABC / XYZ анализ")
-            abc_col1, abc_col2 = st.columns(2)
-            with abc_col1:
-                fig_abc = px.pie(values=[abc_counts.get("A",0), abc_counts.get("B",0), abc_counts.get("C",0)], names=["A 80%","B 15%","C 5%"], hole=0.55, color_discrete_sequence=["#10b981","#f59e0b","#6366f1"], title="ABC по выручке")
-                st.plotly_chart(fig_abc, use_container_width=True)
-            with abc_col2:
-                # matrix
-                matrix = result.groupby(["ABC","XYZ"]).size().unstack(fill_value=0)
-                st.markdown("**Матрица ABC/XYZ (кол-во SKU)**")
-                st.dataframe(matrix, use_container_width=True)
-                st.caption("X — быстрый оборот, Z — медленный. AX идеально, CZ — кандидаты на вывод.")
-        except Exception as e:
-            st.caption(f"ABC/XYZ пока недоступен: {e}")
-
-        st.divider()
-        mode = st.radio(
-            "Разрез аналитики",
-            options=["Категория", "Бренд"],
-            horizontal=True,
-        )
-        summary = aggregate_by(result, mode)
-        chart_summary = summary.head(15).copy()
-
-        chart_left, chart_right = st.columns(2)
-        with chart_left:
-            margin_colors = [
-                "#10b981" if value >= 0.15 else "#f59e0b" if value >= 0 else "#ef4444"
-                for value in chart_summary["Маржа_%"]
-            ]
-            fig_margin = go.Figure(
-                go.Bar(
-                    x=chart_summary[mode],
-                    y=chart_summary["Маржа_%"] * 100,
-                    marker_color=margin_colors,
-                    hovertemplate="%{x}<br>Маржа: %{y:.1f}%<extra></extra>",
-                )
-            )
-            fig_margin.update_layout(
-                title=f"Маржа: топ-15 по {mode.lower()}",
-                yaxis_title="Маржа, %",
-                xaxis_title="",
-                height=410,
-                margin=dict(l=20, r=20, t=55, b=80),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="white",
-            )
-            st.plotly_chart(fig_margin, use_container_width=True)
-
-        with chart_right:
-            costs = cost_structure(totals)
-            fig_cost = px.pie(
-                costs,
-                names="Статья",
-                values="Сумма",
-                hole=0.58,
-                color="Статья",
-                color_discrete_sequence=[
-                    "#6366f1", "#f59e0b", "#0ea5e9", "#8b5cf6", "#14b8a6", "#f43f5e",
-                ],
-                title="Структура расходов",
-            )
-            fig_cost.update_traces(textposition="inside", textinfo="percent")
-            fig_cost.update_layout(
-                height=410,
-                margin=dict(l=20, r=20, t=55, b=20),
-                paper_bgcolor="rgba(0,0,0,0)",
-            )
-            st.plotly_chart(fig_cost, use_container_width=True)
-
-        profit_colors = np.where(chart_summary["Прибыль"] >= 0, "#10b981", "#ef4444")
-        fig_profit = go.Figure(
-            go.Bar(
-                x=chart_summary[mode],
-                y=chart_summary["Прибыль"],
-                marker_color=profit_colors,
-                hovertemplate="%{x}<br>Прибыль: %{y:,.0f} ₽<extra></extra>",
-            )
-        )
-        fig_profit.update_layout(
-            title=f"Прибыль: топ-15 по {mode.lower()}",
-            yaxis_title="Прибыль, ₽",
-            xaxis_title="",
-            height=420,
-            margin=dict(l=20, r=20, t=55, b=90),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="white",
-        )
-        st.plotly_chart(fig_profit, use_container_width=True)
-
-        st.markdown(f"### Сводка по {mode.lower()}")
-        display_summary = summary.head(100).copy()
-        display_summary["Маржа_%"] = display_summary["Маржа_%"] * 100
-        st.dataframe(
-            display_summary,
-            use_container_width=True,
-            hide_index=True,
-            height=420,
-            column_config={
-                "Выручка": st.column_config.NumberColumn(format="%.0f ₽"),
-                "Расходы": st.column_config.NumberColumn(format="%.0f ₽"),
-                "Прибыль": st.column_config.NumberColumn(format="%.0f ₽"),
-                "Маржа_%": st.column_config.NumberColumn("Маржа, %", format="%.1f%%"),
-            },
-        )
-        st.caption("На экране показаны первые 100 групп. Полная сводка войдёт в Excel.")
-
-        if totals["loss_count"]:
-            st.markdown("### Самые убыточные SKU")
-            loss_view = result.nsmallest(50, "Прибыль")[
-                [
-                    "Артикул", "Бренд", "Категория", "Цена", "Себестоимость",
-                    "Логистика_руб", "Хранение_руб", "Прибыль", "Маржа_%",
-                ]
-            ].copy()
-            loss_view["Маржа_%"] *= 100
-            st.dataframe(
-                loss_view,
-                use_container_width=True,
-                hide_index=True,
-                height=300,
-                column_config={
-                    "Прибыль": st.column_config.NumberColumn(format="%.0f ₽"),
-                    "Маржа_%": st.column_config.NumberColumn("Маржа, %", format="%.1f%%"),
-                },
-            )
-
-        st.divider()
-        st.markdown("### Расчёт по SKU")
-        filter_cols = st.columns([1.4, 1, 1, 0.7])
-        search = filter_cols[0].text_input(
-            "Поиск", placeholder="Артикул, бренд или категория"
-        ).strip().lower()
-        brands = ["Все"] + result["Бренд"].value_counts().head(500).index.astype(str).tolist()
-        categories = ["Все"] + result["Категория"].value_counts().head(500).index.astype(str).tolist()
-        selected_brand = filter_cols[1].selectbox("Бренд", brands)
-        selected_category = filter_cols[2].selectbox("Категория", categories)
-        only_loss = filter_cols[3].toggle("Только убыток")
-
-        mask = np.ones(len(result), dtype=bool)
-        if selected_brand != "Все":
-            mask &= result["Бренд"].eq(selected_brand).to_numpy()
-        if selected_category != "Все":
-            mask &= result["Категория"].eq(selected_category).to_numpy()
-        if only_loss:
-            mask &= result["Прибыль"].lt(0).to_numpy()
-        if search:
-            mask &= (
-                result["Артикул"].astype("string").str.lower().str.contains(search, regex=False, na=False)
-                | result["Бренд"].astype("string").str.lower().str.contains(search, regex=False, na=False)
-                | result["Категория"].astype("string").str.lower().str.contains(search, regex=False, na=False)
-            ).to_numpy()
-
-        filtered = result.loc[mask]
-        screen_df = filtered.head(TABLE_PREVIEW_LIMIT).copy()
-        screen_df["Маржа_%"] *= 100
-        st.dataframe(
-            screen_df,
-            use_container_width=True,
-            hide_index=True,
-            height=610,
-            column_config={
-                "Маржа_%": st.column_config.ProgressColumn(
-                    "Маржа, %", min_value=-100, max_value=50, format="%.1f%%"
-                ),
-                "Ставка_комиссии": st.column_config.NumberColumn(format="%.2f"),
-                "Себестоимость_оценка": st.column_config.CheckboxColumn("Себест. оценена"),
-            },
-        )
-        st.caption(
-            f"Найдено {len(filtered):,} SKU. На экране до {TABLE_PREVIEW_LIMIT:,}; "
-            "в экспорт попадут все строки.".replace(",", " ")
-        )
-
-
-# =============================================================================
-# STEP 4: EXPORT
-# =============================================================================
-
-else:
-    st.markdown('<div class="section-title">Экспорт отчётов</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="section-sub">Excel с формулами, быстрый Excel для 300 000 SKU, '
-        'компактная сводка и полный CSV.</div>',
-        unsafe_allow_html=True,
-    )
-    result = st.session_state.result_df
-
-    if result is None:
-        st.markdown(
-            '<div class="info-box"><b>Экспортировать пока нечего.</b> Загрузите каталог '
-            'и выполните расчёт.</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        totals = calculate_totals(result)
-        st.markdown(
-            f'<div class="success-box"><b>Отчёт готов:</b> '
-            f'{len(result):,} SKU · Выручка {money_short(totals["revenue"])} · '
-            f'Прибыль {money_short(totals["profit"])} · '
-            f'Маржа {percent(totals["margin"])}</div>'.replace(",", " "),
-            unsafe_allow_html=True,
-        )
-
-        export_cols = st.columns(4)
-        with export_cols[0]:
-            st.markdown("#### Excel с формулами")
-            st.caption(
-                "Живые формулы, входные данные, категории, бренды и легенда. "
-                f"Лимит: {FORMULA_EXCEL_LIMIT:,} строк.".replace(",", " ")
-            )
-            formula_disabled = len(result) > FORMULA_EXCEL_LIMIT
-            if formula_disabled:
-                st.warning("Для этого объёма используйте быстрый Excel.")
-            if st.button(
-                "Сформировать с формулами",
-                type="primary",
-                use_container_width=True,
-                disabled=formula_disabled,
-            ):
-                with st.spinner("Формируем Excel с формулами..."):
-                    try:
-                        data = export_formula_excel(result, st.session_state.settings)
-                        st.session_state.export_bytes = data
-                        st.session_state.export_name = (
-                            f"unit_economy_formulas_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
-                        )
-                        st.session_state.export_mime = (
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    except Exception as exc:
-                        logger.exception("Formula export failed")
-                        st.error(f"Ошибка Excel: {exc}")
-
-        with export_cols[1]:
-            st.markdown("#### Быстрый Excel")
-            st.caption(
-                "Все значения, условное форматирование, сводки и графики. "
-                "Рекомендуется для больших каталогов."
-            )
-            if st.button("Сформировать быстрый Excel", use_container_width=True):
-                with st.spinner("Формируем полный Excel. Для 300 000 SKU это займёт время..."):
-                    try:
-                        data = export_values_excel(result, st.session_state.settings)
-                        st.session_state.export_bytes = data
-                        st.session_state.export_name = (
-                            f"unit_economy_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
-                        )
-                        st.session_state.export_mime = (
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    except Exception as exc:
-                        logger.exception("Values export failed")
-                        st.error(f"Ошибка Excel: {exc}")
-
-        with export_cols[2]:
-            st.markdown("#### Только сводки")
-            st.caption(
-                "Компактный Excel: итоги, категории, бренды, тариф и легенда. "
-                "Формируется быстро при любом объёме."
-            )
-            if st.button("Сформировать сводный Excel", use_container_width=True):
-                with st.spinner("Формируем сводный отчёт..."):
-                    try:
-                        data = export_summary_excel(result, st.session_state.settings)
-                        st.session_state.export_bytes = data
-                        st.session_state.export_name = (
-                            f"unit_economy_summary_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
-                        )
-                        st.session_state.export_mime = (
-                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    except Exception as exc:
-                        logger.exception("Summary export failed")
-                        st.error(f"Ошибка Excel: {exc}")
-
-        with export_cols[3]:
-            st.markdown("#### Полный CSV")
-            st.caption(
-                "Самый надёжный формат для 300 000 SKU. Все строки и расчётные колонки, "
-                "UTF-8 BOM, разделитель «;»."
-            )
-            if st.button("Сформировать CSV", use_container_width=True):
-                with st.spinner("Формируем CSV..."):
-                    try:
-                        data = export_csv(result)
-                        st.session_state.export_bytes = data
-                        st.session_state.export_name = (
-                            f"unit_economy_{datetime.now():%Y%m%d_%H%M%S}.csv"
-                        )
-                        st.session_state.export_mime = "text/csv"
-                    except Exception as exc:
-                        logger.exception("CSV export failed")
-                        st.error(f"Ошибка CSV: {exc}")
-
-        if st.session_state.export_bytes is not None:
-            st.divider()
-            st.markdown(
-                f'<div class="success-box"><b>Файл сформирован:</b> '
-                f'{st.session_state.export_name} · '
-                f'{file_size_label(len(st.session_state.export_bytes))}</div>',
-                unsafe_allow_html=True,
-            )
-            st.download_button(
-                "Скачать готовый файл",
-                data=st.session_state.export_bytes,
-                file_name=st.session_state.export_name,
-                mime=st.session_state.export_mime,
-                type="primary",
-                use_container_width=True,
-            )
-
-        st.divider()
-        st.markdown("### Что входит в Excel")
-        sheet_info = pd.DataFrame(
-            [
-                ["Итоги", "Выручка, расходы, прибыль, маржа, проблемные SKU"],
-                ["Расчет_FBS", "Полный расчёт по SKU; в формульной версии — живые формулы"],
-                ["Входные_Данные", "Исходные параметры; только в формульной версии"],
-                ["Сводка_Категории", "SKU, выручка, прибыль, маржа и график по категориям"],
-                ["Сводка_Бренды", "Аналогичная аналитика по брендам"],
-                ["Тариф", "Все ставки и допущения расчёта"],
-                ["Легенда", "Описание колонок и формул"],
-            ],
-            columns=["Лист", "Содержание"],
-        )
-        st.dataframe(sheet_info, use_container_width=True, hide_index=True)
-
-
-# =============================================================================
-# FOOTER
-# =============================================================================
-
-st.divider()
-st.markdown(
-    f'<div class="small-muted" style="text-align:center">{APP_NAME} · '
-    f'версия {APP_VERSION} · монолитное приложение Streamlit · '
-    'расчёты выполняются локально</div>',
-    unsafe_allow_html=True,
-)
+st.markdown(f"<p style='text-align:center;color:#94a3b8;font-size:.78rem;margin-top:24px'>{APP_NAME} · монолит Streamlit v{APP_VERSION}</p>", unsafe_allow_html=True)
