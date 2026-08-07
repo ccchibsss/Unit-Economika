@@ -1,4 +1,4 @@
-Понял. Тогда аккуратно — вот полный монолитный скрипт, объединяющий все этапы, с учетом всех формул, экспорта, интерфейса и расчетов. Он большой, поэтому разбит на функции, но внутри — всё в одном файле. Постараюсь придерживаться не сокращений и около 2-3K строк.# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║           PRICE.FUSION — МОНОЛИТНЫЙ STREAMLIT (ВСЁ В 1 ФАЙЛЕ app.py)        ║
 #    Авто-поиск: Артикул | Бренд | Цена → Мин. цена + Источник + Экспорт        ║
 #    Оптимизировано: 300k+ строк, векторизованные операции                       ║
@@ -110,8 +110,21 @@ st.markdown(
         border-color: rgba(56, 189, 248, 0.8) !important;
         background: rgba(15, 36, 64, 0.95) !important;
     }
-    [data-testid="stFileUploadDropzone"] {
+    /* убираем белый фон дропзоны во всех вложенных элементах */
+    [data-testid="stFileUploadDropzone"],
+    section[data-testid="stFileUploadDropzone"],
+    [data-testid="stFileUploadDropzone"] > div,
+    [data-testid="stFileUploadDropzoneInput"],
+    [data-testid="stFileUploader"] > div,
+    [data-testid="stFileUploader"] section,
+    [data-testid="stFileUploader"] > div > div,
+    [data-testid="stFileUploader"] [data-testid="stFileUploadDropzone"] {
         background: transparent !important;
+        background-color: transparent !important;
+    }
+    [data-testid="stFileUploader"] small,
+    [data-testid="stFileUploadDropzone"] small {
+        color: #9db8d8 !important;
     }
     [data-testid="stFileUploader"] *,
     [data-testid="stFileUploader"] span,
@@ -134,6 +147,57 @@ st.markdown(
     [data-testid="stFileUploader"] svg {
         fill: #7dd3fc !important;
         color: #7dd3fc !important;
+    }
+
+    /* ── Мульти-селект (выбор столбцов для выгрузки) ── */
+    [data-testid="stMultiSelect"] label,
+    [data-testid="stMultiSelect"] label p,
+    [data-testid="stMultiSelect"] > label p {
+        color: #f4f4f5 !important;
+        font-weight: 600 !important;
+        font-size: 0.85rem !important;
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+        background-color: #0f2440 !important;
+        border: 1px solid rgba(96, 165, 250, 0.35) !important;
+        border-radius: 12px !important;
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="select"]:focus-within > div {
+        border-color: #60a5fa !important;
+        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25) !important;
+    }
+    [data-testid="stMultiSelect"] input {
+        color: #ffffff !important;
+    }
+    [data-testid="stMultiSelect"] input::placeholder {
+        color: #7d9ac2 !important;
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+        background: rgba(56, 189, 248, 0.18) !important;
+        color: #bae6fd !important;
+        border: 1px solid rgba(56, 189, 248, 0.4) !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
+        fill: #bae6fd !important;
+        color: #bae6fd !important;
+    }
+    /* выпадающий список опций мульти-селекта */
+    [data-baseweb="popover"] div[role="listbox"],
+    [data-baseweb="menu"] {
+        background-color: #0f2440 !important;
+        border: 1px solid rgba(96, 165, 250, 0.3) !important;
+        border-radius: 12px !important;
+    }
+    [data-baseweb="menu"] li,
+    [data-baseweb="menu"] li * {
+        color: #e8eefc !important;
+    }
+    [data-baseweb="menu"] li:hover,
+    li[role="option"]:hover,
+    div[role="option"]:hover {
+        background-color: rgba(56, 189, 248, 0.18) !important;
     }
 
     /* ── Метрики ── */
@@ -701,11 +765,18 @@ def aggregate_best_prices(df_all: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
 
-    # Дедупликация: один артикул + один источник = одна запись (мин. цена)
-    df = df.sort_values("Цена").drop_duplicates(subset=["Артикул", "Источник"], keep="first")
-
-    # Нормализация ключа для группировки (без пробелов, регистр)
+    # Нормализация ключа для группировки (без пробелов, регистра, дефисов) — до дедупликации
     df["_key"] = df["Артикул"].str.upper().str.replace(r"[\s\-_\.\,]+", "", regex=True)
+    df = df[df["_key"].str.len() > 0]
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Количество ВСЕХ строк (предложений) по артикулу во всех файлах, включая дубли
+    qty = df.groupby("_key").size().rename("Количество").reset_index()
+
+    # Дедупликация: один артикул + один источник = одна запись (мин. цена)
+    df = df.sort_values("Цена").drop_duplicates(subset=["_key", "Источник"], keep="first")
 
     # УНИКАЛЬНЫЕ источники + мин/макс цены
     grp = df.groupby("_key").agg(
@@ -717,7 +788,7 @@ def aggregate_best_prices(df_all: pd.DataFrame) -> pd.DataFrame:
     # Индекс минимальной цены (среди всех строк для этого артикула)
     idx_min = df.groupby("_key")["Цена"].idxmin()
     df_best = df.loc[idx_min].copy()
-    df_best = df_best.merge(grp, on="_key", how="left")
+    df_best = df_best.merge(grp, on="_key", how="left").merge(qty, on="_key", how="left")
     df_best = df_best.drop(columns=["_key", "Цена"], errors="ignore")
     df_best = df_best.rename(columns={"Цена_мин": "Цена"})
 
@@ -731,7 +802,7 @@ def aggregate_best_prices(df_all: pd.DataFrame) -> pd.DataFrame:
 
     cols = [
         "Артикул", "Бренд", "Цена", "Источник",
-        "Предложений", "Цена_макс", "Экономия_руб", "Экономия_%",
+        "Предложений", "Количество", "Цена_макс", "Экономия_руб", "Экономия_%",
     ]
     df_best = df_best[[c for c in cols if c in df_best.columns]]
     df_best = df_best.sort_values("Артикул").reset_index(drop=True)
@@ -1223,7 +1294,7 @@ if not df_final.empty:
 
         disp_cols = [
             "Артикул", "Бренд", "Цена", "Источник",
-            "Предложений", "Экономия_руб", "Экономия_%",
+            "Предложений", "Количество", "Экономия_руб", "Экономия_%",
         ]
         disp_cols = [c for c in disp_cols if c in df_view.columns]
 
@@ -1241,6 +1312,11 @@ if not df_final.empty:
             default=[c for c in disp_cols if c in all_available_cols],
             help="Укажите, какие именно колонки должны попасть в итоговый Excel и CSV файл."
         )
+        if not export_cols:
+            export_cols = [c for c in ["Артикул", "Цена", "Источник"] if c in all_available_cols]
+            st.caption("⚠️ Не выбрано ни одного столбца — будет выгружен базовый набор: Артикул, Цена, Источник.")
+        else:
+            st.caption(f"📊 В файл попадёт столбцов: {len(export_cols)}")
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         n_rows = len(df_view)
@@ -1355,6 +1431,10 @@ if not df_final.empty:
                     "📊 Источников", width="small",
                     help="Кол-во уникальных поставщиков",
                 ),
+                "Количество": st.column_config.NumberColumn(
+                    "🔢 Кол-во строк", width="small",
+                    help="Всего строк с этим артикулом во всех загруженных прайсах (включая дубли)",
+                ),
                 "Экономия_руб": st.column_config.NumberColumn("💚 Экономия (₽)", format="%.2f ₽", width="small"),
                 "Экономия_%": st.column_config.NumberColumn("📉 Экономия (%)", format="%.1f%%", width="small"),
             },
@@ -1447,156 +1527,3 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
-```python
-# -*- coding: utf-8 -*-
-"""Юнит-экономика FBS — полный монолитный скрипт для streamlit v5.1.0"""
-
-from __future__ import annotations
-import os, io, json, time, tempfile, ast
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional
-
-import numpy as np
-import pandas as pd
-import streamlit as st
-import plotly.express as px
-import plotly.graph_objects as go
-import requests
-import xlsxwriter
-
-# Настройки и дефолты
-APP_NAME = "Юнит-экономика FBS"
-APP_VERSION = "5.1.0"
-MAX_SKU = 1_048_500
-FORMULA_EXCEL_LIMIT = 1_048_500
-TABLE_PREVIEW_LIMIT = 5_000
-API_URL = "https://api.partner.market.yandex.ru"
-
-DEFAULT_SETTINGS = {
-    "commission_rate": 0.14,
-    "min_commission": 45,
-    "logistics_base": 45,
-    "logistics_per_kg": 14,
-    "storage_per_day_per_liter": 0.25,
-    "acquiring_fee": 0.02,
-    "return_fee": 0.02,
-    "tax_rate": 0.06,
-    "processing_fee": 50,
-    "ad_rate": 0.0,
-    "packaging": 45,
-    "chestny_znak": 1.5,
-    "labeling": 3,
-    "warranty_reserve": 0.02,
-    "hazard_surcharge": 0.01,
-    "fragile_surcharge": 0.005,
-    "cost_fallback_rate": 0.65,
-    "density_kg_per_liter": 0.30,
-    "special_enabled": True,
-    "use_category_rates": True,
-    "category_rates": {},
-    "custom_categories": [],
-    "pricing": {"mode": "none", "markupPercent": 15, "targetMargin": 0.20},
-    "special_tariffs": {
-        "шины": {"label": "Шины", "commission_rate": 0.12, "logistics_base": 90, "storage_per_day_per_liter": 0.50, "reason": "Крупногабаритный"},
-        "аккумулятор": {"label": "Аккумуляторы", "commission_rate": 0.13, "logistics_base": 75, "storage_per_day_per_liter": 0.40, "reason": "Опасный груз"},
-        "двигател": {"label": "Двигатели", "commission_rate": 0.11, "logistics_base": 120, "storage_per_day_per_liter": 0.60, "reason": "Крупногабаритный/тяжёлый"},
-        "кпп": {"label": "КПП", "commission_rate": 0.11, "logistics_base": 110, "storage_per_day_per_liter": 0.60, "reason": "Крупногабаритный/тяжёлый"},
-    }
-}
-
-REQUIRED_COLUMNS = ["Артикул", "Категория", "Цена"]
-RESULT_COLUMNS = [
-    "Артикул", "Бренд", "Категория", "ID_категории", "Длина", "Ширина", "Высота", "Объем_л",
-    "Вес_кг", "Оплач_вес", "Цена", "Себестоимость", "Себестоимость_оценка",
-    "Ставка_комиссии", "Комиссия_руб", "Логистика_руб", "Хранение_руб", "Эквайринг_руб",
-    "Возвраты_руб", "Налог_руб", "Обработка_руб", "Продвижение_руб", "Спец_расходы_FBS",
-    "Итого_расходы", "Выплата_селлеру", "Прибыль", "Маржа_%", "Рекомендованная_цена",
-    "Цена_с_наценкой", "Прибыль_с_наценкой", "Маржа_с_наценкой_%", "ABC", "XYZ", "ABC_XYZ",
-    "Выручка_доля", "Оборачиваемость_дней", "Спецтариф_применён", "Причина_спецтарифа", "Рекомендация"
-]
-
-st.set_page_config(page_title=f"{APP_NAME} | Яндекс Маркет", page_icon="📊", layout="wide")
-if "settings" not in st.session_state:
-    st.session_state.settings = DEFAULT_SETTINGS
-if "raw_df" not in st.session_state:
-    st.session_state.raw_df = None
-if "result_df" not in st.session_state:
-    st.session_state.result_df = None
-if "navigation" not in st.session_state:
-    st.session_state.navigation = "1. Тарифы"
-
-# сохранение/чтение
-def save_settings(settings):
-    with open("settings.json", "w", encoding="utf-8") as f:
-        json.dump(settings, f)
-
-def load_settings():
-    if os.path.exists("settings.json"):
-        with open("settings.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    return DEFAULT_SETTINGS
-
-st.session_state.settings = load_settings()
-
-def normalize_header(c):
-    return " ".join(str(c).lower().replace("ё", "е").split())
-
-def detect_csv_format(data):
-    encodings = ["utf-8-sig", "utf-8", "cp1251"]
-    for enc in encodings:
-        try:
-            s = data[:128000].decode(enc)
-            return enc, [",", ";", "\\t", "|"][0]
-        except:
-            continue
-    return "latin-1", ";"
-
-def read_uploaded_file(uploaded):
-    data = uploaded.getvalue()
-    name = uploaded.name.lower()
-    enc, sep = detect_csv_format(data)
-    if name.endswith(('.csv', '.txt', '.tsv')):
-        df = pd.read_csv(io.BytesIO(data), sep=sep, encoding=enc, on_bad_lines="warn")
-        ttype = f"CSV {sep} {enc}"
-    elif name.endswith(('.xlsx', '.xls')):
-        df = pd.read_excel(io.BytesIO(data))
-        ttype = "Excel"
-    else:
-        raise ValueError("Поддерживаются CSV и Excel файлы")
-    df.columns = [str(c).strip() for c in df.columns]
-    return df, {"input_type": ttype}
-
-def deep_copy(obj):
-    return json.loads(json.dumps(obj))
-def deep_merge(base, patch):
-    res = deep_copy(base)
-    for k, v in patch.items():
-        if isinstance(v, dict) and k in res and isinstance(res[k], dict):
-            res[k] = deep_merge(res[k], v)
-        else:
-            res[k] = v
-    return res
-
-def build_template_csv():
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Артикул", "Бренд", "Категория", "ID_категории", "Длина", "Ширина", "Высота", "Цена", "Себестоимость", "Вес_кг", "Оборачиваемость_дней"])
-    writer.writerow(["man-001","Бренд1","Категория1",0,10,10,10,1000,700,1,15])
-    return ("\\ufeff"+buf.getvalue()).encode("utf-8")
-
-def generate_demo_catalog(cnt):
-    rng = np.random.default_rng(20260408+cnt)
-    br = np.array(["Bosch","Mann-Filter","Sachs","Brembo","Mahle","Denso","Valeo"])
-    ca = np.array(["Фильтры","Масла","Колодки","Диски","Амортизаторы","Аккумуляторы","Шины"])
-    bp = np.array([450,1800,2400,6800,5200,7600,6900])
-    L= np.array([22,28,18,62,66,35,70])
-    W= np.array([14,16,12,62,16,26,70])
-    H= np.array([14,28,8,22,16,26,26])
-    wgt= np.array([0.6,4.4,1.4,9.2,3.6,17,10.6])
-    to= np.array([25,20,30,45,40,35,15])
-    idx=np.arange(cnt)
-    ci=idx%len(ca)
-    pr=np.round(bp[ci]*rng.uniform(0.72,1.48,cnt)/10)*10
-    df=pd.DataFrame({\"Артикул\": [f\"SKU-{i+1:06d}\" for i in range(cnt)],\"Бренд\": br[(idx*7+idx%3)%len(br)],\"Категория\": ca[ci],\"ID_категории\": np.zeros(cnt,dtype=int),\"Цена\": pr, \"Себестоимость\": pr*rng.uniform(0.54,0.76,cnt),\"Вес_кг\": wgt[ci]*rng.uniform(0.87,1.14,cnt),\"Длина\": np.round(L[ci]*rng.uniform(0.88,1.15,cnt)),\"Ширина\": np.round(W[ci]*rng.uniform(0.88,1.15,cnt)),\"Высота\": np.round(H[ci]*rng.uniform(0.88,1.15,cnt)),\"Объем_л\":np.nan,\"Оборачиваемость_дней\":np.round(to[ci]*rng.uniform(0.7,1.35,cnt))})\n\n# --- Calculate unit economics ---\ndef calculate_unit_economics(df, s, progress=None):\n    t0 = time.perf_counter()\n    n = len(df)\n    def upd(v,t): if progress: progress.progress(v, text=t)\n    upd(5, \"Подготовка\")\n    cat = df[\"Категория\"].astype(\"string\").fillna(\"Без категории\")\n    cl = cat.str.lower().str.replace(\"ё\",\"е\",regex=False)\n    dv = np.full(n, 2.0); dw = np.full(n, 1.0); dh = np.zeros(n,bool); dfr = np.zeros(n,bool)\n    for k, v in CATEGORY_DEFAULTS.items():\n        m = cl.str.contains(k, regex=False, na=False).to_numpy()\n        dv[m]=v[0]; dw[m]=v[1]; dh[m]=v[2]; dfr[m]=v[3]\n    for cu in s.get(\"custom_categories\", []):\n        k=normalize_header(str(cu.get(\"key\",\"\"))); \n        if not k: continue\n        m=cl.str.contains(k, regex=False, na=False).to_numpy()\n        dv[m]=float(cu.get(\"volume_l\",2)); dw[m]=float(cu.get(\"weight_kg\",1))\n        dh[m]=bool(cu.get(\"is_hazardous\",False)); dfr[m]=bool(cu.get(\"is_fragile\",False))\n    upd(18, \"Габариты\")\n    L= pd.to_numeric(df[\"Длина\"],errors=\"coerce\").fillna(0).clip(lower=0).to_numpy()\n    W= pd.to_numeric(df[\"Ширина\"],errors=\"coerce\").fillna(0).clip(lower=0).to_numpy()\n    H= pd.to_numeric(df[\"Высота\"],errors=\"coerce\").fillna(0).clip(lower=0).to_numpy()\n    hd=(L>0)&(W>0)&(H>0); dvol=L*W*H/1000.0\n    sv= pd.to_numeric(df[\"Объем_л\"],errors=\"coerce\").to_numpy()\n    vol=np.where(np.isfinite(sv)&(sv>0), sv, np.where(hd, dvol, dv))\n    sw= pd.to_numeric(df[\"Вес_кг\"],errors=\"coerce\").to_numpy()\n    ew= np.maximum(0.1, vol*float(s[\"density_kg_per_liter\"]))\n    wgt=np.where(np.isfinite(sw)&(sw>0), sw, np.where(hd, ew, dw))\n    vw=np.where(hd, L*W*H/5000.0, 0.0); bw=np.maximum(np.maximum(wgt, vw), 0.1)\n    upd(32, \"Себестоимость\")\n    price = pd.to_numeric(df[\"Цена\"],errors=\"coerce\").fillna(0).clip(lower=0).to_numpy()\n    sc= pd.to_numeric(df[\"Себестоимость\"],errors=\"coerce\").to_numpy()\n    ce = ~np.isfinite(sc) | (sc<=0); cost = np.where(ce, price*float(s[\"cost_fallback_rate\"]), sc)\n    sh= df[\"Опасный\"].astype(\"boolean\"); sf= df[\"Хрупкий\"].astype(\"boolean\")\n    haz= sh.fillna(pd.Series(dh, index=df.index)).to_numpy(dtype=bool)\n    fr= sf.fillna(pd.Series(dfr, index=df.index)).to_numpy(dtype=bool)\n    to= pd.to_numeric(df[\"Оборачиваемость_дней\"],errors=\"coerce\").fillna(30).clip(lower=1).to_numpy()\n    fc=float(s[\"packaging\"])+float(s[\"chestny_znak\"])+float(s[\"labeling\"])+float(s.get(\"processing_fee\",50))\n    spc=fc+price*float(s[\"warranty_reserve\"])+np.where(haz,price*float(s[\"hazard_surcharge\"]),0)+np.where(fr,price*float(s[\"fragile_surcharge\"]),0)\n    upd(48, \"Тарифы\")\n    cr=np.full(n,float(s[\"commission_rate\"])); lb=np.full(n,float(s[\"logistics_base\"])); sr=np.full(n,float(s[\"storage_per_day_per_liter\"]))\n    sa=np.zeros(n,bool); sreason=np.full(n,\"\",dtype=object)\n    for cu in s.get(\"special_tariffs\", []):\n        k=normalize_header(str(cu.get(\"key\",\"\"))); \n        if not k: continue\n        m=cl.str.contains(k, regex=False, na=False).to_numpy()\n        cr[m]=float(cu[\"commission_rate\"]); lb[m]=float(cu[\"logistics_base\"]);\ sr[m]=float(cu[\"storage_per_day_per_liter\"]); sa[m]=True;sreason[m]=str(cu.get(\"reason\",\"Спецтариф\"))\n    if s.get(\"special_enabled\",True):\n        for k,rule in s.get(\"special_tariffs\",{}).items():\n            m=cl.str.contains(k, regex=False, na=False).to_numpy()\n            cr[m]=float(rule[\"commission_rate\"]); lb[m]=float(rule[\"logistics_base\"])\n            sr[m]=float(rule[\"storage_per_day_per_liter\"]); sa[m]=True;sreason[m]=str(rule.get(\"reason\",\"Спецтариф\"))\n    if s.get(\"use_category_rates\",True) and s.get(\"category_rates\", {}):\n        rates= {normalize_header(k):float(v) for k,v in s[\"category_rates\"].items()}\n        ex=cl.map(rates); em=ex.notna().to_numpy()\n        cr[em]=ex[em].to_numpy(dtype=float)\n        mr = ~em\n        for k,v in rates.items():\n            if not mr.any(): break\n            m=cl.str.contains(k, regex=False, na=False).to_numpy()&mr\n            cr[m]=v; mr[m]=False\n    upd(65, \"Логистика, хранение, налоги, реклама\")\n    com= np.maximum(price*cr,float(s[\"min_commission\"])); log=lb+bw*float(s[\"logistics_per_kg\"])\n    sto=vol*sr*to; acq=price*float(s[\"acquiring_fee\"]); ret=price*float(s[\"return_fee\"])\n    tax=price*float(s.get(\"tax_rate\",0.06)); proc=np.full(n,float(s.get(\"processing_fee\",50))); adv=price*float(s.get(\"ad_rate\",0))\n    mf= com+log+sto+acq+ret+tax+proc+adv+spc\n    payout=price-mf; te=cost+mf; profit=price-te; margin=np.divide(profit,price,out=np.zeros_like(profit),where=price>0)\n    vr=cr+float(s[\"acquiring_fee\"]) + float(s[\"return_fee\"]) + float(s.get(\"tax_rate\",0.06))+float(s.get(\"ad_rate\",0))+float(s[\"warranty_reserve\"])+np.where(haz,float(s[\"hazard_surcharge\"]),0)+np.where(frg,float(s[\"fragile_surcharge\"]),0)\n    dn=1-vr; dn=np.where(dn<0.05,0.05,dn); rec=(cost+log+sto+fc)/dn*1.01\n    ltd=rec*cr<float(s[\"min_commission\"])\n    if np.any(ltd):\n        dn2=1.0-(float(s[\"acquiring_fee\"]) + float(s[\"return_fee\"]) + float(s.get(\"tax_rate\",0.06)) + float(s.get(\"ad_rate\",0))+float(s[\"warranty_reserve\"]) + np.where(haz,float(s[\"hazard_surcharge\"]),0)+np.where(frg,float(s[\"fragile_surcharge\"]),0))\n        dn2=np.where(dn2<0.05,0.05,dn2)\n        ra=(cost+log+sto+fc+float(s[\"min_commission\"]))/dn2*1.01; rec=np.where(ltd,ra,rec)\n    rec=np.maximum(rec,cost+10); rec=np.where(price>0,rec,0)\n    # Price with markup\n    pr= s.get(\"pricing\",{\"mode\":\"none\",\"markupPercent\":15,\"targetMargin\":0.2})\n    m=pr.get(\"mode\",\"none\"); mp=pr.get(\"markupPercent\",15); tm=pr.get(\"targetMargin\",0.2)\n    pwm=price.copy()\n    if m==\"markup\" and mp!=0: pwm=price*(1+mp/100)\n    elif m==\"targetMargin\":\n        td=1.0-vr-tm; td=np.where(td<0.05,0.05,td);\n        pwm=(cost+log+sto+fc)/td\n        lt=pwm*cr<float(s[\"min_commission\"])\n        if np.any(lt):\n            td2=1.0- (float(s[\"acquiring_fee\"]) + float(s[\"return_fee\"]) + float(s.get(\"tax_rate\",0.06)) + float(s.get(\"ad_rate\",0)) + float(s[\"warranty_reserve\"]))\n            td2=np.where(td2<0.05,0.05,td2)\n            pa=(cost+log+sto+fc+float(s[\"min_commission\"]))/td2; pwm=np.where(lt,pa,pwm)\n        pwm=np.maximum(pwm,cost+10)\n    # Profit margin\n    cmk=np.maximum(pwm*cr,float(s[\"min_commission\"])); amk=pwm*float(s[\"acquiring_fee\"])\n    rmk=pwm*float(s[\"return_fee\"]); tmk=pwm*float(s.get(\"tax_rate\",0.06))\n    amv=pwm*float(s.get(\"ad_rate\",0)); sm=fc+pwm*float(s[\"warranty_reserve\"])+np.where(haz,pwm*float(s[\"hazard_surcharge\"]),0)+np.where(frg,pwm*float(s[\"fragile_surcharge\"]),0)\n    total=pwm*com+log+sto+amk+rmk+tmk+amv+sm\n    profit2=pwm-total\n    mm=np.divide(profit2,pwm,out=np.zeros_like(profit2),where=pwm>0)\n    tr=float(np.sum(price)); rs=np.divide(price,tr,out=np.zeros_like(price),where=tr>0)\n    upd(82, \"Итоговая таблица\")\n    res=pd.DataFrame({\"Артикул\":df[\"Артикул\"].astype(\"string\"),\"Бренд\":df[\"Бренд\"].astype(\"string\"),\"Категория\":cat,\n        \"ID_категории\":df[\"ID_категории\"].astype(\"int64\"),\"Длина\":L,\"Ширина\":W,\"Высота\":H,\"Объем_л\":vol,\"Вес_кг\":wgt,\"Оплач_вес\":bw,\n        \"Цена\":price,\"Себестоимость\":cost,\"Себестоимость_оценка\":ce,\"is_hazardous\":haz,\"is_fragile\":frg,\n        \"Ставка_комиссии\":cr,\"Логистика_база\":lb,\"Ставка_за_кг\":np.full(n,float(s[\"logistics_per_kg\"])),\"Ставка_хранения\":sr,\n        \"Комиссия_руб\":com,\"Логистика_руб\":log,\"Хранение_руб\":sto,\"Эквайринг_руб\":acq,\"Возвраты_руб\":ret,\n        \"Налог_руб\":tax,\"Обработка_руб\":proc,\"Продвижение_руб\":adv,\"Спец_расходы_FBS\":spc,\"Итого_расходы\":te,\"Выплата_селлеру\":payout,\n        \"Прибыль\":profit,\"Маржа_%\":margin,\"Рекомендованная_цена\":rec,\"Цена_с_наценкой\":pwm,\"Прибыль_с_наценкой\":pm,\"Маржа_с_наценкой_%\":mm,\n        \"Выручка_доля\":rs,\"Оборачиваемость_дней\":to,\"Спецтариф_применён\":sa,\"Причина_спецтарифа\":sreason})\n    if n>0:\n        ord=np.argsort(-price,kind=\"stable\"); cs=np.cumsum(price[ord])\n        total=cs[-1] if cs.size else 1\n        abc=np.full(n,\"C\",dtype=object); csh=cs/total\n        abc[csh<=0.80]=\"A\"; abc[(csh>0.80)&(csh<=0.95)]=\"B\"\n        af=np.empty(n,dtype=object); af[ord]=abc; ts=np.sort(to)\n        q1=ts[int(n*0.33)] if n>=3 else 30; q2=ts[int(n*0.66)] if n>=3 else 45\n        xyz=np.where(to<=q1,\"X\",np.where(to<=q2,\"Y\",\"Z\"))\n        res[\"ABC\"]=af; res[\"XYZ\"]=xyz; res[\"ABC_XYZ\"]=res[\"ABC\"].astype(str)+res[\"XYZ\"].astype(str)\n        res[\"Рекомендация\"]=np.where(res[\"Прибыль\"]<0,\"↑ Поднять до \" + res[\"Рекомендованная_цена\"].round(0).astype(str)+\" ₽\",np.where(res[\"Маржа_%\"]<0.05,\"⚠ Критично\",np.where(res[\"Маржа_%\"]<0.15,\"→ Можно +10%\",\"✓ ОК\")))\n    else:\n        for c in [\"ABC\",\"XYZ\",\"ABC_XYZ\",\"Рекомендация\"]: res[c]=pd.Series(dtype=\"string\")\n    res.attrs[\"calculation_seconds\"]=time.perf_counter()-t0\n    upd(100,\"Готово\")\n    return res\n\ndef run_calculation():\n    raw=st.session_state.raw_df\n    if raw is None or raw.empty: st.warning(\"Сначала загрузите каталог.\"); return\n    progress=st.progress(0,text=\"Подготовка\")\n    started=time.perf_counter()\n    try:\n        result=calculate_unit_economics(raw,st.session_state.settings,progress)\n        st.session_state.result_df=result\n        st.session_state.calculation_seconds=time.perf_counter()-started\n        st.session_state.calculated_settings_hash=stable_settings_hash(st.session_state.settings)\n        clear_export(); time.sleep(0.08); progress.empty()\n        st.success(f\"Рассчитано {len(result):,} SKU за {st.session_state.calculation_seconds:.2f}с\")\n    except Exception as exc:\n        progress.empty(); logger.exception(\"Calculation failed\"); st.error(f\"Ошибка: {exc}\")\n''')\n\nprint(\"Step 4 written\")\n''')\n\nprint(\"Complete script generated\")\n"}
